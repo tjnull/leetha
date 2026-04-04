@@ -334,5 +334,155 @@
     "category": "ip_camera",
     "note": "UniFi Protect device (camera, doorbell, NVR)",
     "certainty": 80
+  },
+  {
+    "condition": "\"playstation.net\" in domain_lower or \"playstation.com\" in domain_lower",
+    "domains": [
+      "playstation.net",
+      "playstation.com"
+    ],
+    "vendor": "Sony",
+    "category": "game_console",
+    "note": "PlayStation device",
+    "certainty": 75
+  },
+  {
+    "condition": "\"xbox.com\" in domain_lower or \"xboxlive.com\" in domain_lower",
+    "domains": [
+      "xbox.com",
+      "xboxlive.com"
+    ],
+    "vendor": "Microsoft",
+    "category": "game_console",
+    "note": "Xbox device",
+    "certainty": 75
+  },
+  {
+    "condition": "\"nintendo.net\" in domain_lower or \"nintendo.com\" in domain_lower",
+    "domains": [
+      "nintendo.net",
+      "nintendo.com"
+    ],
+    "vendor": "Nintendo",
+    "category": "game_console",
+    "note": "Nintendo device",
+    "certainty": 75
+  },
+  {
+    "condition": "\"ring.com\" in domain_lower",
+    "domains": [
+      "ring.com"
+    ],
+    "vendor": "Amazon",
+    "category": "doorbell",
+    "note": "Ring doorbell/camera",
+    "certainty": 80
+  },
+  {
+    "condition": "\"home.nest.com\" in domain_lower or \"nest.com\" in domain_lower",
+    "domains": [
+      "home.nest.com",
+      "nest.com"
+    ],
+    "vendor": "Google",
+    "category": "smart_home",
+    "note": "Google Nest device",
+    "certainty": 75
+  },
+  {
+    "condition": "\"samsungcloud.com\" in domain_lower or \"smartthings.com\" in domain_lower",
+    "domains": [
+      "samsungcloud.com",
+      "smartthings.com"
+    ],
+    "vendor": "Samsung",
+    "category": "smart_home",
+    "note": "Samsung Smart TV or SmartThings",
+    "certainty": 70
+  },
+  {
+    "condition": "\"roku.com\" in domain_lower",
+    "domains": [
+      "roku.com"
+    ],
+    "vendor": "Roku",
+    "category": "streaming_device",
+    "note": "Roku streaming device",
+    "certainty": 80
+  },
+  {
+    "condition": "\"sonos.com\" in domain_lower",
+    "domains": [
+      "sonos.com"
+    ],
+    "vendor": "Sonos",
+    "category": "smart_speaker",
+    "note": "Sonos speaker",
+    "certainty": 80
+  },
+  {
+    "condition": "\"meethue.com\" in domain_lower or \"hue.philips.com\" in domain_lower",
+    "domains": [
+      "meethue.com",
+      "hue.philips.com"
+    ],
+    "vendor": "Philips",
+    "category": "smart_light",
+    "note": "Philips Hue",
+    "certainty": 80
+  },
+  {
+    "condition": "\"wyze.com\" in domain_lower or \"wyzecam.com\" in domain_lower",
+    "domains": [
+      "wyze.com",
+      "wyzecam.com"
+    ],
+    "vendor": "Wyze",
+    "category": "ip_camera",
+    "note": "Wyze camera/device",
+    "certainty": 75
+  },
+  {
+    "condition": "\"ecobee.com\" in domain_lower",
+    "domains": [
+      "ecobee.com"
+    ],
+    "vendor": "ecobee",
+    "category": "thermostat",
+    "note": "ecobee thermostat",
+    "certainty": 80
+  },
+  {
+    "condition": "\"tplinkcloud.com\" in domain_lower or \"kasa.com\" in domain_lower or \"tapo.com\" in domain_lower",
+    "domains": [
+      "tplinkcloud.com",
+      "kasa.com",
+      "tapo.com"
+    ],
+    "vendor": "TP-Link",
+    "category": "smart_home",
+    "note": "TP-Link Kasa/Tapo device",
+    "certainty": 75
+  },
+  {
+    "condition": "\"tesla.com\" in domain_lower",
+    "domains": [
+      "tesla.com"
+    ],
+    "vendor": "Tesla",
+    "category": "smart_home",
+    "note": "Tesla vehicle or wall connector",
+    "certainty": 70
+  },
+  {
+    "condition": "\"alexa.amazon.com\" in domain_lower or \"device-metrics-us.amazon.com\" in domain_lower",
+    "domains": [
+      "alexa.amazon.com",
+      "device-metrics-us.amazon.com"
+    ],
+    "vendor": "Amazon",
+    "category": "smart_speaker",
+    "note": "Amazon Echo/Alexa device",
+    "certainty": 75
   }
 ]

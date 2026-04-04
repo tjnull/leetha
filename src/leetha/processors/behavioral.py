@@ -10,8 +10,11 @@ import time
 from collections import Counter
 from dataclasses import dataclass, field
 
+from leetha.evidence.models import Evidence
+
 
 _MIN_QUERIES_FOR_PROFILE = 20
+_AFFINITY_EVIDENCE_THRESHOLD = 0.80
 _LEARNING_PERIOD_SECONDS = 600
 _EARLY_DRIFT_THRESHOLD = 0.60
 _STABLE_DRIFT_THRESHOLD = 0.50
@@ -131,6 +134,43 @@ class DnsBehaviorTracker:
 
         profile.drift_detected_at = None
         return None
+
+    def get_affinity_evidence(self, hw_addr: str) -> Evidence | None:
+        """Return Evidence when a host has a confident vendor affinity.
+
+        After the learning period, if a single vendor accounts for
+        >= 80% of classified DNS queries, emit an Evidence object so
+        the verdict pipeline can incorporate behavioral signals.
+        """
+        profile = self._profiles.get(hw_addr)
+        if profile is None or not profile.baseline_locked:
+            return None
+
+        if profile.total_classified < _MIN_QUERIES_FOR_PROFILE:
+            return None
+
+        # Build affinity distribution
+        affinity: dict[str, float] = {}
+        for vendor, count in profile.vendor_counts.items():
+            affinity[vendor] = round(count / profile.total_classified, 4)
+
+        top = profile.vendor_counts.most_common(1)
+        if not top:
+            return None
+
+        top_vendor = top[0][0]
+        top_pct = top[0][1] / profile.total_classified
+
+        if top_pct < _AFFINITY_EVIDENCE_THRESHOLD:
+            return None
+
+        return Evidence(
+            source="dns_behavioral",
+            method="heuristic",
+            certainty=0.65,
+            vendor=top_vendor,
+            raw={"affinity": affinity},
+        )
 
     def _classify_domain(self, domain: str) -> str | None:
         try:

@@ -35,6 +35,7 @@ _SOURCE_WEIGHTS: dict[str, float] = {
     "tls_sni": 0.50,
     "dns": 0.50,
     "dns_vendor": 0.55,
+    "dns_behavioral": 0.60,
     "netbios": 0.60,
     "icmpv6_ra": 0.60,
     "stp": 0.50,

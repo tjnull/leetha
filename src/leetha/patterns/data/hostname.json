@@ -592,6 +592,62 @@
     "certainty": 80
   },
   {
+    "match": "^DESKTOP-[A-Z0-9]{5,8}$",
+    "category": "workstation",
+    "vendor": "Microsoft",
+    "platform": "Windows",
+    "model": null,
+    "certainty": 88
+  },
+  {
+    "match": "^LAPTOP-[A-Z0-9]{5,8}$",
+    "category": "laptop",
+    "vendor": "Microsoft",
+    "platform": "Windows",
+    "model": null,
+    "certainty": 88
+  },
+  {
+    "match": "^[Ee]sp[_-]?[0-9A-Fa-f]{4,8}",
+    "category": "iot_device",
+    "vendor": "Espressif",
+    "platform": null,
+    "model": null,
+    "certainty": 75
+  },
+  {
+    "match": "^[Tt]asmota[_-]",
+    "category": "iot_device",
+    "vendor": null,
+    "platform": "Tasmota",
+    "model": null,
+    "certainty": 80
+  },
+  {
+    "match": "^[Ss]helly[_-]",
+    "category": "iot_device",
+    "vendor": "Shelly",
+    "platform": null,
+    "model": null,
+    "certainty": 82
+  },
+  {
+    "match": "^PS[45]-[A-Za-z0-9]+",
+    "category": "game_console",
+    "vendor": "Sony",
+    "platform": "PlayStation",
+    "model": null,
+    "certainty": 85
+  },
+  {
+    "match": "^Xbox[_-]",
+    "category": "game_console",
+    "vendor": "Microsoft",
+    "platform": "Xbox",
+    "model": null,
+    "certainty": 85
+  },
+  {
     "match": "roborock[_-]vacuum",
     "category": "robot_vacuum",
     "vendor": "Roborock",
