@@ -5,6 +5,7 @@ from leetha.core.pipeline import Pipeline
 from leetha.capture.packets import CapturedPacket
 from leetha.evidence.engine import VerdictEngine
 from leetha.store.store import Store
+from leetha.pipeline import PacketDispatcher
 
 
 @pytest.fixture
@@ -113,3 +114,22 @@ async def test_pipeline_multiple_packets_same_host(pipeline):
     # Verdict should accumulate evidence
     verdict = await pipeline.store.verdicts.find_by_addr("aa:bb:cc:dd:ee:ff")
     assert len(verdict.evidence_chain) == 3
+
+
+class TestPacketDispatcherBackpressure:
+    def test_queue_has_maxsize(self):
+        dispatcher = PacketDispatcher(shard_count=2, max_queue_size=10)
+        assert dispatcher.workers[0].maxsize == 10
+
+    def test_default_maxsize(self):
+        dispatcher = PacketDispatcher(shard_count=2)
+        assert dispatcher.workers[0].maxsize == 10_000
+
+    def test_route_drops_when_full(self):
+        dispatcher = PacketDispatcher(shard_count=1, max_queue_size=2)
+        for i in range(3):
+            pkt = MagicMock()
+            pkt.src_mac = "aa:bb:cc:dd:ee:ff"
+            dispatcher.route(pkt)
+        assert dispatcher.workers[0].qsize() == 2
+        assert dispatcher.dropped_count == 1

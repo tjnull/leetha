@@ -32,12 +32,13 @@ class PacketDispatcher:
     land on the same shard.
     """
 
-    def __init__(self, shard_count: int = 4, num_workers: int | None = None):
+    def __init__(self, shard_count: int = 4, num_workers: int | None = None, max_queue_size: int = 10_000):
         if num_workers is not None:
             shard_count = num_workers
         self.shard_count = shard_count
+        self.dropped_count = 0
         self.workers: list[asyncio.Queue[ParsedPacket]] = [
-            asyncio.Queue() for _ in range(shard_count)
+            asyncio.Queue(maxsize=max_queue_size) for _ in range(shard_count)
         ]
 
     # -- kept as ``num_workers`` property so existing code that reads
@@ -53,7 +54,10 @@ class PacketDispatcher:
     def route(self, pkt: ParsedPacket) -> None:
         """Enqueue *pkt* onto its designated shard queue."""
         idx = self.shard_for(pkt)
-        self.workers[idx].put_nowait(pkt)
+        try:
+            self.workers[idx].put_nowait(pkt)
+        except asyncio.QueueFull:
+            self.dropped_count += 1
 
 
 # Backward-compat alias -- app.py imports ``PacketRouter``
