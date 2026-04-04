@@ -1463,6 +1463,32 @@ ON CONFLICT(mac) DO UPDATE SET
             rows = await cur.fetchall()
             return {"columns": col_names, "rows": [list(r) for r in rows]}
 
+    async def prune_observations(self, retention_days: int = 7) -> int:
+        """Delete observations older than *retention_days*. Returns count deleted."""
+        from datetime import timedelta
+
+        assert self._conn is not None
+        cutoff = (datetime.now() - timedelta(days=retention_days)).isoformat()
+        async with self._mu:
+            cursor = await self._conn.execute(
+                "DELETE FROM observations WHERE timestamp < ?", (cutoff,)
+            )
+            await self._conn.commit()
+            return cursor.rowcount
+
+    async def prune_alerts(self, retention_days: int = 30) -> int:
+        """Delete alerts older than *retention_days*. Returns count deleted."""
+        from datetime import timedelta
+
+        assert self._conn is not None
+        cutoff = (datetime.now() - timedelta(days=retention_days)).isoformat()
+        async with self._mu:
+            cursor = await self._conn.execute(
+                "DELETE FROM alerts WHERE timestamp < ?", (cutoff,)
+            )
+            await self._conn.commit()
+            return cursor.rowcount
+
     async def clear_all_devices(self) -> None:
         """Wipe the devices and observations tables entirely."""
         assert self._conn is not None
