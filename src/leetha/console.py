@@ -745,15 +745,18 @@ class LeethaConsole:
         await self.app.start()
 
         # start() defers capture to start_capture() which checks privileges.
-        # If capture didn't actually start, tell the user how to fix it.
+        # If capture didn't actually start, re-exec under sudo.
         if not self.app.capture_engine._workers:
-            self._warn(f"Interfaces selected: {names}")
-            self._error(
-                "Capture requires elevated privileges. Options:\n"
-                "  [bold cyan]sudo $(which leetha)[/bold cyan]                    — run with sudo\n"
-                "  [bold cyan]sudo setcap cap_net_raw+ep $(which python3)[/bold cyan] — grant capture capability (recommended)"
-            )
-            return
+            await self.app.stop()
+            self.app = None
+            self._warn("Capture requires elevated privileges — re-launching with sudo")
+            import os, sys
+            leetha_bin = os.path.abspath(sys.argv[0])
+            iface_args = []
+            for iface in self.interfaces:
+                iface_args.extend(["-i", iface.name])
+            os.execvp("sudo", ["sudo", sys.executable, leetha_bin] + iface_args)
+            return  # unreachable — execvp replaces the process
 
         self._success(f"Capture started on {names}")
         self.console.print()
@@ -795,10 +798,16 @@ class LeethaConsole:
         self.app = LeethaApp(interfaces=self.interfaces)
         await self.app.start()
         if not self.app.capture_engine._workers:
-            self._error(
-                "Capture requires elevated privileges. Run with sudo or setcap."
-            )
-            return False
+            await self.app.stop()
+            self.app = None
+            self._warn("Capture requires elevated privileges — re-launching with sudo")
+            import os, sys
+            leetha_bin = os.path.abspath(sys.argv[0])
+            iface_args = []
+            for iface in self.interfaces:
+                iface_args.extend(["-i", iface.name])
+            os.execvp("sudo", ["sudo", sys.executable, leetha_bin] + iface_args)
+            return False  # unreachable
         names = ", ".join(f"[cyan]{i.name}[/cyan]" for i in self.interfaces)
         self._success(f"Capture started on {names}")
         return True
