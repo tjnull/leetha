@@ -41,11 +41,12 @@ _BPF_NAME_SVC = "udp port 5355 or udp port 137"
 _BPF_DNS = "udp port 53"
 _BPF_ICMP6 = "icmp6"
 _BPF_ARP = "arp"
+_BPF_IOT_SCADA = "udp port 502 or udp port 47808 or udp port 5683 or tcp port 44818 or udp port 44818"
 
 _FULL_BPF = " or ".join([
     _BPF_L2_PROTOS, _BPF_SNMP, _BPF_TCP_SYN, _BPF_TLS, _BPF_HTTP,
     _BPF_AI_PORTS, _BPF_BANNER_PORTS, _BPF_DHCP4, _BPF_DHCP6, _BPF_MDNS, _BPF_SSDP,
-    _BPF_NAME_SVC, _BPF_DNS, _BPF_ICMP6, _BPF_ARP,
+    _BPF_NAME_SVC, _BPF_DNS, _BPF_ICMP6, _BPF_ARP, _BPF_IOT_SCADA,
 ])
 
 

@@ -28,6 +28,11 @@ from leetha.capture.protocols.fallback import parse_ip_observed as _new_parse_ip
 from leetha.capture.protocols.icmpv6 import parse_icmpv6 as _new_parse_icmpv6
 from leetha.capture.protocols.ws_discovery import parse_ws_discovery as _new_parse_ws_discovery
 from leetha.capture.protocols.ntp import parse_ntp as _new_parse_ntp
+from leetha.capture.protocols.iot_scada import parse_modbus as _new_parse_modbus
+from leetha.capture.protocols.iot_scada import parse_bacnet as _new_parse_bacnet
+from leetha.capture.protocols.iot_scada import parse_coap as _new_parse_coap
+from leetha.capture.protocols.iot_scada import parse_mqtt as _new_parse_mqtt
+from leetha.capture.protocols.iot_scada import parse_enip as _new_parse_enip
 from leetha.capture.protocols.banner import parse_service_banner as _new_parse_service_banner
 
 # Ordered parser chain -- most specific first, fallback last
@@ -42,6 +47,8 @@ PARSER_CHAIN = [
     _new_parse_snmp,
     _new_parse_icmpv6,
     _new_parse_ntp,
+    _new_parse_modbus, _new_parse_bacnet, _new_parse_coap,
+    _new_parse_mqtt, _new_parse_enip,
     _new_parse_service_banner,
     _new_parse_ip_observed,
 ]
