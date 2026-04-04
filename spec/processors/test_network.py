@@ -1,5 +1,6 @@
-"""Tests for NetworkDiscoveryProcessor."""
+"""Tests for NetworkDiscoveryProcessor and PassiveObserverProcessor."""
 from leetha.processors.network import NetworkDiscoveryProcessor
+from leetha.processors.passive import PassiveObserverProcessor
 from leetha.capture.packets import CapturedPacket
 from leetha.evidence.models import Evidence
 
@@ -34,3 +35,34 @@ class TestNetworkDiscoveryProcessor:
                              ip_addr="192.168.1.1")
         result = self.processor.analyze(pkt)
         assert result == []
+
+
+class TestPassiveObserverProcessor:
+    def setup_method(self):
+        self.processor = PassiveObserverProcessor()
+
+    def test_dst_port_produces_service_hint(self):
+        """Verify processor reads dst_port (not 'port') from fallback parser."""
+        pkt = CapturedPacket(
+            protocol="ip_observed",
+            hw_addr="aa:bb:cc:dd:ee:ff",
+            ip_addr="192.168.1.50",
+            fields={"src_port": 54321, "dst_port": 443, "ttl": 128},
+        )
+        result = self.processor.analyze(pkt)
+        port_evidence = [e for e in result if e.source == "ip_observed_port"]
+        assert len(port_evidence) == 1
+        assert port_evidence[0].raw["port"] == 443
+        assert port_evidence[0].raw["service_hint"] == "https"
+
+    def test_no_port_field_returns_no_port_evidence(self):
+        """When dst_port is None, no port evidence should be produced."""
+        pkt = CapturedPacket(
+            protocol="ip_observed",
+            hw_addr="aa:bb:cc:dd:ee:ff",
+            ip_addr="192.168.1.50",
+            fields={"ttl": 64},
+        )
+        result = self.processor.analyze(pkt)
+        port_evidence = [e for e in result if e.source == "ip_observed_port"]
+        assert len(port_evidence) == 0

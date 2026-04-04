@@ -14,7 +14,7 @@ class PassiveObserverProcessor(Processor):
     def analyze(self, packet: CapturedPacket) -> list[Evidence]:
         evidence = []
         ttl = packet.get("ttl")
-        port = packet.get("port")
+        port = packet.get("dst_port")
         ttl_os_hint = packet.get("ttl_os_hint")
 
         if ttl is not None:

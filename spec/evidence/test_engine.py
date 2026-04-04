@@ -1,5 +1,7 @@
 """Tests for VerdictEngine."""
-from leetha.evidence.engine import VerdictEngine
+import re
+from pathlib import Path
+from leetha.evidence.engine import VerdictEngine, _SOURCE_WEIGHTS
 from leetha.evidence.models import Evidence, Verdict
 
 
@@ -89,3 +91,17 @@ class TestVerdictEngine:
         evidence = [Evidence(source="lldp", method="exact", certainty=0.9, vendor="Cisco")]
         v = self.engine.compute("aa:bb:cc:dd:ee:ff", evidence)
         assert v.is_classified is True
+
+    def test_all_processor_sources_have_explicit_weights(self):
+        """Every source= value used by processors must have an explicit weight."""
+        processors_dir = Path(__file__).resolve().parents[2] / "src" / "leetha" / "processors"
+        source_pattern = re.compile(r'source="([a-z_]+)"')
+        sources_used = set()
+        for py_file in processors_dir.glob("*.py"):
+            text = py_file.read_text()
+            sources_used.update(source_pattern.findall(text))
+
+        missing = sources_used - set(_SOURCE_WEIGHTS.keys())
+        assert not missing, (
+            f"Processor sources missing from _SOURCE_WEIGHTS: {sorted(missing)}"
+        )

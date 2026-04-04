@@ -41,6 +41,36 @@ _SOURCE_WEIGHTS: dict[str, float] = {
     "arp": 0.30,
     "ip_observed": 0.30,
     "hostname": 0.65,
+    # TCP/TLS sources
+    "tcp_syn_ttl": 0.50,
+    "tcp_syn_sig": 0.65,
+    "tls_ja3": 0.75,
+    "tls_ja4": 0.75,
+    "http_host": 0.40,
+    # DNS sources
+    "dns_query": 0.45,
+    "dns_ntp_hint": 0.55,
+    # mDNS sources
+    "mdns_service": 0.65,
+    "mdns_name": 0.60,
+    # Banner source
+    "passive_banner": 0.85,
+    # IoT/SCADA sources
+    "modbus": 0.60,
+    "bacnet": 0.65,
+    "coap": 0.50,
+    "mqtt": 0.55,
+    "enip": 0.65,
+    # Other
+    "ip_observed_ttl": 0.35,
+    "ip_observed_port": 0.30,
+    "dns_answer": 0.50,
+    "ws_discovery": 0.85,
+    # Discovery-enhanced sources
+    "dhcp_server": 0.85,
+    "dns_server": 0.50,
+    "ntp": 0.55,
+    "ssdp_server": 0.65,
 }
 
 # Agreement boost: when N independent sources agree, multiply certainty
