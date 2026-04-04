@@ -303,7 +303,10 @@ async def db_info():
     db_size = 0
     if config.db_path.exists():
         db_size = config.db_path.stat().st_size
-    device_count = await app_instance.db.get_identity_count()
+    try:
+        device_count = await app_instance.store.hosts.count()
+    except Exception:
+        device_count = await app_instance.db.get_identity_count()
     return {
         "db_path": str(config.db_path),
         "db_size_bytes": db_size,
@@ -569,71 +572,47 @@ async def export_devices(
     """Export devices as CSV or JSON, respecting current filters."""
     from fastapi import HTTPException
     from fastapi.responses import Response, JSONResponse
-    from leetha.store.models import Device
     import csv
     import io
 
-    # Reuse filtering logic (same as /api/devices)
-    filters = []
-    params = []
+    # Build device dicts from verdicts+hosts
+    verdicts = await app_instance.store.verdicts.find_all(limit=10000)
+    all_devices = []
+    for v in verdicts:
+        h = await app_instance.store.hosts.find_by_addr(v.hw_addr)
+        all_devices.append(_build_device_dict(v, h))
 
+    # Apply filters
     if q:
-        filters.append(
-            "(mac LIKE ? OR ip_v4 LIKE ? OR hostname LIKE ? OR manufacturer LIKE ?)"
-        )
-        search_term = f"%{q}%"
-        params.extend([search_term] * 4)
-
+        q_lower = q.lower()
+        all_devices = [
+            d for d in all_devices
+            if q_lower in (d.get("mac") or "").lower()
+            or q_lower in (d.get("ip_v4") or "").lower()
+            or q_lower in (d.get("hostname") or "").lower()
+            or q_lower in (d.get("manufacturer") or "").lower()
+        ]
     if manufacturer:
-        filters.append("manufacturer = ?")
-        params.append(manufacturer)
-
+        all_devices = [d for d in all_devices if d.get("manufacturer") == manufacturer]
     if device_type:
-        filters.append("device_type = ?")
-        params.append(device_type)
-
+        all_devices = [d for d in all_devices if d.get("device_type") == device_type]
     if os_family:
-        filters.append("os_family = ?")
-        params.append(os_family)
-
+        all_devices = [d for d in all_devices if d.get("os_family") == os_family]
     if alert_status:
-        filters.append("alert_status = ?")
-        params.append(alert_status)
+        all_devices = [d for d in all_devices if d.get("alert_status") == alert_status]
 
-    where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
-
-    query = f"SELECT * FROM devices {where_clause}"
-    devices = []
-    async with app_instance.db.db.execute(query, params) as cursor:
-        async for row in cursor:
-            devices.append(Device.from_row(row))
+    csv_fields = [
+        "mac", "ip_v4", "ip_v6", "manufacturer", "device_type",
+        "os_family", "os_version", "hostname", "confidence",
+        "first_seen", "last_seen", "alert_status",
+    ]
 
     if format == "csv":
         output = io.StringIO()
-        writer = csv.DictWriter(
-            output,
-            fieldnames=[
-                "mac",
-                "ip_v4",
-                "ip_v6",
-                "manufacturer",
-                "device_type",
-                "os_family",
-                "os_version",
-                "hostname",
-                "confidence",
-                "first_seen",
-                "last_seen",
-                "alert_status",
-            ],
-        )
+        writer = csv.DictWriter(output, fieldnames=csv_fields)
         writer.writeheader()
-        for d in devices:
-            row_dict = d.to_dict()
-            # Only keep fields in the CSV header — drop extras like
-            # raw_evidence, identity_id, manual_override, etc.
-            filtered = {k: row_dict.get(k) for k in writer.fieldnames}
-            writer.writerow(filtered)
+        for d in all_devices:
+            writer.writerow({k: d.get(k) for k in csv_fields})
 
         return Response(
             content=output.getvalue(),
@@ -642,10 +621,9 @@ async def export_devices(
         )
 
     elif format == "json":
-        # Exclude raw_evidence (large nested blob) from export
         export_data = []
-        for d in devices:
-            dd = d.to_dict()
+        for d in all_devices:
+            dd = dict(d)
             dd.pop("raw_evidence", None)
             export_data.append(dd)
         return JSONResponse(
@@ -665,35 +643,17 @@ async def export_alerts(format: str = "csv"):
     import csv
     import io
 
-    alerts = await app_instance.db.list_alerts(acknowledged=None)  # All alerts
+    findings = await app_instance.store.findings.list_active(limit=10000)
+    alerts = [_finding_to_alert_dict(f) for f in findings]
+
+    alert_fields = ["id", "device_mac", "alert_type", "severity", "message", "timestamp", "acknowledged"]
 
     if format == "csv":
         output = io.StringIO()
-        writer = csv.DictWriter(
-            output,
-            fieldnames=[
-                "id",
-                "device_mac",
-                "alert_type",
-                "severity",
-                "message",
-                "timestamp",
-                "acknowledged",
-            ],
-        )
+        writer = csv.DictWriter(output, fieldnames=alert_fields)
         writer.writeheader()
         for a in alerts:
-            writer.writerow(
-                {
-                    "id": a.id,
-                    "device_mac": a.device_mac,
-                    "alert_type": str(a.alert_type),
-                    "severity": str(a.severity),
-                    "message": a.message,
-                    "timestamp": a.timestamp.isoformat(),
-                    "acknowledged": a.acknowledged,
-                }
-            )
+            writer.writerow(a)
 
         return Response(
             content=output.getvalue(),
@@ -703,18 +663,7 @@ async def export_alerts(format: str = "csv"):
 
     elif format == "json":
         return JSONResponse(
-            content=[
-                {
-                    "id": a.id,
-                    "device_mac": a.device_mac,
-                    "alert_type": str(a.alert_type),
-                    "severity": str(a.severity),
-                    "message": a.message,
-                    "timestamp": a.timestamp.isoformat(),
-                    "acknowledged": a.acknowledged,
-                }
-                for a in alerts
-            ],
+            content=alerts,
             headers={"Content-Disposition": "attachment; filename=alerts.json"},
         )
 
@@ -740,10 +689,10 @@ async def bulk_device_action(request: Request):
 
     updated = 0
     for mac in macs:
-        device = await app_instance.db.get_device(mac)
-        if device:
-            device.alert_status = status
-            await app_instance.db.upsert_device(device)
+        host = await app_instance.store.hosts.find_by_addr(mac)
+        if host:
+            host.disposition = status
+            await app_instance.store.hosts.upsert(host)
             updated += 1
 
     return {"status": "ok", "updated": updated}
@@ -759,12 +708,15 @@ async def bulk_alert_action(request: Request):
     action = data.get("action")  # "acknowledge" | "delete"
 
     if action == "acknowledge":
-        await app_instance.db.acknowledge_alerts_batch(alert_ids)
+        for aid in alert_ids:
+            await app_instance.store.findings.resolve(aid)
         return {"status": "ok", "updated": len(alert_ids)}
 
     elif action == "delete":
-        count = await app_instance.db.delete_alerts_batch(alert_ids)
-        return {"status": "ok", "deleted": count}
+        # Findings table doesn't support hard delete; resolve instead
+        for aid in alert_ids:
+            await app_instance.store.findings.resolve(aid)
+        return {"status": "ok", "deleted": len(alert_ids)}
 
     else:
         raise HTTPException(400, "Invalid action")
@@ -803,19 +755,28 @@ async def api_device(mac: str):
 
 @fastapi_app.get("/api/devices/{mac}/override")
 async def get_device_override(mac: str):
-    """Get the manual override for a device."""
+    """Get the manual override for a device.
+
+    TODO: migrate overrides to new schema — currently still reads from old devices table.
+    """
     mac = _validate_mac(mac)
     if not mac:
         return JSONResponse(status_code=400, content={"error": "Invalid MAC address format"})
-    device = await app_instance.db.get_device(mac)
+    try:
+        device = await app_instance.db.get_device(mac)
+    except Exception:
+        device = None
     if device is None:
-        return JSONResponse(status_code=404, content={"error": "Device not found"})
+        return {"mac": mac, "override": None}
     return {"mac": mac, "override": device.manual_override}
 
 
 @fastapi_app.put("/api/devices/{mac}/override")
 async def set_device_override(mac: str, request: Request):
-    """Set or update the manual override for a device."""
+    """Set or update the manual override for a device.
+
+    TODO: migrate overrides to new schema — currently still writes to old devices table.
+    """
     mac = _validate_mac(mac)
     if not mac:
         return JSONResponse(status_code=400, content={"error": "Invalid MAC address format"})
@@ -846,13 +807,19 @@ async def set_device_override(mac: str, request: Request):
 
 @fastapi_app.delete("/api/devices/{mac}/override")
 async def delete_device_override(mac: str):
-    """Clear the manual override for a device."""
+    """Clear the manual override for a device.
+
+    TODO: migrate overrides to new schema — currently still writes to old devices table.
+    """
     mac = _validate_mac(mac)
     if not mac:
         return JSONResponse(status_code=400, content={"error": "Invalid MAC address format"})
-    device = await app_instance.db.get_device(mac)
+    try:
+        device = await app_instance.db.get_device(mac)
+    except Exception:
+        device = None
     if device is None:
-        return JSONResponse(status_code=404, content={"error": "Device not found"})
+        return {"status": "ok", "mac": mac}
 
     device.manual_override = None
     await app_instance.db.upsert_device(device)
@@ -1083,18 +1050,22 @@ async def get_device_coverage(mac: str):
     mac = _validate_mac(mac)
     if not mac:
         return JSONResponse(status_code=400, content={"error": "Invalid MAC address format"})
-    device = await app_instance.db.get_device(mac)
-    if not device:
+    verdict = await app_instance.store.verdicts.find_by_addr(mac)
+    host = await app_instance.store.hosts.find_by_addr(mac)
+    if not verdict and not host:
         return JSONResponse(status_code=404, content={"error": "Device not found"})
 
-    # Get all observation source types for this device
+    device = _build_device_dict(verdict, host)
+
+    # Get observation source types from sightings
     try:
-        rows = await app_instance.db.execute_readonly_query(
-            "SELECT source_type, COUNT(*) as cnt, MAX(timestamp) as last "
-            "FROM observations WHERE device_mac = ? GROUP BY source_type ORDER BY cnt DESC",
-            params=(mac,),
+        cursor = await app_instance.store.connection.execute(
+            "SELECT source, COUNT(*) as cnt, MAX(timestamp) as last "
+            "FROM sightings WHERE hw_addr = ? GROUP BY source ORDER BY cnt DESC",
+            (mac,),
         )
-        observed_sources = {r[0]: {"count": r[1], "last_seen": r[2]} for r in rows.get("rows", [])}
+        rows = await cursor.fetchall()
+        observed_sources = {r[0]: {"count": r[1], "last_seen": r[2]} for r in rows}
     except Exception:
         observed_sources = {}
 
@@ -1172,7 +1143,7 @@ async def get_device_coverage(mac: str):
             "message": "No HTTP/TLS traffic observed. These reveal OS, browser, and cloud services.",
             "action": "This device may not use web services, or traffic is routed through a different path.",
         })
-    if "lldp" in missing_names and device.device_type in ("switch", "router", "access_point"):
+    if "lldp" in missing_names and device.get("device_type") in ("switch", "router", "access_point"):
         recommendations.append({
             "priority": "high",
             "message": "No LLDP data observed for a network device. LLDP reveals exact model and firmware.",
@@ -1180,13 +1151,14 @@ async def get_device_coverage(mac: str):
         })
 
     # Evidence quality score
-    evidence_count = len(device.raw_evidence) if device.raw_evidence else 0
+    raw_ev = device.get("raw_evidence", {})
+    evidence_count = len(raw_ev.get("chain", [])) if isinstance(raw_ev, dict) else 0
     source_count = len(observed)
     quality = "excellent" if source_count >= 5 else "good" if source_count >= 3 else "limited" if source_count >= 2 else "minimal"
 
     return {
         "mac": mac,
-        "confidence": device.confidence,
+        "confidence": device.get("confidence", 0),
         "evidence_count": evidence_count,
         "source_count": source_count,
         "quality": quality,
@@ -1202,21 +1174,25 @@ async def get_capture_visibility():
     import ipaddress
 
     try:
-        # Get all devices with IPs and their observation source types
-        rows = await app_instance.db.execute_readonly_query(
-            "SELECT d.mac, d.ip_v4, d.manufacturer, d.device_type, d.confidence, d.hostname, "
-            "  GROUP_CONCAT(DISTINCT o.source_type) as sources, "
-            "  COUNT(DISTINCT o.source_type) as source_count "
-            "FROM devices d "
-            "LEFT JOIN observations o ON d.mac = o.device_mac "
-            "WHERE d.ip_v4 IS NOT NULL "
-            "GROUP BY d.mac"
+        # Get all devices with IPs and their sighting source types
+        cursor = await app_instance.store.connection.execute(
+            "SELECT h.hw_addr, h.ip_addr, v.vendor, v.category, v.certainty, v.hostname, "
+            "  GROUP_CONCAT(DISTINCT s.source) as sources, "
+            "  COUNT(DISTINCT s.source) as source_count "
+            "FROM hosts h "
+            "LEFT JOIN verdicts v ON h.hw_addr = v.hw_addr "
+            "LEFT JOIN sightings s ON h.hw_addr = s.hw_addr "
+            "WHERE h.ip_addr IS NOT NULL "
+            "GROUP BY h.hw_addr"
         )
+        raw_rows = await cursor.fetchall()
 
         # Group by /24 subnet
         subnets: dict[str, dict] = {}
-        for r in rows.get("rows", []):
-            mac, ip, mfr, dtype, conf, hostname, sources, src_count = r
+        for r in raw_rows:
+            mac, ip, mfr, dtype, conf, hostname, sources, src_count = (
+                r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]
+            )
             try:
                 net = str(ipaddress.ip_network(f"{ip}/24", strict=False))
             except (ValueError, TypeError):
@@ -1424,13 +1400,18 @@ async def get_device_timeline(mac: str, limit: int = 100):
 
     from leetha.timeline import build_timeline
 
-    device_obj = await app_instance.db.get_device(mac)
-    device_dict = device_obj.to_dict() if device_obj else None
+    verdict = await app_instance.store.verdicts.find_by_addr(mac)
+    host = await app_instance.store.hosts.find_by_addr(mac)
+    device_dict = _build_device_dict(verdict, host) if (verdict or host) else None
 
-    obs_raw = await app_instance.db.get_observations(mac, limit=200)
-    observations = [{"timestamp": o.timestamp.isoformat() if hasattr(o.timestamp, 'isoformat') else str(o.timestamp),
-                      "source_type": o.source_type, "raw_data": o.raw_data,
-                      "confidence": o.confidence} for o in obs_raw]
+    # Get sightings as observations
+    try:
+        sightings = await app_instance.store.sightings.for_host(mac, limit=200)
+    except Exception:
+        sightings = []
+    observations = [{"timestamp": s.timestamp.isoformat() if hasattr(s.timestamp, 'isoformat') else str(s.timestamp),
+                      "source_type": s.source, "raw_data": json.dumps(s.payload) if isinstance(s.payload, dict) else str(s.payload),
+                      "confidence": int(s.certainty * 100) if s.certainty <= 1 else int(s.certainty)} for s in sightings]
 
     fp_history = []
     try:
@@ -1448,13 +1429,15 @@ async def get_device_timeline(mac: str, limit: int = 100):
     except Exception:
         pass
 
+    # Get findings for this device as alert-compatible dicts
     findings = []
     try:
-        async with app_instance.db.db.execute(
-            "SELECT alert_type, severity, message, timestamp FROM alerts WHERE device_mac = ? ORDER BY timestamp DESC LIMIT 50",
+        cursor = await app_instance.store.connection.execute(
+            "SELECT rule, severity, message, timestamp FROM findings WHERE hw_addr = ? ORDER BY timestamp DESC LIMIT 50",
             (mac,),
-        ) as cursor:
-            findings = [dict(row) for row in await cursor.fetchall()]
+        )
+        for row in await cursor.fetchall():
+            findings.append({"alert_type": row[0], "severity": row[1], "message": row[2], "timestamp": row[3]})
     except Exception:
         pass
 
@@ -1781,16 +1764,29 @@ async def acknowledge_alert(alert_id: int):
 
 @fastapi_app.delete("/api/alerts/resolved")
 async def api_delete_resolved_alerts():
-    count = await app_instance.db.delete_resolved_alerts()
-    return {"deleted": count}
+    # Findings use soft-delete (resolved flag); purge resolved rows
+    try:
+        cursor = await app_instance.store.connection.execute(
+            "DELETE FROM findings WHERE resolved = 1"
+        )
+        await app_instance.store.connection.commit()
+        return {"deleted": cursor.rowcount}
+    except Exception:
+        return {"deleted": 0}
 
 
 @fastapi_app.delete("/api/alerts/all")
 async def api_delete_all_alerts(confirm: bool = False):
     if not confirm:
         return {"error": "Pass ?confirm=true to delete all alerts"}
-    count = await app_instance.db.delete_all_alerts()
-    return {"deleted": count}
+    try:
+        cursor = await app_instance.store.connection.execute(
+            "DELETE FROM findings"
+        )
+        await app_instance.store.connection.commit()
+        return {"deleted": cursor.rowcount}
+    except Exception:
+        return {"deleted": 0}
 
 
 @fastapi_app.get("/api/incidents")
@@ -1799,12 +1795,29 @@ async def api_incidents():
     import re
     from collections import defaultdict
 
-    alerts = await app_instance.db.list_alerts(acknowledged=False)
+    findings = await app_instance.store.findings.list_active(limit=10000)
+    alerts = [_finding_to_alert_dict(f) for f in findings]
+    # Attach the original Finding objects for access to .rule etc.
+    for ad, f in zip(alerts, findings):
+        ad["_finding"] = f
 
-    # Extract subtype: for spoofing alerts, parse the message for specifics;
-    # for all other alert types, use the alert_type directly as subtype.
-    def extract_subtype(alert_type: str, msg: str) -> str:
-        if alert_type == "spoofing":
+    # Extract subtype from finding rule + message
+    def extract_subtype(rule: str, msg: str) -> str:
+        # Map new FindingRule values to subtypes the frontend expects
+        rule_map = {
+            "new_host": "new_device",
+            "platform_drift": "fingerprint_drift",
+            "addr_conflict": "ip_conflict",
+            "low_certainty": "unclassified",
+            "stale_source": "source_stale",
+            "randomized_addr": "mac_randomized",
+            "dhcp_anomaly": "dhcp_anomaly",
+            "identity_shift": "mac_spoofing",
+            "behavioral_drift": "fingerprint_drift",
+        }
+        mapped = rule_map.get(rule, rule)
+        # For spoofing-related rules, try to parse more specific subtypes from message
+        if mapped in ("spoofing", "other"):
             msg_l = msg.lower()
             if "gateway" in msg_l or "trusted binding" in msg_l:
                 return "gateway_impersonation"
@@ -1814,32 +1827,23 @@ async def api_incidents():
                 return "flip_flop"
             if "gratuitous" in msg_l and "flood" in msg_l:
                 return "grat_flood"
-            if "fingerprint drift" in msg_l or "fp_drift" in msg_l or "drift" in msg_l:
-                return "fingerprint_drift"
-            if "oui" in msg_l and ("mismatch" in msg_l or "behavior" in msg_l):
-                return "oui_mismatch"
-            if "dhcp" in msg_l and ("anomal" in msg_l or "multiple" in msg_l or "server" in msg_l):
-                return "dhcp_anomaly"
-            return "other"
-        # Non-spoofing alert types map directly
-        return alert_type or "other"
+        return mapped or "other"
 
     # Group ALL alerts by (device_mac, subtype)
     groups = defaultdict(list)
     for a in alerts:
-        if not a.alert_type:
-            continue
-        sub = extract_subtype(a.alert_type, a.message or "")
-        groups[(a.device_mac, sub)].append(a)
+        rule = a.get("_finding").rule.value if a.get("_finding") else a.get("alert_type", "")
+        sub = extract_subtype(rule, a.get("message") or "")
+        groups[(a["device_mac"], sub)].append(a)
 
     # Check MAC randomization status
     mac_cache = {}
     async def is_mac_randomized(mac: str) -> tuple[bool, str | None]:
         if mac in mac_cache:
             return mac_cache[mac]
-        dev = await app_instance.db.get_device(mac)
-        if dev:
-            result = (dev.is_randomized_mac, dev.correlated_mac)
+        host = await app_instance.store.hosts.find_by_addr(mac)
+        if host:
+            result = (host.mac_randomized, host.real_hw_addr)
         else:
             # Check locally-administered bit
             try:
@@ -1861,7 +1865,7 @@ async def api_incidents():
     info_count = 0
 
     for (mac, subtype), alert_list in groups.items():
-        alert_list.sort(key=lambda a: a.timestamp or "")
+        alert_list.sort(key=lambda a: a.get("timestamp") or "")
         randomized, correlated = await is_mac_randomized(mac)
 
         # Determine severity
@@ -1879,19 +1883,19 @@ async def api_incidents():
             suspicious_count += 1
 
         # Build summary from first alert message
-        first_msg = alert_list[0].message or ""
-        # Extract key info from message
+        first_msg = alert_list[0].get("message") or ""
         summary = first_msg
         if len(summary) > 120:
             summary = summary[:117] + "..."
 
         # Get device info for context
-        dev = await app_instance.db.get_device(mac)
-        ip = dev.ip_v4 if dev else None
-        manufacturer = dev.manufacturer if dev else None
+        verdict = await app_instance.store.verdicts.find_by_addr(mac)
+        host = await app_instance.store.hosts.find_by_addr(mac)
+        ip = host.ip_addr if host else None
+        manufacturer = verdict.vendor if verdict else None
 
-        first_ts = str(alert_list[0].timestamp) if alert_list[0].timestamp else None
-        last_ts = str(alert_list[-1].timestamp) if alert_list[-1].timestamp else None
+        first_ts = alert_list[0].get("timestamp")
+        last_ts = alert_list[-1].get("timestamp")
 
         incidents.append({
             "id": f"{subtype}_{mac.replace(':', '')}",
@@ -1906,7 +1910,7 @@ async def api_incidents():
             "summary": summary,
             "is_randomized_mac": randomized,
             "correlated_mac": correlated,
-            "alert_ids": [a.id for a in alert_list],
+            "alert_ids": [a.get("id") for a in alert_list],
         })
 
     # Sort: threats first, then suspicious, then info. Within same severity, most alerts first.
@@ -1941,13 +1945,16 @@ async def api_incident_detail(incident_id: str):
     else:
         mac = mac_hex
 
-    # Fetch all context
-    device = await app_instance.db.get_device(mac)
-    if not device:
+    # Fetch all context from new store
+    verdict = await app_instance.store.verdicts.find_by_addr(mac)
+    host = await app_instance.store.hosts.find_by_addr(mac)
+    if not verdict and not host:
         return JSONResponse(status_code=404, content={"error": "Device not found"})
 
-    # Evidence
-    evidence = device.raw_evidence if device.raw_evidence else []
+    device_dict = _build_device_dict(verdict, host)
+
+    # Evidence from verdict
+    evidence = device_dict.get("raw_evidence", {})
 
     # ARP history
     arp_history = await app_instance.db.get_arp_history_for_mac(mac)
@@ -1958,27 +1965,31 @@ async def api_incident_detail(incident_id: str):
     except Exception:
         fp_history = []
 
-    # Recent observations
-    observations = await app_instance.db.get_observations(mac, limit=15)
+    # Recent sightings as observations
+    try:
+        sightings = await app_instance.store.sightings.for_host(mac, limit=15)
+    except Exception:
+        sightings = []
     obs_list = [
         {
-            "id": o.id,
-            "timestamp": o.timestamp.isoformat() if o.timestamp else None,
-            "source_type": o.source_type,
-            "raw_data": o.raw_data,
-            "match_result": o.match_result,
-            "confidence": o.confidence,
+            "id": None,
+            "timestamp": s.timestamp.isoformat() if s.timestamp else None,
+            "source_type": s.source,
+            "raw_data": json.dumps(s.payload) if isinstance(s.payload, dict) else str(s.payload),
+            "match_result": json.dumps(s.analysis) if isinstance(s.analysis, dict) else str(s.analysis),
+            "confidence": int(s.certainty * 100) if s.certainty <= 1 else int(s.certainty),
         }
-        for o in observations
+        for s in sightings
     ]
 
+    ip_addr = host.ip_addr if host else None
     # Trusted bindings for this device
     bindings = await app_instance.db.list_trusted_bindings()
-    device_bindings = [b for b in bindings if b.get("mac") == mac or b.get("ip") == device.ip_v4]
+    device_bindings = [b for b in bindings if b.get("mac") == mac or b.get("ip") == ip_addr]
 
     # Suppression rules for this device
     rules = await app_instance.db.list_suppression_rules()
-    device_rules = [r for r in rules if (r.get("mac") and r.get("mac") == mac) or (r.get("ip") and r.get("ip") == device.ip_v4) or (r.get("subtype") and r.get("subtype") == subtype)]
+    device_rules = [r for r in rules if (r.get("mac") and r.get("mac") == mac) or (r.get("ip") and r.get("ip") == ip_addr) or (r.get("subtype") and r.get("subtype") == subtype)]
 
     # Detection context
     DETECTION_METHODS = {
@@ -2075,7 +2086,7 @@ async def api_incident_detail(incident_id: str):
     })
 
     # Generate recommendation
-    randomized = device.is_randomized_mac
+    randomized = host.mac_randomized if host else False
     recommendations = {
         # Non-spoofing subtypes (randomized status irrelevant for most)
         ("new_device", True): "New device with a randomized MAC. This is normal for modern phones, laptops, and IoT devices. Acknowledge once reviewed.",
@@ -2115,7 +2126,7 @@ async def api_incident_detail(incident_id: str):
     return {
         "incident_id": incident_id,
         "subtype": subtype,
-        "device": device.to_dict(),
+        "device": device_dict,
         "evidence": evidence,
         "arp_history": arp_history,
         "fingerprint_history": fp_history,
@@ -2125,7 +2136,7 @@ async def api_incident_detail(incident_id: str):
         "detection_context": {
             **detection,
             "mac_randomized": randomized,
-            "correlated_mac": device.correlated_mac,
+            "correlated_mac": host.real_hw_addr if host else None,
             "recommendation": recommendation,
         },
     }
@@ -2195,19 +2206,19 @@ async def api_activity_stats():
 async def api_filter_options():
     """Available filter values for device dropdowns (cached 30s)."""
     try:
-        dt_rows = await app_instance.db.execute_readonly_query(
-            "SELECT DISTINCT device_type FROM devices WHERE device_type IS NOT NULL ORDER BY device_type"
+        dt_cursor = await app_instance.store.connection.execute(
+            "SELECT DISTINCT category FROM verdicts WHERE category IS NOT NULL ORDER BY category"
         )
-        os_rows = await app_instance.db.execute_readonly_query(
-            "SELECT DISTINCT os_family FROM devices WHERE os_family IS NOT NULL ORDER BY os_family"
+        os_cursor = await app_instance.store.connection.execute(
+            "SELECT DISTINCT platform FROM verdicts WHERE platform IS NOT NULL ORDER BY platform"
         )
-        mfr_rows = await app_instance.db.execute_readonly_query(
-            "SELECT DISTINCT manufacturer FROM devices WHERE manufacturer IS NOT NULL ORDER BY manufacturer"
+        mfr_cursor = await app_instance.store.connection.execute(
+            "SELECT DISTINCT vendor FROM verdicts WHERE vendor IS NOT NULL ORDER BY vendor"
         )
         return {
-            "device_types": [r[0] for r in dt_rows.get("rows", [])],
-            "os_families": [r[0] for r in os_rows.get("rows", [])],
-            "manufacturers": [r[0] for r in mfr_rows.get("rows", [])],
+            "device_types": [r[0] for r in await dt_cursor.fetchall()],
+            "os_families": [r[0] for r in await os_cursor.fetchall()],
+            "manufacturers": [r[0] for r in await mfr_cursor.fetchall()],
         }
     except Exception:
         return {"device_types": [], "os_families": [], "manufacturers": []}
@@ -2231,12 +2242,13 @@ async def api_protocol_stats():
 async def api_alert_type_stats():
     """Alert count by type for dashboard breakdown."""
     try:
-        rows = await app_instance.db.execute_readonly_query(
-            "SELECT COALESCE(alert_type, 'unknown') as atype, severity, COUNT(*) as cnt "
-            "FROM alerts WHERE acknowledged = 0 "
+        cursor = await app_instance.store.connection.execute(
+            "SELECT COALESCE(rule, 'unknown') as atype, severity, COUNT(*) as cnt "
+            "FROM findings WHERE resolved = 0 "
             "GROUP BY atype, severity ORDER BY cnt DESC"
         )
-        return {"types": [{"type": r[0], "severity": r[1], "count": r[2]} for r in rows.get("rows", [])]}
+        rows = await cursor.fetchall()
+        return {"types": [{"type": r[0], "severity": r[1], "count": r[2]} for r in rows]}
     except Exception:
         return {"types": []}
 
@@ -2245,13 +2257,25 @@ async def api_alert_type_stats():
 async def api_targeted_devices():
     """Most alerted devices for dashboard."""
     try:
-        rows = await app_instance.db.execute_readonly_query(
-            "SELECT a.device_mac, COUNT(*) as cnt, d.ip_v4, d.manufacturer, d.device_type "
-            "FROM alerts a LEFT JOIN devices d ON a.device_mac = d.mac "
-            "WHERE a.acknowledged = 0 "
-            "GROUP BY a.device_mac ORDER BY cnt DESC LIMIT 10"
+        cursor = await app_instance.store.connection.execute(
+            "SELECT f.hw_addr, COUNT(*) as cnt "
+            "FROM findings f WHERE f.resolved = 0 "
+            "GROUP BY f.hw_addr ORDER BY cnt DESC LIMIT 10"
         )
-        return {"devices": [{"mac": r[0], "count": r[1], "ip": r[2], "manufacturer": r[3], "device_type": r[4]} for r in rows.get("rows", [])]}
+        rows = await cursor.fetchall()
+        result = []
+        for r in rows:
+            hw_addr, cnt = r[0], r[1]
+            verdict = await app_instance.store.verdicts.find_by_addr(hw_addr)
+            host = await app_instance.store.hosts.find_by_addr(hw_addr)
+            result.append({
+                "mac": hw_addr,
+                "count": cnt,
+                "ip": host.ip_addr if host else None,
+                "manufacturer": verdict.vendor if verdict else None,
+                "device_type": verdict.category if verdict else None,
+            })
+        return {"devices": result}
     except Exception:
         return {"devices": []}
 
@@ -2260,13 +2284,14 @@ async def api_targeted_devices():
 async def api_alert_trend():
     """Hourly alert counts over last 24 hours for trend line chart."""
     try:
-        rows = await app_instance.db.execute_readonly_query(
+        cursor = await app_instance.store.connection.execute(
             "SELECT strftime('%H', timestamp) as hour, COUNT(*) as cnt "
-            "FROM alerts WHERE timestamp > datetime('now', '-24 hours') "
+            "FROM findings WHERE timestamp > datetime('now', '-24 hours') "
             "GROUP BY hour ORDER BY hour"
         )
+        rows = await cursor.fetchall()
         counts = [0] * 24
-        for r in rows.get("rows", []):
+        for r in rows:
             try:
                 counts[int(r[0])] = r[1]
             except (ValueError, IndexError):
@@ -2280,13 +2305,14 @@ async def api_alert_trend():
 async def api_new_devices_timeline():
     """New devices discovered per hour over last 24h."""
     try:
-        rows = await app_instance.db.execute_readonly_query(
-            "SELECT strftime('%H', first_seen) as hour, COUNT(*) as cnt "
-            "FROM devices WHERE first_seen > datetime('now', '-24 hours') "
+        cursor = await app_instance.store.connection.execute(
+            "SELECT strftime('%H', discovered_at) as hour, COUNT(*) as cnt "
+            "FROM hosts WHERE discovered_at > datetime('now', '-24 hours') "
             "GROUP BY hour ORDER BY hour"
         )
+        rows = await cursor.fetchall()
         counts = [0] * 24
-        for r in rows.get("rows", []):
+        for r in rows:
             try:
                 counts[int(r[0])] = r[1]
             except (ValueError, IndexError):
@@ -2332,35 +2358,26 @@ async def api_topology():
         return _topology_cache["data"]
 
     try:
-        # 1. Devices
-        raw_devices = await app_instance.db.list_devices()
-        devices = [
-            {
-                "mac": d.mac,
-                "hostname": d.hostname,
-                "ip_v4": d.ip_v4,
-                "device_type": d.device_type,
-                "manufacturer": d.manufacturer,
-                "confidence": d.confidence,
-                "os_family": d.os_family,
-                "last_seen": d.last_seen.isoformat() if d.last_seen else None,
-                "is_randomized_mac": d.is_randomized_mac,
-                "alert_status": d.alert_status,
-            }
-            for d in raw_devices
-        ]
+        # 1. Devices — from verdicts + hosts
+        verdicts = await app_instance.store.verdicts.find_all(limit=1000)
+        devices = []
+        for v in verdicts:
+            h = await app_instance.store.hosts.find_by_addr(v.hw_addr)
+            d = _build_device_dict(v, h)
+            devices.append(d)
 
         # 1b. Gather mDNS services and LLDP/CDP presence per device for connection type
         device_mdns_services: dict[str, list[str]] = {}
         device_has_lldp: set[str] = set()
         device_has_cdp: set[str] = set()
         try:
-            svc_rows = await app_instance.db.execute_readonly_query(
-                "SELECT device_mac, source_type, raw_data FROM observations "
-                "WHERE source_type IN ('mdns', 'lldp', 'cdp') "
+            svc_cursor = await app_instance.store.connection.execute(
+                "SELECT hw_addr, source, payload FROM sightings "
+                "WHERE source IN ('mdns', 'lldp', 'cdp') "
                 "ORDER BY timestamp DESC LIMIT 5000"
             )
-            for r in svc_rows.get("rows", []):
+            svc_rows = await svc_cursor.fetchall()
+            for r in svc_rows:
                 dev_mac, src_type, raw = r[0], r[1], r[2]
                 if src_type == "lldp":
                     device_has_lldp.add(dev_mac)
@@ -2456,10 +2473,11 @@ async def api_topology():
         # 4. LLDP/CDP neighbors
         lldp_neighbors = []
         try:
-            lldp_rows = await app_instance.db.execute_readonly_query(
-                "SELECT device_mac, raw_data FROM observations WHERE source_type IN ('lldp', 'cdp')"
+            lldp_cursor = await app_instance.store.connection.execute(
+                "SELECT hw_addr, payload FROM sightings WHERE source IN ('lldp', 'cdp')"
             )
-            for r in lldp_rows.get("rows", []):
+            lldp_rows = await lldp_cursor.fetchall()
+            for r in lldp_rows:
                 device_mac = r[0]
                 try:
                     raw = _json.loads(r[1]) if isinstance(r[1], str) else (r[1] or {})
