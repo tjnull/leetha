@@ -437,6 +437,90 @@
       "vendor": null,
       "platform": null,
       "certainty": 70
+    },
+    "_airprint._tcp": {
+      "category": "printer",
+      "vendor": null,
+      "platform": null,
+      "certainty": 85
+    },
+    "_rdp._tcp": {
+      "category": "workstation",
+      "vendor": "Microsoft",
+      "platform": "Windows",
+      "certainty": 85
+    },
+    "_teamviewer._tcp": {
+      "category": "workstation",
+      "vendor": null,
+      "platform": null,
+      "certainty": 70
+    },
+    "_vnc._tcp": {
+      "category": "workstation",
+      "vendor": null,
+      "platform": null,
+      "certainty": 65
+    },
+    "_microsoft-ds._tcp": {
+      "category": "workstation",
+      "vendor": "Microsoft",
+      "platform": "Windows",
+      "certainty": 70
+    },
+    "_hubitat._tcp": {
+      "category": "smart_home",
+      "vendor": "Hubitat",
+      "platform": null,
+      "certainty": 90
+    },
+    "_openhab._tcp": {
+      "category": "smart_home",
+      "vendor": "openHAB",
+      "platform": "Linux",
+      "certainty": 85
+    },
+    "_lifx._tcp": {
+      "category": "smart_light",
+      "vendor": "LIFX",
+      "platform": null,
+      "certainty": 90
+    },
+    "_lutron._tcp": {
+      "category": "smart_home",
+      "vendor": "Lutron",
+      "platform": null,
+      "certainty": 90
+    },
+    "_meross._tcp": {
+      "category": "smart_home",
+      "vendor": "Meross",
+      "platform": null,
+      "certainty": 85
+    },
+    "_steam-casts._tcp": {
+      "category": "game_console",
+      "vendor": "Valve",
+      "platform": "SteamOS",
+      "certainty": 85
+    },
+    "_hpnetdiscovery._tcp": {
+      "category": "printer",
+      "vendor": "HP",
+      "platform": null,
+      "certainty": 85
+    },
+    "_viziocast._tcp": {
+      "category": "smart_tv",
+      "vendor": "Vizio",
+      "platform": "SmartCast",
+      "certainty": 92
+    },
+    "_bravia._tcp": {
+      "category": "smart_tv",
+      "vendor": "Sony",
+      "platform": "Android TV",
+      "certainty": 90
     }
   },
   "names": [
