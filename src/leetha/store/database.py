@@ -376,6 +376,15 @@ class Database:
         await self._clean_dirty_hostnames()
         await self._conn.commit()
 
+        # Fix DB file ownership when running under sudo
+        from leetha.platform import fix_ownership
+        fix_ownership(self._path)
+        # Also fix WAL and SHM journal files if they exist
+        for suffix in ("-wal", "-shm"):
+            journal = self._path.parent / (self._path.name + suffix)
+            if journal.exists():
+                fix_ownership(journal)
+
     async def _apply_migrations(self) -> None:
         """Add columns that may be missing from older schema versions."""
         dev_cols = await self._column_names("devices")

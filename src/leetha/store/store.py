@@ -38,6 +38,16 @@ class Store:
         await self.sightings.create_tables()
         await self.verdicts.create_tables()
 
+        # Fix DB file ownership when running under sudo
+        from leetha.platform import fix_ownership
+        from pathlib import Path
+        db_file = Path(self.db_path)
+        fix_ownership(db_file)
+        for suffix in ("-wal", "-shm"):
+            journal = db_file.parent / (db_file.name + suffix)
+            if journal.exists():
+                fix_ownership(journal)
+
     async def close(self):
         if self._conn:
             await self._conn.close()

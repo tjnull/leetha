@@ -56,6 +56,17 @@ class LeethaConfig:
         self.db_path = self.data_dir / "leetha.db"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        # When running under sudo, fix ownership so the real user
+        # owns these directories and the DB file.
+        from leetha.platform import fix_ownership
+        fix_ownership(self.cache_dir)
+        fix_ownership(self.data_dir)
+        # Fix parent dirs too (.cache, .local, .local/share)
+        for d in (self.cache_dir, self.data_dir):
+            for parent in d.parents:
+                if parent == Path.home() or parent == Path("/"):
+                    break
+                fix_ownership(parent)
 
 
 # Global config instance
