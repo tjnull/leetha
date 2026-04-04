@@ -14,6 +14,7 @@ import threading
 from collections import deque
 from typing import TYPE_CHECKING
 
+from leetha.capture.dedup import TTLDedup
 from leetha.capture.interfaces import InterfaceConfig
 
 if TYPE_CHECKING:
@@ -86,6 +87,10 @@ class PacketCapture:
 
         # ring buffer of raw bytes for PCAP export
         self._packet_buffer: deque = deque(maxlen=10_000)
+
+        # TTL-based dedup caches (replace old class-level sets)
+        self._ip_observed_dedup = TTLDedup(max_entries=50_000, ttl_seconds=300.0)
+        self._banner_dedup = TTLDedup(max_entries=50_000, ttl_seconds=300.0)
 
         # registered interfaces keyed by device name
         self.interfaces: dict[str, InterfaceConfig] = {}
@@ -251,14 +256,6 @@ class PacketCapture:
     # Packet ingestion -- called once per captured frame
     # ------------------------------------------------------------------
 
-    # Track which MAC+port combos we've already seen for ip_observed
-    # to suppress the flood of duplicate observations.
-    _ip_observed_seen: set[tuple[str, int | None]] = set()
-
-    # Track which server MAC+port combos we've already emitted a
-    # service_banner for, to suppress duplicate banner events.
-    _banner_seen: set[tuple[str, int]] = set()
-
     def _ingest(self, frame, dev_name: str = "") -> None:
         """Buffer raw bytes, classify the frame, and push to async queue."""
         self._packet_buffer.append(bytes(frame))
@@ -271,24 +268,15 @@ class PacketCapture:
         # banner per server MAC + server port combo.
         if result.protocol == "service_banner":
             server_port = result.fields.get("server_port", 0)
-            key = (result.hw_addr, server_port)
-            if key in self._banner_seen:
+            if self._banner_dedup.seen(result.hw_addr, server_port):
                 return
-            self._banner_seen.add(key)
-            if len(self._banner_seen) > 50_000:
-                self._banner_seen.clear()
 
         # Suppress duplicate ip_observed — only enqueue the first
         # observation per MAC+dst_port pair. Other protocols always pass.
         if result.protocol == "ip_observed":
             dst_port = result.fields.get("dst_port")
-            key = (result.hw_addr, dst_port)
-            if key in self._ip_observed_seen:
-                return  # already seen this MAC talking to this port
-            self._ip_observed_seen.add(key)
-            # Cap the set size to prevent unbounded growth
-            if len(self._ip_observed_seen) > 50_000:
-                self._ip_observed_seen.clear()
+            if self._ip_observed_dedup.seen(result.hw_addr, dst_port):
+                return
 
         # Stamp with originating interface
         result.interface = dev_name
