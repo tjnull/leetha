@@ -623,6 +623,74 @@ class FingerprintEngine:
             ))
         return matches
 
+    def process_service_banner(
+        self, src_mac: str, service: str, software: str | None = None,
+        version: str | None = None, server_port: int | None = None, **kwargs
+    ) -> list[FingerprintMatch]:
+        """Process a passively captured service banner."""
+        matches: list[FingerprintMatch] = []
+        matches.extend(self.lookup.lookup_mac(src_mac))
+
+        device_type = None
+        if service in ("ipp", "jetdirect", "lpd"):
+            device_type = "printer"
+        elif service in ("mysql", "postgresql", "mssql", "mongodb", "redis",
+                         "cassandra", "elasticsearch"):
+            device_type = "server"
+        elif service == "rdp":
+            device_type = "workstation"
+        elif service in ("rtsp", "unifiprotect"):
+            device_type = "ip_camera"
+        elif service == "sip":
+            device_type = "voip_phone"
+
+        os_family = None
+        if service == "rdp":
+            os_family = "Windows"
+        elif service == "mssql":
+            os_family = "Windows"
+
+        if software or version or device_type:
+            matches.append(FingerprintMatch(
+                source="passive_banner",
+                match_type="pattern",
+                confidence=0.85,
+                manufacturer=software,
+                device_type=device_type,
+                os_family=os_family,
+                os_version=version,
+                raw_data={
+                    "service": service, "software": software,
+                    "version": version, "server_port": server_port,
+                },
+            ))
+        return matches
+
+    def process_iot_scada(
+        self, src_mac: str, protocol: str, **fields
+    ) -> list[FingerprintMatch]:
+        """Process an IoT/SCADA protocol packet (Modbus, BACnet, CoAP, MQTT, EtherNet/IP)."""
+        matches: list[FingerprintMatch] = []
+        matches.extend(self.lookup.lookup_mac(src_mac))
+
+        device_type_map = {
+            "modbus": "ics_device",
+            "bacnet": "building_automation",
+            "coap": "iot_device",
+            "mqtt": "iot_device",
+            "enip": "ics_device",
+        }
+        device_type = device_type_map.get(protocol, "iot_device")
+
+        matches.append(FingerprintMatch(
+            source=protocol,
+            match_type="pattern",
+            confidence=0.60,
+            device_type=device_type,
+            raw_data=fields,
+        ))
+        return matches
+
     @staticmethod
     def _build_tcp_signature(
         ttl: int, window_size: int, mss: int | None, tcp_options: str

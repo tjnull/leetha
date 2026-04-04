@@ -1001,6 +1001,35 @@ class LeethaApp:
                 sys_name=data.get("sys_name", ""),
                 sys_object_id=data.get("sys_object_id", ""),
             )
+        elif packet.protocol == "service_banner":
+            return engine.process_service_banner(
+                src_mac=packet.src_mac,
+                service=data.get("service", ""),
+                software=data.get("software"),
+                version=data.get("version"),
+                server_port=data.get("server_port"),
+            )
+        elif packet.protocol == "ws_discovery":
+            return engine.process_ws_discovery(
+                src_mac=packet.src_mac,
+                device_types=data.get("device_types"),
+                manufacturer=data.get("manufacturer"),
+                model=data.get("model"),
+                firmware=data.get("firmware"),
+            )
+        elif packet.protocol == "ntp":
+            return engine.process_ntp(
+                src_mac=packet.src_mac,
+                mode=data.get("mode", ""),
+                stratum=data.get("stratum", 0),
+                reference_id=data.get("reference_id", ""),
+            )
+        elif packet.protocol in ("modbus", "bacnet", "coap", "mqtt", "enip"):
+            return engine.process_iot_scada(
+                src_mac=packet.src_mac,
+                protocol=packet.protocol,
+                **data,
+            )
         return []
 
     async def _persist_packet_metadata(self, packet: ParsedPacket) -> None:
