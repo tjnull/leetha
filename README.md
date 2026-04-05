@@ -68,8 +68,10 @@ Capture Engine -----> Parser Chain (20 protocol parsers)
 Requires **Python 3.11+** and packet capture privileges (root, sudo, or `CAP_NET_RAW`).
 
 ```bash
-# Install
-pip install leetha
+# Install from source
+git clone https://github.com/tjnull/leetha.git && cd leetha
+cd frontend && bun install && bun run build && cd ..
+pip install -e .
 
 # Sync fingerprint databases (recommended, ~880 MB)
 leetha sync
@@ -88,30 +90,31 @@ Open `http://localhost:8080` to view discovered devices in real-time.
 
 ## Installation
 
-### pip (all platforms)
-
-```bash
-pip install leetha
-```
-
-### pipx (isolated install, recommended)
-
-```bash
-pipx install leetha
-```
-
-### Docker
-
-```bash
-docker run --net=host --cap-add=NET_RAW ghcr.io/tjnull/leetha:latest --web
-```
-
 ### From source
 
 ```bash
 git clone https://github.com/tjnull/leetha.git
 cd leetha
+
+# Build the frontend (requires bun — https://bun.sh)
+cd frontend && bun install && bun run build && cd ..
+
+# Install leetha
 pip install -e .
+```
+
+### Docker
+
+```bash
+# Build locally (includes frontend build)
+docker build -t leetha .
+docker run --net=host --cap-add=NET_RAW leetha --web
+```
+
+### Docker Compose
+
+```bash
+docker compose up -d
 ```
 
 ## Capture Privileges

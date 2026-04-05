@@ -1,17 +1,27 @@
 # Leetha — network host identification engine
-# Multi-stage build: compile wheel, then install into slim runtime
+# Multi-stage build: build frontend, compile wheel, install into slim runtime
 
-# ── Stage 1: Build ──────────────────────────────────────────────
+# ── Stage 1: Build frontend ─────────────────────────────────────
+FROM oven/bun:1 AS frontend
+
+WORKDIR /app/frontend
+COPY frontend/package.json frontend/bun.lock* ./
+RUN bun install --frozen-lockfile
+COPY frontend/ ./
+COPY src/leetha/ui/web/ /app/src/leetha/ui/web/
+RUN bun run build
+
+# ── Stage 2: Build wheel ────────────────────────────────────────
 FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS compile
 
 WORKDIR /src
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock README.md ./
 COPY src/ src/
-COPY frontend/dist/ src/leetha/ui/web/dist/
+COPY --from=frontend /app/src/leetha/ui/web/dist/ src/leetha/ui/web/dist/
 
 RUN uv build --wheel --out-dir /src/wheels
 
-# ── Stage 2: Runtime ────────────────────────────────────────────
+# ── Stage 3: Runtime ────────────────────────────────────────────
 FROM python:3.11-slim
 
 LABEL maintainer="leetha" \
