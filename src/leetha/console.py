@@ -33,6 +33,7 @@ from leetha.capture.interfaces import (
 )
 from leetha.config import get_config
 from leetha.store.database import Database
+from leetha.store.store import Store
 from leetha.sync import CACHE_NAMES
 from leetha.sync.registry import SourceRegistry
 from leetha.ui.live import run_live
@@ -241,6 +242,7 @@ class LeethaConsole:
         self.config = get_config()
         self.app: LeethaApp | None = None
         self.db: Database | None = None
+        self._store: Store | None = None
         self._running = True
         self._completer = LeethaCompleter()
 
@@ -250,6 +252,13 @@ class LeethaConsole:
             iface_names = ",".join(i.name for i in self.interfaces)
             return f"leetha [capture: {iface_names}]> "
         return "leetha> "
+
+    @property
+    def _active_store(self) -> Store | None:
+        """Get the active Store -- from app if running, otherwise standalone."""
+        if self.app and hasattr(self.app, 'store') and self.app.store:
+            return self.app.store
+        return self._store
 
     # Main loop
 
@@ -262,6 +271,10 @@ class LeethaConsole:
         # Initialize database
         self.db = Database(self.config.db_path)
         await self.db.initialize()
+
+        # Initialize standalone Store for console queries
+        self._store = Store(self.config.db_path)
+        await self._store.initialize()
 
         loop = asyncio.get_event_loop()
 
@@ -337,6 +350,9 @@ class LeethaConsole:
                 self.app = None
             if self.db is not None:
                 await self.db.close()
+            if self._store is not None:
+                await self._store.close()
+                self._store = None
 
     # Dispatch
 
@@ -932,61 +948,17 @@ class LeethaConsole:
         return self.db
 
     async def _cmd_devices(self, args: list[str]) -> None:
-        db = self._get_db()
-        if not db:
-            self._error("Database not initialized")
+        store = self._active_store
+        if not store:
+            self._error("Store not initialized")
             return
 
-        # --all flag shows raw device rows
-        if "--all" in args:
-            devices = await db.list_devices()
-            if not devices:
-                self._hint("No devices discovered yet — start a capture first")
-                return
-
-            self._section("All Devices", f"{len(devices)} MAC addresses")
-
-            table = Table(
-                show_header=True, show_edge=False, pad_edge=True, box=None,
-                expand=True, padding=(0, 1),
-            )
-            table.add_column("Name", style="bold cyan", no_wrap=True, min_width=18)
-            table.add_column("MAC", style="blue", no_wrap=True, width=20)
-            table.add_column("IPv4", style="white", no_wrap=True, width=16)
-            table.add_column("Type", style="white", width=14)
-            table.add_column("OS", style="white", width=12)
-            table.add_column("Conf", justify="right", width=6)
-            table.add_column("ID", justify="right", width=5, style="dim")
-
-            for d in devices:
-                conf = d.confidence or 0
-                mac_display = d.mac
-                if d.is_randomized_mac:
-                    mac_display = f"{d.mac} [magenta]R[/magenta]"
-
-                # Show hostname if available, otherwise manufacturer
-                name = d.hostname or d.manufacturer or "[dim]—[/dim]"
-
-                table.add_row(
-                    name,
-                    mac_display,
-                    d.ip_v4 or "[dim]—[/dim]",
-                    _display_type(d.device_type),
-                    d.os_family or "[dim]—[/dim]",
-                    self._confidence_bar(conf),
-                    str(d.identity_id or "—"),
-                )
-            self.console.print(table)
-            self.console.print()
-            return
-
-        # Default: show unified identities
-        identities = await db.list_identities()
-        if not identities:
+        verdicts = await store.verdicts.find_all(limit=500)
+        if not verdicts:
             self._hint("No devices discovered yet — start a capture first")
             return
 
-        self._section("Discovered Devices", f"{len(identities)} unique identities")
+        self._section("Discovered Devices", f"{len(verdicts)} hosts")
 
         table = Table(
             show_header=True, show_edge=False, pad_edge=True, box=None,
@@ -999,26 +971,35 @@ class LeethaConsole:
         table.add_column("OS", style="white", width=12)
         table.add_column("Conf", justify="right", width=6)
 
-        for d in identities:
-            conf = d.confidence or 0
-            mac_display = d.primary_mac
-            if d.mac_count > 1:
-                mac_display = f"{d.primary_mac} [dim]+{d.mac_count - 1}[/dim]"
+        for v in verdicts:
+            h = await store.hosts.find_by_addr(v.hw_addr)
+            mac = v.hw_addr
+            ip = h.ip_addr if h else None
+            vendor = v.vendor or "Unknown"
+            category = v.category or "unknown"
+            platform = v.platform or None
+            hostname = v.hostname or None
+            certainty = v.certainty or 0
 
-            # Show hostname if available, otherwise manufacturer
-            name = d.hostname or d.manufacturer or "[dim]—[/dim]"
+            # Show randomized MAC indicator
+            mac_display = mac
+            if h and h.mac_randomized:
+                mac_display = f"{mac} [magenta]R[/magenta]"
+
+            name = hostname or vendor
+            if name == "Unknown":
+                name = "[dim]—[/dim]"
 
             table.add_row(
                 name,
                 mac_display,
-                d.ip_v4 or "[dim]—[/dim]",
-                _display_type(d.device_type),
-                d.os_family or "[dim]—[/dim]",
-                self._confidence_bar(conf),
+                ip or "[dim]—[/dim]",
+                _display_type(category),
+                platform or "[dim]—[/dim]",
+                self._confidence_bar(certainty),
             )
 
         self.console.print(table)
-        self._hint(f"Show all MACs: [bold cyan]devices --all[/bold cyan]")
         self.console.print()
 
     _SEVERITY_ICONS: dict[str, str] = {
@@ -1030,23 +1011,23 @@ class LeethaConsole:
     }
 
     async def _cmd_alerts(self, args: list[str]) -> None:
-        db = self._get_db()
-        if not db:
-            self._error("Database not initialized")
+        store = self._active_store
+        if not store:
+            self._error("Store not initialized")
             return
 
-        alerts = await db.list_alerts(acknowledged=False)
-        if not alerts:
+        findings = await store.findings.list_active(limit=100)
+        if not findings:
             self._success("No active alerts — network looks clean")
             return
 
         # Count by severity
         sev_counts: dict[str, int] = {}
-        for a in alerts:
-            sev = str(a.severity)
+        for f in findings:
+            sev = f.severity.value
             sev_counts[sev] = sev_counts.get(sev, 0) + 1
 
-        self._section("Active Alerts", f"{len(alerts)} unacknowledged")
+        self._section("Active Alerts", f"{len(findings)} unresolved")
 
         # Summary badges
         badges = []
@@ -1069,16 +1050,16 @@ class LeethaConsole:
         table.add_column("Message", min_width=30)
         table.add_column("Time", width=10, style="dim", justify="right")
 
-        for a in alerts:
-            sev = str(a.severity)
+        for f in findings:
+            sev = f.severity.value
             sev_display = self._SEVERITY_ICONS.get(sev, sev.upper())
-            time_str = a.timestamp.strftime("%H:%M:%S") if a.timestamp else ""
+            time_str = f.timestamp.strftime("%H:%M:%S") if f.timestamp else ""
 
             table.add_row(
                 sev_display,
-                str(a.alert_type),
-                a.device_mac,
-                a.message,
+                f.rule.value,
+                f.hw_addr,
+                f.message,
                 time_str,
             )
 
@@ -1091,11 +1072,10 @@ class LeethaConsole:
 
         device_count = 0
         alert_count = 0
-        db = self._get_db()
-        if db:
-            device_count = await db.get_identity_count()
-            alerts = await db.list_alerts(acknowledged=False)
-            alert_count = len(alerts)
+        store = self._active_store
+        if store:
+            device_count = await store.hosts.count()
+            alert_count = await store.findings.count_active()
 
         self._section("System Status")
 
