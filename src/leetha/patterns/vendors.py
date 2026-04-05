@@ -5827,7 +5827,7 @@ GOOGLE_MAC_PREFIXES: Dict[str, Tuple[str, str, Optional[str]]] = {
     "1C:F2:9A": ("smart_speaker", "IoT", "Google Home"),
     "20:DF:B9": ("smart_speaker", "IoT", "Google Nest"),
     "30:FD:38": ("smart_speaker", "IoT", "Google Home"),
-    "44:07:0B": ("router", "Network Equipment", "Google Nest WiFi"),
+    "44:07:0B": ("smart_speaker", "IoT", "Google"),  # Shared OUI: Nest WiFi, Chromecast, Home — let mDNS refine
     "48:D6:D5": ("smart_speaker", "IoT", "Google Home"),
     "54:60:09": ("router", "Network Equipment", "Google Wifi"),
     "94:EB:2C": ("smart_speaker", "IoT", "Google Home"),
@@ -7207,7 +7207,7 @@ ASUS_MAC_PREFIXES: Dict[str, Tuple[str, str, Optional[str]]] = {
     "88:D7:F6": ("computer", "Computer", "ASUS"),
     "90:E6:BA": ("router", "Network Equipment", "ASUS Router"),
     "9C:5C:8E": ("computer", "Computer", "ASUS"),
-    "A0:36:BC": ("router", "Network Equipment", "ASUS Router"),
+    "A0:36:BC": ("computer", "Computer", "ASUS"),  # Shared OUI: routers + laptops/Chromebooks
     "A0:AD:9F": ("router", "Network Equipment", "ASUS Router"),
     "A8:5E:45": ("router", "Network Equipment", "ASUS Router"),
     "AC:22:0B": ("computer", "Computer", "ASUS"),
@@ -9018,7 +9018,7 @@ RING_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
 
 # LUTRON (Lighting Control)
 LUTRON_MAC_PREFIXES: Dict[str, Tuple[str, str, Optional[str]]] = {
-    # REMOVED: 00:17:7C - IEEE assigns to Unknown, not LUTRON
+    "00:0F:E7": ("smart_home", "Smart Home", "Lutron"),  # IEEE-assigned to Lutron Electronics
     "AC:63:FE": ("lighting_controller", "Smart Home", "Lutron Device"),
 }
 
