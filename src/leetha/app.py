@@ -458,10 +458,22 @@ class LeethaApp:
 
     async def _on_verdict_event(self, hw_addr, verdict, packet):
         """Emit WebSocket event after verdict computed."""
+        # Include packet info for the console live stream
+        packet_info = None
+        if packet:
+            packet_info = {
+                "protocol": packet.protocol,
+                "src_mac": packet.hw_addr,
+                "src_ip": packet.ip_addr,
+                "dst_ip": getattr(packet, "target_ip", None),
+                "fields": packet.fields,
+                "interface": packet.interface,
+            }
         event = {
             "type": "device_update",
             "mac": hw_addr,
             "verdict": verdict.to_dict() if hasattr(verdict, "to_dict") else {},
+            "packet": packet_info,
         }
         for sub in self.event_subscribers:
             try:

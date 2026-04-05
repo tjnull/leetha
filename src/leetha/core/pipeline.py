@@ -14,6 +14,7 @@ from datetime import datetime
 from leetha.capture.packets import CapturedPacket
 from leetha.evidence.models import Evidence, Verdict
 from leetha.evidence.engine import VerdictEngine
+from leetha.fingerprint.lookup import FingerprintLookup
 from leetha.processors.registry import get_processor, get_all_processors
 from leetha.rules.registry import get_all_rules
 from leetha.store.models import Host, Sighting
@@ -36,6 +37,7 @@ class Pipeline:
         self._on_arp = on_arp                  # async(packet)
         self._on_dhcp = on_dhcp                # callable(packet) -- sync fire-and-forget
         self._on_gateway_hint = on_gateway_hint  # async(mac, ip, source, interface)
+        self._lookup = FingerprintLookup()
         self._evidence_buffer: dict[str, list[Evidence]] = defaultdict(list)
         self._batch_queue: list = []
         self._processor_instances: dict[str, object] = {}
@@ -109,6 +111,22 @@ class Pipeline:
             return
 
         if not evidence_list:
+            evidence_list = []
+
+        # Enrich with MAC OUI lookup (runs on every packet)
+        mac_matches = self._lookup.match_mac(packet.hw_addr)
+        for match in mac_matches:
+            evidence_list.append(self._match_to_evidence(match))
+
+        # Protocol-specific fingerprint lookups
+        try:
+            fp_matches = self._fingerprint_lookup(protocol, packet)
+            for match in fp_matches:
+                evidence_list.append(self._match_to_evidence(match))
+        except Exception:
+            logger.debug("Fingerprint lookup failed for %s", protocol, exc_info=True)
+
+        if not evidence_list:
             return
 
         hw_addr = packet.hw_addr
@@ -154,6 +172,119 @@ class Pipeline:
                     await self.store.findings.add(finding)
             except Exception:
                 logger.debug("Rule %s failed", type(rule).__name__, exc_info=True)
+
+    def _fingerprint_lookup(self, protocol: str, packet: CapturedPacket) -> list:
+        """Run protocol-specific fingerprint database lookups.
+
+        These supplement the processor's raw evidence with identifications
+        from the 11.5M signature databases (IEEE OUI, Huginn, p0f, etc.).
+        """
+        data = packet.fields
+        hits: list = []
+
+        if protocol == "dhcpv4":
+            hits.extend(self._lookup.match_dhcp(
+                opt55=data.get("opt55"),
+                opt60=data.get("opt60"),
+            ))
+            hostname = data.get("hostname")
+            if hostname:
+                m = self._lookup.match_hostname(hostname)
+                if m:
+                    hits.append(m)
+
+        elif protocol == "dhcpv6":
+            hits.extend(self._lookup.match_dhcpv6(
+                oro=data.get("oro"),
+                vendor_class=data.get("vendor_class"),
+                enterprise_id=data.get("enterprise_id"),
+            ))
+
+        elif protocol == "mdns":
+            hits.extend(self._lookup.match_mdns_service(
+                service_type=data.get("service_type", ""),
+                name=data.get("name"),
+                packet_data=data,
+            ))
+
+        elif protocol == "ssdp":
+            m = self._lookup.match_ssdp_server(
+                server=data.get("server"),
+                st=data.get("st"),
+            )
+            if m:
+                hits.append(m)
+
+        elif protocol == "http_useragent":
+            ua = data.get("user_agent", "")
+            if ua:
+                m = self._lookup.match_user_agent(ua)
+                if m:
+                    hits.append(m)
+
+        elif protocol == "tcp_syn":
+            ttl = data.get("ttl", 0)
+            if ttl:
+                m = self._lookup.match_ttl(ttl)
+                if m:
+                    hits.append(m)
+            sig = f"{data.get('ttl', 0)}:{data.get('window_size', 0)}:{data.get('mss', '*')}:{data.get('tcp_options', '')}"
+            m = self._lookup.match_tcp_signature(sig)
+            if m:
+                hits.append(m)
+
+        elif protocol == "dns":
+            qname = data.get("query_name", "")
+            if qname:
+                m = self._lookup.match_dns_query(qname, data.get("query_type", 1))
+                if m:
+                    hits.append(m)
+
+        elif protocol == "netbios":
+            m = self._lookup.match_netbios(
+                query_name=data.get("query_name", ""),
+                query_type=data.get("query_type", "llmnr"),
+                netbios_suffix=data.get("netbios_suffix"),
+            )
+            if m:
+                hits.append(m)
+
+        elif protocol == "service_banner":
+            service = data.get("service", "")
+            banner = data.get("raw_banner", "")
+            if service and banner:
+                m = self._lookup.match_banner(protocol=service, banner_text=banner)
+                if m:
+                    hits.append(m)
+
+        elif protocol == "tls":
+            ja3 = data.get("ja3_hash")
+            if ja3:
+                m = self._lookup.match_ja3(ja3)
+                if m:
+                    hits.append(m)
+            sni = data.get("sni")
+            if sni:
+                m = self._lookup.lookup_tls_sni(sni)
+                if m:
+                    hits.append(m)
+
+        return hits
+
+    @staticmethod
+    def _match_to_evidence(match) -> Evidence:
+        """Convert a FingerprintMatch to an Evidence object."""
+        return Evidence(
+            source=match.source,
+            method=match.match_type,
+            certainty=match.confidence,
+            category=match.device_type or match.category,
+            vendor=match.manufacturer or match.vendor,
+            platform=match.os_family,
+            platform_version=match.os_version,
+            model=match.model,
+            raw=match.raw_data,
+        )
 
     async def process_batch(self, packets: list[CapturedPacket]) -> None:
         """Process multiple packets. Can be parallelized in future."""
