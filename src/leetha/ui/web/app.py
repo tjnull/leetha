@@ -1306,42 +1306,48 @@ async def get_capture_visibility():
 async def get_capture_health():
     """Diagnostic: overall capture health and protocol coverage."""
     try:
+        conn = app_instance.store.connection
+
         # Protocol counts in last hour
-        rows = await app_instance.db.execute_readonly_query(
-            "SELECT source_type, COUNT(*) as cnt FROM observations "
+        cursor = await conn.execute(
+            "SELECT source, COUNT(*) as cnt FROM sightings "
             "WHERE timestamp > datetime('now', '-1 hour') "
-            "GROUP BY source_type ORDER BY cnt DESC"
+            "GROUP BY source ORDER BY cnt DESC"
         )
-        recent_protocols = {r[0]: r[1] for r in rows.get("rows", [])}
+        proto_rows = await cursor.fetchall()
+        recent_protocols = {r[0]: r[1] for r in proto_rows}
 
         # Total device count
-        total_devices = await app_instance.db.get_identity_count()
+        total_devices = await app_instance.store.hosts.count()
 
         # Devices with only ARP evidence
-        arp_only_rows = await app_instance.db.execute_readonly_query(
-            "SELECT COUNT(DISTINCT device_mac) FROM observations "
-            "WHERE device_mac NOT IN ("
-            "  SELECT DISTINCT device_mac FROM observations WHERE source_type != 'arp' AND source_type != 'ip_observed'"
+        cursor = await conn.execute(
+            "SELECT COUNT(DISTINCT hw_addr) FROM sightings "
+            "WHERE hw_addr NOT IN ("
+            "  SELECT DISTINCT hw_addr FROM sightings WHERE source != 'arp' AND source != 'ip_observed'"
             ")"
         )
-        arp_only_count = arp_only_rows["rows"][0][0] if arp_only_rows.get("rows") else 0
+        row = await cursor.fetchone()
+        arp_only_count = row[0] if row else 0
 
         # Devices with high evidence (3+ sources)
-        rich_rows = await app_instance.db.execute_readonly_query(
+        cursor = await conn.execute(
             "SELECT COUNT(*) FROM ("
-            "  SELECT device_mac, COUNT(DISTINCT source_type) as src_count FROM observations "
-            "  GROUP BY device_mac HAVING src_count >= 3"
+            "  SELECT hw_addr, COUNT(DISTINCT source) as src_count FROM sightings "
+            "  GROUP BY hw_addr HAVING src_count >= 3"
             ")"
         )
-        rich_count = rich_rows["rows"][0][0] if rich_rows.get("rows") else 0
+        row = await cursor.fetchone()
+        rich_count = row[0] if row else 0
 
         # VLAN detection: devices seen on multiple subnets
-        multi_subnet_rows = await app_instance.db.execute_readonly_query(
-            "SELECT mac, GROUP_CONCAT(DISTINCT ip_v4) as ips FROM devices "
-            "WHERE ip_v4 IS NOT NULL GROUP BY mac "
-            "HAVING COUNT(DISTINCT SUBSTR(ip_v4, 1, INSTR(ip_v4, '.') + INSTR(SUBSTR(ip_v4, INSTR(ip_v4, '.') + 1), '.'))) > 1"
+        cursor = await conn.execute(
+            "SELECT hw_addr, GROUP_CONCAT(DISTINCT ip_addr) as ips FROM hosts "
+            "WHERE ip_addr IS NOT NULL GROUP BY hw_addr "
+            "HAVING COUNT(DISTINCT SUBSTR(ip_addr, 1, INSTR(ip_addr, '.') + INSTR(SUBSTR(ip_addr, INSTR(ip_addr, '.') + 1), '.'))) > 1"
         )
-        multi_subnet_devices = len(multi_subnet_rows.get("rows", []))
+        multi_subnet_rows = await cursor.fetchall()
+        multi_subnet_devices = len(multi_subnet_rows)
 
         issues = []
         if "mdns" not in recent_protocols:
@@ -1373,21 +1379,31 @@ async def get_device_observations(mac: str, limit: int = 50, offset: int = 0):
     mac = _validate_mac(mac)
     if not mac:
         return JSONResponse(status_code=400, content={"error": "Invalid MAC address format"})
-    observations = await app_instance.db.get_observations(mac, limit=limit)
-    total = await app_instance.db.get_observation_count(mac)
+    try:
+        sightings = await app_instance.store.sightings.for_host(mac, limit=limit)
+        # Get total count
+        conn = app_instance.store.connection
+        cursor = await conn.execute(
+            "SELECT COUNT(*) FROM sightings WHERE hw_addr = ?", (mac,)
+        )
+        row = await cursor.fetchone()
+        total = row[0] if row else 0
+    except Exception:
+        sightings = []
+        total = 0
+
+    observations = [
+        {
+            "source_type": s.source,
+            "timestamp": s.timestamp.isoformat() if hasattr(s.timestamp, 'isoformat') else str(s.timestamp),
+            "raw_data": s.payload,
+            "certainty": s.certainty,
+        }
+        for s in sightings
+    ]
 
     return {
-        "observations": [
-            {
-                "id": o.id,
-                "timestamp": o.timestamp.isoformat(),
-                "source_type": o.source_type,
-                "raw_data": o.raw_data,
-                "match_result": o.match_result,
-                "confidence": o.confidence,
-            }
-            for o in observations
-        ],
+        "observations": observations,
         "total": total,
         "has_more": (offset + limit) < total,
     }
@@ -1399,7 +1415,17 @@ async def get_device_activity(mac: str):
     mac = _validate_mac(mac)
     if not mac:
         return JSONResponse(status_code=400, content={"error": "Invalid MAC address format"})
-    activity = await app_instance.db.get_device_activity_24h(mac)
+    try:
+        conn = app_instance.store.connection
+        cursor = await conn.execute(
+            "SELECT strftime('%H', timestamp) as hour, COUNT(*) as cnt "
+            "FROM sightings WHERE hw_addr = ? AND timestamp > datetime('now', '-24 hours') "
+            "GROUP BY hour ORDER BY hour",
+            (mac,))
+        rows = await cursor.fetchall()
+        activity = {row[0]: row[1] for row in rows}
+    except Exception:
+        activity = {}
     return {"hourly_counts": activity}
 
 
@@ -1484,7 +1510,10 @@ async def _get_cached_attack_surface():
         from leetha.analysis.attack_surface import analyze_attack_surface
         data_dir = getattr(app_instance.config, "data_dir", None)
         interface = getattr(app_instance.config, "interface", None)
-        _attack_surface_cache = await analyze_attack_surface(app_instance.db, data_dir, interface=interface)
+        try:
+            _attack_surface_cache = await analyze_attack_surface(app_instance.db, data_dir, interface=interface)
+        except Exception:
+            _attack_surface_cache = {"chains": [], "services": [], "summary": {}}
         _attack_surface_cache_ts = now
     return _attack_surface_cache
 
@@ -2198,12 +2227,16 @@ async def api_device_type_stats():
 async def api_activity_stats():
     """24-hour packet activity for dashboard timeline."""
     try:
-        rows = await app_instance.db.execute_readonly_query(
-            "SELECT strftime('%H', timestamp) as hour, COUNT(*) as cnt FROM observations WHERE timestamp > datetime('now', '-24 hours') GROUP BY hour ORDER BY hour"
+        conn = app_instance.store.connection
+        cursor = await conn.execute(
+            "SELECT strftime('%H', timestamp) as hour, COUNT(*) as cnt "
+            "FROM sightings WHERE timestamp > datetime('now', '-24 hours') "
+            "GROUP BY hour ORDER BY hour"
         )
+        rows = await cursor.fetchall()
         # Build 24-element array
         counts = [0] * 24
-        for r in rows.get("rows", []):
+        for r in rows:
             try:
                 h = int(r[0])
                 counts[h] = r[1]
@@ -2240,12 +2273,14 @@ async def api_filter_options():
 async def api_protocol_stats():
     """Protocol distribution for dashboard pie chart."""
     try:
-        rows = await app_instance.db.execute_readonly_query(
-            "SELECT COALESCE(source_type, 'unknown') as proto, COUNT(*) as cnt "
-            "FROM observations WHERE timestamp > datetime('now', '-24 hours') "
+        conn = app_instance.store.connection
+        cursor = await conn.execute(
+            "SELECT COALESCE(source, 'unknown') as proto, COUNT(*) as cnt "
+            "FROM sightings WHERE timestamp > datetime('now', '-24 hours') "
             "GROUP BY proto ORDER BY cnt DESC LIMIT 15"
         )
-        return {"protocols": [{"protocol": r[0], "count": r[1]} for r in rows.get("rows", [])]}
+        rows = await cursor.fetchall()
+        return {"protocols": [{"protocol": r[0], "count": r[1]} for r in rows]}
     except Exception:
         return {"protocols": []}
 
@@ -2338,19 +2373,21 @@ async def api_new_devices_timeline():
 async def api_top_connections():
     """Top source→destination IP pairs by observation count."""
     try:
-        rows = await app_instance.db.execute_readonly_query(
+        conn = app_instance.store.connection
+        cursor = await conn.execute(
             "SELECT "
-            "  COALESCE(json_extract(raw_data, '$.src_ip'), 'unknown') as src, "
-            "  COALESCE(json_extract(raw_data, '$.dst_ip'), json_extract(raw_data, '$.target_ip'), 'unknown') as dst, "
+            "  COALESCE(json_extract(payload, '$.src_ip'), 'unknown') as src, "
+            "  COALESCE(json_extract(payload, '$.dst_ip'), json_extract(payload, '$.target_ip'), 'unknown') as dst, "
             "  COUNT(*) as cnt "
-            "FROM observations "
+            "FROM sightings "
             "WHERE timestamp > datetime('now', '-24 hours') "
-            "  AND json_extract(raw_data, '$.src_ip') IS NOT NULL "
-            "  AND (json_extract(raw_data, '$.dst_ip') IS NOT NULL OR json_extract(raw_data, '$.target_ip') IS NOT NULL) "
+            "  AND json_extract(payload, '$.src_ip') IS NOT NULL "
+            "  AND (json_extract(payload, '$.dst_ip') IS NOT NULL OR json_extract(payload, '$.target_ip') IS NOT NULL) "
             "GROUP BY src, dst "
             "ORDER BY cnt DESC LIMIT 20"
         )
-        return {"connections": [{"src": r[0], "dst": r[1], "count": r[2]} for r in rows.get("rows", [])]}
+        rows = await cursor.fetchall()
+        return {"connections": [{"src": r[0], "dst": r[1], "count": r[2]} for r in rows]}
     except Exception:
         return {"connections": []}
 
