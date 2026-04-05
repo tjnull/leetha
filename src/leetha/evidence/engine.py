@@ -15,6 +15,10 @@ logger = logging.getLogger(__name__)
 
 # Source reliability weights — how much we trust each evidence source
 _SOURCE_WEIGHTS: dict[str, float] = {
+    # MAC OUI identification — highest reliability
+    "oui": 0.90,
+    "huginn_mac": 0.85,
+    # Infrastructure protocols
     "lldp": 0.95,
     "cdp": 0.95,
     "snmp": 0.90,
@@ -80,8 +84,8 @@ _AGREEMENT_BONUS = {1: 1.0, 2: 1.1, 3: 1.2, 4: 1.25}
 
 def cap_evidence(
     evidence: list[Evidence],
-    max_per_source: int = 20,
-    max_total: int = 200,
+    max_per_source: int = 3,
+    max_total: int = 100,
 ) -> list[Evidence]:
     """Keep the most recent N evidence items per source, capped at max_total."""
     if not evidence:

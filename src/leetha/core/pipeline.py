@@ -39,6 +39,8 @@ class Pipeline:
         self._on_gateway_hint = on_gateway_hint  # async(mac, ip, source, interface)
         self._lookup = FingerprintLookup()
         self._evidence_buffer: dict[str, list[Evidence]] = defaultdict(list)
+        self._oui_vendors: dict[str, str] = {}  # MAC -> OUI vendor name
+        self._lookup_done: set = set()  # (MAC, protocol) pairs already looked up
         self._batch_queue: list = []
         self._processor_instances: dict[str, object] = {}
         self._rule_instances: list = []
@@ -113,23 +115,42 @@ class Pipeline:
         if not evidence_list:
             evidence_list = []
 
-        # Enrich with MAC OUI lookup (runs on every packet)
-        mac_matches = self._lookup.match_mac(packet.hw_addr)
-        for match in mac_matches:
-            evidence_list.append(self._match_to_evidence(match))
+        hw_addr = packet.hw_addr
 
-        # Protocol-specific fingerprint lookups
-        try:
-            fp_matches = self._fingerprint_lookup(protocol, packet)
-            for match in fp_matches:
+        # Enrich with MAC OUI lookup (only on first sighting per MAC)
+        if hw_addr not in self._evidence_buffer:
+            mac_matches = self._lookup.match_mac(hw_addr)
+            for match in mac_matches:
                 evidence_list.append(self._match_to_evidence(match))
-        except Exception:
-            logger.debug("Fingerprint lookup failed for %s", protocol, exc_info=True)
+            # Cache OUI vendor for cross-validation
+            oui_hit = next((m for m in mac_matches if m.source == "oui"), None)
+            if oui_hit and oui_hit.manufacturer:
+                self._oui_vendors[hw_addr] = oui_hit.manufacturer
+
+        # Protocol-specific fingerprint lookups (once per protocol per MAC)
+        lookup_key = (hw_addr, protocol)
+        if lookup_key not in self._lookup_done:
+            self._lookup_done.add(lookup_key)
+            try:
+                fp_matches = self._fingerprint_lookup(protocol, packet)
+                for match in fp_matches:
+                    evidence_list.append(self._match_to_evidence(match))
+            except Exception:
+                logger.debug("Fingerprint lookup failed for %s", protocol, exc_info=True)
+
+        # Cross-validate: if mDNS evidence vendor conflicts with OUI vendor,
+        # lower certainty. Prevents forwarded mDNS from overriding gateway identity.
+        oui_vendor = self._oui_vendors.get(hw_addr)
+        if oui_vendor:
+            for ev in evidence_list:
+                if (ev.vendor and ev.vendor != oui_vendor
+                        and ev.source in ("mdns_service", "mdns_exclusive", "mdns",
+                                          "mdns_txt", "mdns_name")
+                        and oui_vendor.lower() not in (ev.vendor or "").lower()):
+                    ev.certainty = min(ev.certainty, 0.30)
 
         if not evidence_list:
             return
-
-        hw_addr = packet.hw_addr
 
         # 2. Record sighting
         sighting = Sighting(

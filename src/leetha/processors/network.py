@@ -51,9 +51,11 @@ class NetworkDiscoveryProcessor(Processor):
             from leetha.patterns.matching import match_hostname
             host_match = match_hostname(hostname)
             if host_match:
+                raw_conf = host_match.get("confidence", 75)
+                cert = raw_conf / 100.0 if raw_conf > 1 else raw_conf
                 evidence.append(Evidence(
                     source="hostname", method="pattern",
-                    certainty=host_match.get("confidence", 0.75),
+                    certainty=cert,
                     vendor=host_match.get("manufacturer"),
                     category=host_match.get("device_type"),
                     platform=host_match.get("os_family"),
@@ -71,9 +73,11 @@ class NetworkDiscoveryProcessor(Processor):
             from leetha.patterns.matching import match_dhcp_opt60
             opt60_match = match_dhcp_opt60(opt60)
             if opt60_match:
+                raw_conf = opt60_match.get("confidence", 80)
+                cert = raw_conf / 100.0 if raw_conf > 1 else raw_conf
                 evidence.append(Evidence(
                     source="dhcpv4_vendor", method="pattern",
-                    certainty=opt60_match.get("confidence", 0.80),
+                    certainty=cert,
                     vendor=opt60_match.get("manufacturer"),
                     category=opt60_match.get("device_type"),
                     platform=opt60_match.get("os_family"),

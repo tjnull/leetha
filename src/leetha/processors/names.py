@@ -173,9 +173,11 @@ class NameResolutionProcessor(Processor):
                 from leetha.patterns.matching import match_mdns_service
                 mdns_match = match_mdns_service(service_type, name)
                 if mdns_match:
+                    raw_conf = mdns_match.get("confidence", 70)
+                    cert = raw_conf / 100.0 if raw_conf > 1 else raw_conf
                     evidence.append(Evidence(
                         source="mdns_service", method="pattern",
-                        certainty=mdns_match.get("confidence", 0.70),
+                        certainty=cert,
                         vendor=mdns_match.get("manufacturer"),
                         category=mdns_match.get("device_type"),
                         platform=mdns_match.get("os_family"),
@@ -219,9 +221,11 @@ class NameResolutionProcessor(Processor):
             from leetha.patterns.matching import match_hostname
             host_match = match_hostname(query_name)
             if host_match:
+                raw_conf = host_match.get("confidence", 65)
+                cert = raw_conf / 100.0 if raw_conf > 1 else raw_conf
                 evidence.append(Evidence(
                     source="netbios", method="pattern",
-                    certainty=host_match.get("confidence", 0.65),
+                    certainty=cert,
                     vendor=host_match.get("manufacturer"),
                     category=host_match.get("device_type"),
                     platform=host_match.get("os_family"),
@@ -244,9 +248,11 @@ class NameResolutionProcessor(Processor):
             from leetha.patterns.matching import match_ssdp_server
             ssdp_match = match_ssdp_server(server)
             if ssdp_match:
+                raw_conf = ssdp_match.get("confidence", 65)
+                cert = raw_conf / 100.0 if raw_conf > 1 else raw_conf
                 evidence.append(Evidence(
                     source="ssdp_server", method="pattern",
-                    certainty=ssdp_match.get("confidence", 0.65),
+                    certainty=cert,
                     vendor=ssdp_match.get("manufacturer"),
                     category=ssdp_match.get("device_type"),
                     platform=ssdp_match.get("os_family"),
