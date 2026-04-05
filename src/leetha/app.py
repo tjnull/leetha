@@ -335,6 +335,7 @@ class LeethaApp:
 
     async def _process_loop(self):
         """Single-worker packet processing loop using new Pipeline."""
+        error_count = 0
         try:
             while self._running:
                 try:
@@ -344,7 +345,10 @@ class LeethaApp:
                 try:
                     await self.pipeline.process(packet)
                 except Exception:
-                    logger.debug("Pipeline processing failed", exc_info=True)
+                    error_count += 1
+                    if error_count <= 5 or error_count % 100 == 0:
+                        logger.warning("Pipeline error #%d processing %s",
+                                      error_count, packet.protocol, exc_info=True)
         except asyncio.CancelledError:
             return
 

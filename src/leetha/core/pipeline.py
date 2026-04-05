@@ -152,17 +152,20 @@ class Pipeline:
         if not evidence_list:
             return
 
-        # 2. Record sighting
-        sighting = Sighting(
-            hw_addr=hw_addr,
-            source=protocol,
-            payload=packet.fields,
-            analysis={"evidence_count": len(evidence_list)},
-            certainty=max((e.certainty for e in evidence_list), default=0.0),
-            interface=packet.interface,
-            network=packet.network,
-        )
-        await self.store.sightings.record(sighting)
+        # 2. Record sighting (non-fatal if it fails)
+        try:
+            sighting = Sighting(
+                hw_addr=hw_addr,
+                source=protocol,
+                payload=packet.fields,
+                analysis={"evidence_count": len(evidence_list)},
+                certainty=max((e.certainty for e in evidence_list), default=0.0),
+                interface=packet.interface,
+                network=packet.network,
+            )
+            await self.store.sightings.record(sighting)
+        except Exception:
+            logger.debug("Sighting record failed", exc_info=True)
 
         # 3. Accumulate evidence and compute verdict
         self._evidence_buffer[hw_addr].extend(evidence_list)
