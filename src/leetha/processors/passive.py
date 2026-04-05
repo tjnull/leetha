@@ -18,9 +18,13 @@ class PassiveObserverProcessor(Processor):
         ttl_os_hint = packet.get("ttl_os_hint")
 
         if ttl is not None:
-            os_hint = ttl_os_hint or self._ttl_os_hint(ttl)
+            # Use our own TTL analysis, not the parser's overly-broad hint.
+            # TTL 64 is shared by Linux, macOS, iOS, Android, FreeBSD —
+            # too ambiguous to label as any specific OS.
+            os_hint = self._ttl_os_hint(ttl)
             evidence.append(Evidence(
-                source="ip_observed_ttl", method="heuristic", certainty=0.40,
+                source="ip_observed_ttl", method="heuristic",
+                certainty=0.40 if os_hint else 0.15,
                 platform=os_hint,
                 raw={"ttl": ttl, "os_hint": os_hint},
             ))
