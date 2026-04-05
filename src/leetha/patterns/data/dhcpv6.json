@@ -120,7 +120,7 @@
     },
     {
       "match": "^udhcp",
-      "category": "router",
+      "category": "iot",
       "vendor": null,
       "certainty": "Linux (Embedded)"
     },

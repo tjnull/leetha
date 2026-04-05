@@ -54,7 +54,7 @@ ZYXEL_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
     (r"VMG\d+", "ZyXEL VMG Router", "router", "Firmware"),
     (r"LTE\d+", "ZyXEL LTE Router", "router", "Firmware"),
     # Generic
-    (r"ZyXEL", "ZyXEL Device", "router", None),
+    (r"ZyXEL", "ZyXEL Device", "network_device", None),
 ]
 
 
@@ -172,7 +172,7 @@ DLINK_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
     (r"DNS-\d+", "D-Link DNS NAS", "nas", "Firmware"),
     (r"DNR-\d+", "D-Link DNR NVR", "nvr", "Firmware"),
     # Generic
-    (r"D-Link", "D-Link Device", "router", None),
+    (r"D-Link", "D-Link Device", "network_device", None),
 ]
 
 
@@ -208,24 +208,24 @@ LINKSYS_MAC_PREFIXES: Dict[str, Tuple[str, str, Optional[str]]] = {
     "C8:B3:73": ("network_device", "Network Equipment", "Linksys"),
     "C8:D7:19": ("network_device", "Network Equipment", "Linksys"),
     # Belkin International (IEEE MA-L) — Linksys parent company
-    "00:17:3F": ("router", "Network Equipment", "Linksys/Belkin"),
-    "00:1C:DF": ("router", "Network Equipment", "Linksys/Belkin"),
-    "00:22:75": ("router", "Network Equipment", "Linksys/Belkin"),
-    "08:86:3B": ("router", "Network Equipment", "Linksys/Belkin"),
-    "14:91:82": ("router", "Network Equipment", "Linksys/Belkin"),
-    "24:F5:A2": ("router", "Network Equipment", "Linksys/Belkin"),
-    "30:23:03": ("router", "Network Equipment", "Linksys/Belkin"),
-    "58:EF:68": ("router", "Network Equipment", "Linksys/Belkin"),
-    "60:38:E0": ("router", "Network Equipment", "Linksys/Belkin"),
-    "80:69:1A": ("router", "Network Equipment", "Linksys/Belkin"),
-    "94:10:3E": ("router", "Network Equipment", "Linksys/Belkin"),
-    "94:44:52": ("router", "Network Equipment", "Linksys/Belkin"),
-    "B4:75:0E": ("router", "Network Equipment", "Linksys/Belkin"),
-    "C0:56:27": ("router", "Network Equipment", "Linksys/Belkin"),
-    "C4:41:1E": ("router", "Network Equipment", "Linksys/Belkin"),
-    "D8:EC:5E": ("router", "Network Equipment", "Linksys/Belkin"),
-    "E8:9F:80": ("router", "Network Equipment", "Linksys/Belkin"),
-    "EC:1A:59": ("router", "Network Equipment", "Linksys/Belkin"),
+    "00:17:3F": ("network_device", "Network Equipment", "Linksys/Belkin"),
+    "00:1C:DF": ("network_device", "Network Equipment", "Linksys/Belkin"),
+    "00:22:75": ("network_device", "Network Equipment", "Linksys/Belkin"),
+    "08:86:3B": ("network_device", "Network Equipment", "Linksys/Belkin"),
+    "14:91:82": ("network_device", "Network Equipment", "Linksys/Belkin"),
+    "24:F5:A2": ("network_device", "Network Equipment", "Linksys/Belkin"),
+    "30:23:03": ("network_device", "Network Equipment", "Linksys/Belkin"),
+    "58:EF:68": ("network_device", "Network Equipment", "Linksys/Belkin"),
+    "60:38:E0": ("network_device", "Network Equipment", "Linksys/Belkin"),
+    "80:69:1A": ("network_device", "Network Equipment", "Linksys/Belkin"),
+    "94:10:3E": ("network_device", "Network Equipment", "Linksys/Belkin"),
+    "94:44:52": ("network_device", "Network Equipment", "Linksys/Belkin"),
+    "B4:75:0E": ("network_device", "Network Equipment", "Linksys/Belkin"),
+    "C0:56:27": ("network_device", "Network Equipment", "Linksys/Belkin"),
+    "C4:41:1E": ("network_device", "Network Equipment", "Linksys/Belkin"),
+    "D8:EC:5E": ("network_device", "Network Equipment", "Linksys/Belkin"),
+    "E8:9F:80": ("network_device", "Network Equipment", "Linksys/Belkin"),
+    "EC:1A:59": ("network_device", "Network Equipment", "Linksys/Belkin"),
 }
 
 LINKSYS_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
@@ -245,7 +245,7 @@ LINKSYS_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
     # Switches
     (r"LGS\d+", "Linksys LGS Switch", "switch", "Firmware"),
     # Generic
-    (r"Linksys", "Linksys Device", "router", None),
+    (r"Linksys", "Linksys Device", "network_device", None),
 ]
 
 
@@ -331,7 +331,7 @@ BUFFALO_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
     (r"LS\d{3}", "Buffalo LinkStation", "nas", "Firmware"),
     (r"TS\d{4}", "Buffalo TeraStation", "nas", "Firmware"),
     # Generic
-    (r"Buffalo", "Buffalo Device", "router", None),
+    (r"Buffalo", "Buffalo Device", "network_device", None),
 ]
 
 
@@ -9862,13 +9862,13 @@ FUJITSU_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
 HUAWEI_MAC_PREFIXES: Dict[str, Tuple[str, str, Optional[str]]] = {
     # Huawei networking equipment
     "00:18:82": ("switch", "Network Equipment", "Huawei Switch"),
-    "00:1E:10": ("router", "Network Equipment", "Huawei Router"),
-    "00:25:9E": ("router", "Network Equipment", "Huawei Router"),
+    "00:1E:10": ("network_device", "Network Equipment", "Huawei"),
+    "00:25:9E": ("network_device", "Network Equipment", "Huawei"),
     "20:F3:A3": ("access_point", "Network Equipment", "Huawei AP"),
     "34:6B:D3": ("switch", "Network Equipment", "Huawei Switch"),
-    "48:46:FB": ("router", "Network Equipment", "Huawei Router"),
+    "48:46:FB": ("network_device", "Network Equipment", "Huawei"),
     # REMOVED: 70:7B:E8 - IEEE assigns to Unknown, not HUAWEI
-    "AC:E8:7B": ("router", "Network Equipment", "Huawei Router"),
+    "AC:E8:7B": ("network_device", "Network Equipment", "Huawei"),
     "E0:24:7F": ("access_point", "Network Equipment", "Huawei AP"),
     # Huawei mobile devices (phones, tablets)
     "00:46:4B": ("phone", "Mobile", "Huawei Phone"),
@@ -9957,24 +9957,24 @@ HUAWEI_MAC_PREFIXES: Dict[str, Tuple[str, str, Optional[str]]] = {
     "FC:48:EF": ("phone", "Mobile", "Huawei Phone"),
     # Huawei additional networking OUIs
     "00:E0:FC": ("switch", "Network Equipment", "Huawei Switch"),
-    "04:02:1F": ("router", "Network Equipment", "Huawei Router"),
+    "04:02:1F": ("network_device", "Network Equipment", "Huawei"),
     "04:BD:70": ("access_point", "Network Equipment", "Huawei AP"),
     "24:69:A5": ("switch", "Network Equipment", "Huawei Switch"),
-    "28:31:52": ("router", "Network Equipment", "Huawei Router"),
-    "40:CB:A8": ("router", "Network Equipment", "Huawei Router"),
+    "28:31:52": ("network_device", "Network Equipment", "Huawei"),
+    "40:CB:A8": ("network_device", "Network Equipment", "Huawei"),
     "4C:1F:CC": ("access_point", "Network Equipment", "Huawei AP"),
     "54:A5:1B": ("switch", "Network Equipment", "Huawei Switch"),
-    "58:60:5F": ("router", "Network Equipment", "Huawei Router"),
-    "60:DE:44": ("router", "Network Equipment", "Huawei Router"),
+    "58:60:5F": ("network_device", "Network Equipment", "Huawei"),
+    "60:DE:44": ("network_device", "Network Equipment", "Huawei"),
     "70:72:3C": ("switch", "Network Equipment", "Huawei Switch"),
-    "78:6A:89": ("router", "Network Equipment", "Huawei Router"),
+    "78:6A:89": ("network_device", "Network Equipment", "Huawei"),
     "80:FB:06": ("access_point", "Network Equipment", "Huawei AP"),
     "84:BE:52": ("switch", "Network Equipment", "Huawei Switch"),
     "D0:D0:4B": ("switch", "Network Equipment", "Huawei Switch"),
-    "D4:B1:10": ("router", "Network Equipment", "Huawei Router"),
+    "D4:B1:10": ("network_device", "Network Equipment", "Huawei"),
     "E0:97:96": ("access_point", "Network Equipment", "Huawei AP"),
     "EC:38:8F": ("switch", "Network Equipment", "Huawei Switch"),
-    "F4:4C:7F": ("router", "Network Equipment", "Huawei Router"),
+    "F4:4C:7F": ("network_device", "Network Equipment", "Huawei"),
 }
 
 HUAWEI_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [

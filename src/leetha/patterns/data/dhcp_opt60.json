@@ -36,7 +36,7 @@
   },
   {
     "pattern": "^udhcp\\s+\\d+",
-    "device_type": "router",
+    "device_type": "iot",
     "manufacturer": null,
     "os_family": "Linux (Embedded)",
     "confidence": 70

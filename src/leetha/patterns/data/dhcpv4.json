@@ -33,7 +33,7 @@
     },
     {
       "match": "^udhcp\\s+\\d+",
-      "category": "router",
+      "category": "iot",
       "vendor": null,
       "certainty": "Linux (Embedded)"
     },

@@ -260,9 +260,9 @@ _DEVICE_TYPE_NORMALIZE: dict[str, str] = {
     "industrial_switch": "switch",
     "network": "switch",
     "proxy": "server",
-    "cable_modem": "router",
+    "cable_modem": "cable_modem",
     "wireless_bridge": "access_point",
-    "wan_optimizer": "router",
+    "wan_optimizer": "network_device",
     "av_switcher": "av_switcher",
 
     # --- Firewall / Router model names (in case used as device_type) ---
@@ -1041,14 +1041,16 @@ def _normalize_device_type(dt: str | None) -> str:
                                     "ids_ips", "asa ")):
         return "firewall"
     for keyword in ("switch", "router", "gateway", "dream machine", "edgerouter",
-                    "security gateway", "cable_modem", "meraki mx"):
+                    "security gateway", "meraki mx"):
         if keyword in dt_lower:
             if "switch" in dt_lower and "dream" not in dt_lower and "av_" not in dt_lower:
                 return "switch"
             if any(k in dt_lower for k in ("router", "gateway", "dream machine",
                                             "edgerouter", "security gateway",
-                                            "cable_modem", "meraki mx")):
+                                            "meraki mx")):
                 return "router"
+    if "cable_modem" in dt_lower:
+        return "cable_modem"
     # Check for access point — but "ap" is too short and matches "laptop", "map", etc.
     # Only match if "ap" is a standalone word or part of "access_point"/"access point"
     if "access_point" in dt_lower or "access point" in dt_lower:

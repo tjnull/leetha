@@ -102,8 +102,8 @@
     {
       "pattern": "MiniUPnP[dD]?/([\\d.]+)",
       "os_version_group": 1,
-      "device_type": "router",
-      "confidence": 60
+      "device_type": "network_device",
+      "confidence": 40
     }
   ],
   "upnp_device_types": {

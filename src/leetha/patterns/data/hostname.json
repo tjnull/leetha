@@ -1121,27 +1121,27 @@
   },
   {
     "match": "^NETGEAR",
-    "category": "router",
+    "category": "network_device",
     "vendor": "Netgear",
     "platform": null,
     "model": null,
-    "certainty": 85
+    "certainty": 60
   },
   {
     "match": "^TP-Link",
-    "category": "router",
+    "category": "network_device",
     "vendor": "TP-Link",
     "platform": null,
     "model": null,
-    "certainty": 85
+    "certainty": 60
   },
   {
     "match": "^Linksys",
-    "category": "router",
+    "category": "network_device",
     "vendor": "Linksys",
     "platform": null,
     "model": null,
-    "certainty": 85
+    "certainty": 60
   },
   {
     "match": "^Aruba",
