@@ -12,6 +12,8 @@ from leetha.store.hosts import HostRepository
 from leetha.store.findings import FindingRepository
 from leetha.store.sightings import SightingRepository
 from leetha.store.verdicts import VerdictRepository
+from leetha.store.identities import IdentityRepository
+from leetha.store.snapshots import SnapshotRepository
 
 
 class Store:
@@ -24,6 +26,8 @@ class Store:
         self.findings: FindingRepository | None = None
         self.sightings: SightingRepository | None = None
         self.verdicts: VerdictRepository | None = None
+        self.identities: IdentityRepository | None = None
+        self.snapshots: SnapshotRepository | None = None
 
     async def initialize(self):
         """Open connection and create all tables."""
@@ -37,10 +41,14 @@ class Store:
         self.findings = FindingRepository(self._conn)
         self.sightings = SightingRepository(self._conn)
         self.verdicts = VerdictRepository(self._conn)
+        self.identities = IdentityRepository(self._conn)
+        self.snapshots = SnapshotRepository(self._conn)
         await self.hosts.create_tables()
         await self.findings.create_tables()
         await self.sightings.create_tables()
         await self.verdicts.create_tables()
+        await self.identities.create_tables()
+        await self.snapshots.create_tables()
 
         # Fix DB file ownership when running under sudo
         from leetha.platform import fix_ownership

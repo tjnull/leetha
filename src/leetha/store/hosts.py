@@ -23,6 +23,13 @@ class HostRepository:
                 disposition TEXT DEFAULT 'new'
             )
         """)
+        # Migration: add identity_id column for existing databases
+        try:
+            await self._conn.execute(
+                "ALTER TABLE hosts ADD COLUMN identity_id INTEGER")
+            await self._conn.commit()
+        except Exception:
+            pass  # column already exists
         await self._conn.commit()
 
     async def upsert(self, host: Host) -> None:
@@ -64,6 +71,11 @@ class HostRepository:
         return row[0]
 
     def _row_to_host(self, row) -> Host:
+        # identity_id may be missing on old databases before migration
+        try:
+            identity_id = row["identity_id"]
+        except (KeyError, IndexError):
+            identity_id = None
         return Host(
             hw_addr=row["hw_addr"],
             ip_addr=row["ip_addr"],
@@ -73,4 +85,5 @@ class HostRepository:
             mac_randomized=bool(row["mac_randomized"]),
             real_hw_addr=row["real_hw_addr"],
             disposition=row["disposition"],
+            identity_id=identity_id,
         )

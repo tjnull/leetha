@@ -241,6 +241,7 @@ class Host:
     mac_randomized: bool = False
     real_hw_addr: str | None = None
     disposition: str = "new"  # "new", "known", "self"
+    identity_id: int | None = None
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -272,3 +273,19 @@ class Sighting:
     interface: str | None = None
     network: str | None = None
     timestamp: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class Identity:
+    """A resolved device identity, grouping attributes across sightings."""
+    primary_mac: str
+    id: int | None = None
+    manufacturer: str | None = None
+    device_type: str | None = None
+    os_family: str | None = None
+    os_version: str | None = None
+    hostname: str | None = None
+    confidence: int = 0
+    fingerprint: dict = field(default_factory=dict)
+    first_seen: datetime = field(default_factory=datetime.now)
+    last_seen: datetime = field(default_factory=datetime.now)
