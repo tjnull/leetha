@@ -37,11 +37,12 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
+      - name: Create frontend dist placeholder
+        run: python -c "import pathlib; d=pathlib.Path('src/leetha/ui/web/dist'); d.mkdir(parents=True,exist_ok=True); (d/'index.html').write_text('<html></html>')"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          mkdir -p src/leetha/ui/web/dist
-          echo '<html><body>Build frontend with: cd frontend && bun install && bun run build</body></html>' > src/leetha/ui/web/dist/index.html
           pip install -e .
           pip install pytest pytest-asyncio ruff httpx
 
