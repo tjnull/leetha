@@ -118,6 +118,27 @@ export const DEVICE_TYPE_COLORS: Record<string, string> = {
   elevator_controller: "#64748b",
   // Medical
   medical_device: "#f87171",
+  // Missing infrastructure types
+  cable_modem: "#f87171",
+  network_device: "#fb923c",
+  av_switcher: "#fb923c",
+  // Missing IoT types
+  robot_vacuum: "#67e8f9",
+  smart_scale: "#67e8f9",
+  garage_controller: "#67e8f9",
+  garage_door_opener: "#67e8f9",
+  smart_blinds: "#67e8f9",
+  smart_fan: "#67e8f9",
+  smart_valve: "#67e8f9",
+  water_leak_sensor: "#67e8f9",
+  motion_sensor: "#67e8f9",
+  contact_sensor: "#67e8f9",
+  humidity_sensor: "#67e8f9",
+  air_quality_monitor: "#67e8f9",
+  smart_sprinkler: "#34d399",
+  smart_switch: "#67e8f9",
+  media_device: "#2dd4bf",
+  wireless_earbuds: "#e879f9",
 };
 
 export function getDeviceTypeColor(deviceType: string | null | undefined): string {

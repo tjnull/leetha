@@ -1849,7 +1849,7 @@ def build_topology_graph(
             try:
                 from datetime import datetime, timedelta
                 ls = datetime.fromisoformat(last_seen) if isinstance(last_seen, str) else last_seen
-                is_online = (datetime.now() - ls) < timedelta(minutes=5)
+                is_online = (datetime.now() - ls) < timedelta(minutes=30)
             except Exception:
                 pass
 
@@ -2067,6 +2067,16 @@ def build_topology_graph(
         mac = n["id"]
         conn_type = n.get("connection_type", "unknown")
         dt = (n.get("type") or "").lower()
+
+        # Self device (leetha host) — always connect to a switch on the same subnet
+        if n.get("is_self") and all_switches:
+            same_subnet_switches = [sw for sw in all_switches if device_by_mac.get(sw, {}).get("subnet") == subnet]
+            target_switch = same_subnet_switches[0] if same_subnet_switches else all_switches[0]
+            pair = tuple(sorted([target_switch, mac]))
+            if pair not in connected:
+                connected.add(pair)
+                edges.append({"source": target_switch, "target": mac, "type": "client_link"})
+            continue
 
         # LLDP-known link — always preferred
         lldp_parent = None

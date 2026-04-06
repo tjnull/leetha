@@ -497,6 +497,27 @@ export const DEVICE_ICON_MAP: Record<string, React.ComponentType<IconProps>> = {
   elevator_controller: IconIoT,
   // Medical
   medical_device: IconIoT,
+  // Missing infrastructure types
+  cable_modem: IconRouter,
+  network_device: IconSwitch,
+  av_switcher: IconSwitch,
+  // Missing IoT types
+  robot_vacuum: IconSmartHome,
+  smart_scale: IconIoT,
+  garage_controller: IconSmartHome,
+  garage_door_opener: IconSmartHome,
+  smart_blinds: IconSmartHome,
+  smart_fan: IconSmartHome,
+  smart_valve: IconIoT,
+  water_leak_sensor: IconIoT,
+  motion_sensor: IconIoT,
+  contact_sensor: IconIoT,
+  humidity_sensor: IconIoT,
+  air_quality_monitor: IconIoT,
+  smart_sprinkler: IconIoT,
+  smart_switch: IconSmartPlug,
+  media_device: IconStreamingDevice,
+  wireless_earbuds: IconWearable,
   // Catch-all
   unknown: IconUnknown,
 };
