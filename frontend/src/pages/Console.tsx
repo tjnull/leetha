@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, memo, useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { authHeaders, importPcap } from "@/lib/api";
+import { authHeaders, importPcap, fetchStats, fetchProtocolStats, fetchTopConnections } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -272,52 +272,66 @@ const ProtocolStats = memo(function ProtocolStats({ packets }: { packets: Consol
 // ═══════════════════════════════════════════
 
 function NetworkOverviewTab({ packets }: { packets: ConsolePacket[] }) {
-  const stats = useMemo(() => {
-    const proto: Record<string, number> = {};
+  const { data: statsData } = useQuery({
+    queryKey: ["console-stats"], queryFn: fetchStats,
+    staleTime: 10000, refetchInterval: 15000,
+  });
+  const { data: protoData } = useQuery({
+    queryKey: ["console-protocols"], queryFn: fetchProtocolStats,
+    staleTime: 10000, refetchInterval: 15000,
+  });
+  const { data: connData } = useQuery({
+    queryKey: ["console-connections"], queryFn: fetchTopConnections,
+    staleTime: 15000, refetchInterval: 30000,
+  });
+
+  const sessionStats = useMemo(() => {
     const srcIps: Record<string, number> = {};
     const dstIps: Record<string, number> = {};
     const srcMacs: Record<string, number> = {};
     const names: Record<string, string> = {};
-    let alerts = 0;
     for (const p of packets) {
-      proto[p.protocol] = (proto[p.protocol] ?? 0) + 1;
       srcMacs[p.src_mac] = (srcMacs[p.src_mac] ?? 0) + 1;
       if (p.src_ip) srcIps[p.src_ip] = (srcIps[p.src_ip] ?? 0) + 1;
       if (p.dst_ip) dstIps[p.dst_ip] = (dstIps[p.dst_ip] ?? 0) + 1;
       if (p.device?.hostname) names[p.src_mac] = p.device.hostname;
-      alerts += p.alerts?.length ?? 0;
     }
     return {
-      proto: Object.entries(proto).sort((a, b) => b[1] - a[1]),
       srcIps: Object.entries(srcIps).sort((a, b) => b[1] - a[1]).slice(0, 10),
       dstIps: Object.entries(dstIps).sort((a, b) => b[1] - a[1]).slice(0, 10),
       srcMacs: Object.entries(srcMacs).sort((a, b) => b[1] - a[1]).slice(0, 10),
-      names, alerts, total: packets.length,
-      hosts: new Set([...Object.keys(srcIps), ...Object.keys(dstIps)]).size,
+      names,
     };
   }, [packets]);
+
+  const protocols = protoData?.protocols ?? [];
+  const totalSightings = protocols.reduce((s, p) => s + p.count, 0);
+  const connections = connData?.connections ?? [];
 
   return (
     <div className="flex-1 overflow-y-auto p-1 space-y-4">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {[
-          ["Total Packets", stats.total], ["Unique Hosts", stats.hosts],
-          ["Protocols", stats.proto.length], ["Alerts", stats.alerts],
-        ].map(([l, v]) => (
-          <div key={l as string} className="rounded-lg bg-card border border-border p-3">
+        {([
+          ["Packets (session)", packets.length, false],
+          ["Total Sightings", totalSightings, false],
+          ["Unique Hosts", statsData?.device_count ?? 0, false],
+          ["Protocols", protocols.length, false],
+        ] as const).map(([l, v, warn]) => (
+          <div key={l} className="rounded-lg bg-card border border-border p-3">
             <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{l}</div>
-            <div className={cn("text-2xl font-bold mt-1", l === "Alerts" && (v as number) > 0 ? "text-destructive" : "")}>{v}</div>
+            <div className={cn("text-2xl font-bold mt-1", warn && (v as number) > 0 ? "text-destructive" : "")}>{v}</div>
           </div>
         ))}
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <StatsCard title="Protocol Breakdown">{stats.proto.map(([p, c]) => {
-          const pct = stats.total > 0 ? (c / stats.total) * 100 : 0;
-          return (<div key={p} className="flex items-center gap-3 mb-1.5"><span className="text-xs font-mono uppercase w-16" style={{ color: PROTO_COLORS[p] ?? "#999" }}>{p.replace("_", " ")}</span><div className="flex-1 h-1.5 bg-muted rounded-full"><div className="h-full rounded-full" style={{ width: `${pct}%`, background: PROTO_COLORS[p] ?? "#999" }} /></div><span className="text-xs w-10 text-right">{c}</span></div>);
+        <StatsCard title="Protocol Breakdown">{protocols.map((entry) => {
+          const pct = totalSightings > 0 ? (entry.count / totalSightings) * 100 : 0;
+          return (<div key={entry.protocol} className="flex items-center gap-3 mb-1.5"><span className="text-xs font-mono uppercase w-16" style={{ color: PROTO_COLORS[entry.protocol] ?? "#999" }}>{entry.protocol.replace("_", " ")}</span><div className="flex-1 h-1.5 bg-muted rounded-full"><div className="h-full rounded-full" style={{ width: `${pct}%`, background: PROTO_COLORS[entry.protocol] ?? "#999" }} /></div><span className="text-xs w-10 text-right">{entry.count}</span></div>);
         })}</StatsCard>
-        <StatsCard title="Top Source IPs">{stats.srcIps.map(([ip, c]) => (<div key={ip} className="flex justify-between text-xs mb-1"><span className="font-data">{ip}</span><span className="text-muted-foreground">{c}</span></div>))}</StatsCard>
-        <StatsCard title="Top Destination IPs">{stats.dstIps.map(([ip, c]) => (<div key={ip} className="flex justify-between text-xs mb-1"><span className="font-data">{ip}</span><span className="text-muted-foreground">{c}</span></div>))}</StatsCard>
-        <StatsCard title="Top Source MACs">{stats.srcMacs.map(([mac, c]) => (<div key={mac} className="flex justify-between text-xs mb-1 gap-2"><div><span className="font-data">{mac}</span>{stats.names[mac] && <span className="text-cyan-400 ml-2 text-[10px]">{stats.names[mac]}</span>}</div><span className="text-muted-foreground shrink-0">{c}</span></div>))}</StatsCard>
+        <StatsCard title="Top Connections">{connections.length > 0 ? connections.map((c, i) => (<div key={i} className="flex justify-between text-xs mb-1 gap-2"><span className="font-data truncate">{c.src} &rarr; {c.dst}</span><span className="text-muted-foreground shrink-0">{c.count}</span></div>)) : <span className="text-xs text-muted-foreground">No connection data yet</span>}</StatsCard>
+        <StatsCard title="Top Source IPs (session)">{sessionStats.srcIps.length > 0 ? sessionStats.srcIps.map(([ip, c]) => (<div key={ip} className="flex justify-between text-xs mb-1"><span className="font-data">{ip}</span><span className="text-muted-foreground">{c}</span></div>)) : <span className="text-xs text-muted-foreground">No packets captured this session</span>}</StatsCard>
+        <StatsCard title="Top Destination IPs (session)">{sessionStats.dstIps.length > 0 ? sessionStats.dstIps.map(([ip, c]) => (<div key={ip} className="flex justify-between text-xs mb-1"><span className="font-data">{ip}</span><span className="text-muted-foreground">{c}</span></div>)) : <span className="text-xs text-muted-foreground">No packets captured this session</span>}</StatsCard>
+        <StatsCard title="Top Source MACs (session)">{sessionStats.srcMacs.map(([mac, c]) => (<div key={mac} className="flex justify-between text-xs mb-1 gap-2"><div><span className="font-data">{mac}</span>{sessionStats.names[mac] && <span className="text-cyan-400 ml-2 text-[10px]">{sessionStats.names[mac]}</span>}</div><span className="text-muted-foreground shrink-0">{c}</span></div>))}</StatsCard>
       </div>
     </div>
   );
