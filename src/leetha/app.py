@@ -520,6 +520,7 @@ class LeethaApp:
                             f"(threshold: {max_age_days}d). Run 'leetha sync' to update.",
                 )
                 await self.store.findings.add(finding)
+                self._broadcast_finding(finding)
 
     async def _check_infra_offline(self):
         """Check for infrastructure devices gone offline using new Store."""
@@ -580,6 +581,7 @@ class LeethaApp:
                 ),
             )
             await self.store.findings.add(finding)
+            self._broadcast_finding(finding)
 
     async def _prune_sightings(self, retention_days: int = 7):
         """Delete sightings older than retention_days to prevent DB bloat."""
@@ -618,6 +620,32 @@ class LeethaApp:
                 message=f"DHCP anomaly on option '{anomaly.get('option', '?')}': {anomaly.get('reason', 'unknown')}",
             )
             await self.store.findings.add(finding)
+            self._broadcast_finding(finding)
+
+    def _broadcast_finding(self, finding):
+        """Push a finding_created event to all websocket subscribers."""
+        event = {
+            "type": "finding_created",
+            "finding": {
+                "hw_addr": finding.hw_addr,
+                "rule": finding.rule.value if hasattr(finding.rule, "value") else str(finding.rule),
+                "severity": finding.severity.value if hasattr(finding.severity, "value") else str(finding.severity),
+                "message": finding.message,
+                "timestamp": finding.timestamp.isoformat() if hasattr(finding, "timestamp") and finding.timestamp else None,
+            },
+        }
+        for sub in self.event_subscribers:
+            try:
+                sub.put_nowait(event)
+            except asyncio.QueueFull:
+                try:
+                    sub.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+                try:
+                    sub.put_nowait(event)
+                except asyncio.QueueFull:
+                    pass
 
     # Sharded pipeline (worker_count > 1)
 
@@ -735,6 +763,7 @@ class LeethaApp:
                     message=alert.message,
                 )
                 await self.store.findings.add(finding)
+                self._broadcast_finding(finding)
         except Exception:
             logger.debug("ARP spoofing check failed", exc_info=True)
 
@@ -796,6 +825,7 @@ class LeethaApp:
                     message=alert.message,
                 )
                 await self.store.findings.add(finding)
+                self._broadcast_finding(finding)
         except Exception:
             logger.debug("Device spoofing check failed", exc_info=True)
 
