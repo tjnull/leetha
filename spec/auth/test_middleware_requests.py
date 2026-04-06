@@ -1,5 +1,4 @@
 """Integration tests for auth middleware request flow."""
-import pytest
 from unittest.mock import AsyncMock
 from starlette.testclient import TestClient
 from starlette.applications import Starlette
