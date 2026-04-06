@@ -3123,7 +3123,7 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             event = await events.get()
             # Pass through import events directly
-            if isinstance(event, dict) and event.get("type") in ("import_progress", "import_complete"):
+            if isinstance(event, dict) and event.get("type") in ("import_progress", "import_complete", "finding_created"):
                 await websocket.send_json(event)
                 continue
 
@@ -3230,7 +3230,7 @@ async def websocket_console(websocket: WebSocket):
         while True:
             event = await events.get()
             # Pass through import events directly
-            if isinstance(event, dict) and event.get("type") in ("import_progress", "import_complete"):
+            if isinstance(event, dict) and event.get("type") in ("import_progress", "import_complete", "finding_created"):
                 await websocket.send_json(event)
                 continue
 
