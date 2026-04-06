@@ -3159,9 +3159,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json({
                     "type": "device_update",
                     "device": device_dict,
-                    "alerts": [],
                     "packet": packet_info,
-                    "matches": [],
                 })
                 continue
 
@@ -3264,8 +3262,6 @@ async def websocket_console(websocket: WebSocket):
                     "data": {k: str(v) if not isinstance(v, (str, int, float, bool, type(None))) else v
                              for k, v in fields.items()},
                     "device": device_dict,
-                    "matches": [],
-                    "alerts": [],
                 })
                 continue
 
