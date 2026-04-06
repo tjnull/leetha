@@ -162,14 +162,35 @@ class VerdictEngine:
         ]) if val[0] is not None)
         overall = min(100, int(sum(field_scores) / max(weight_sum, 0.01) * 100))
 
+        # Fallback: infer platform from vendor + device type when no
+        # protocol-level evidence provided one (common in passive monitoring)
+        chosen_platform = platform[0]
+        if chosen_platform is None and vendor[0] is not None:
+            from leetha.fingerprint.evidence import _guess_os_from_vendor
+            chosen_platform = _guess_os_from_vendor(vendor[0], category[0])
+
+        # Clean mDNS hostname artifacts (service suffixes, UUIDs)
+        chosen_hostname = hostname[0]
+        if chosen_hostname:
+            import re
+            # Strip mDNS service type suffix: "Name._service._tcp.local" → "Name"
+            if "._" in chosen_hostname:
+                chosen_hostname = chosen_hostname.split("._")[0]
+            # Strip trailing hex UUIDs: "Google-Nest-Hub-Max-6aa3e8..." → "Google-Nest-Hub-Max"
+            chosen_hostname = re.sub(r'-[0-9a-f]{12,}$', '', chosen_hostname, flags=re.IGNORECASE)
+            # Strip .local suffix
+            if chosen_hostname.endswith(".local"):
+                chosen_hostname = chosen_hostname[:-6]
+            chosen_hostname = chosen_hostname.strip(".-") or hostname[0]
+
         return Verdict(
             hw_addr=hw_addr,
             category=category[0],
             vendor=vendor[0],
-            platform=platform[0],
+            platform=chosen_platform,
             platform_version=platform_version[0],
             model=model[0],
-            hostname=hostname[0],
+            hostname=chosen_hostname,
             certainty=overall,
             evidence_chain=list(evidence),
             computed_at=datetime.now(),
