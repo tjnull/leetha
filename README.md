@@ -6,7 +6,7 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Tests](https://img.shields.io/badge/tests-511%20passing-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-531%20passing-brightgreen.svg)](#testing)
 
 </div>
 
@@ -71,7 +71,7 @@ Requires **Python 3.11+** and packet capture privileges (root, sudo, or `CAP_NET
 # Install from source
 git clone https://github.com/tjnull/leetha.git && cd leetha
 cd frontend && bun install && bun run build && cd ..
-pip install -e .
+pipx install -e .  # or: pip install -e .
 
 # Sync fingerprint databases (recommended, ~880 MB)
 leetha sync
@@ -90,7 +90,7 @@ Open `http://localhost:8080` to view discovered devices in real-time.
 
 ## Installation
 
-### From source
+### From source (pipx — recommended)
 
 ```bash
 git clone https://github.com/tjnull/leetha.git
@@ -99,7 +99,10 @@ cd leetha
 # Build the frontend (requires bun — https://bun.sh)
 cd frontend && bun install && bun run build && cd ..
 
-# Install leetha
+# Install with pipx (isolated environment, editable)
+pipx install -e .
+
+# Or install with pip
 pip install -e .
 ```
 
