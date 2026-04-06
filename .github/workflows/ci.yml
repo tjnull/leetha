@@ -107,18 +107,26 @@ jobs:
         with:
           name: frontend-dist
           path: src/leetha/ui/web/dist/
-      - run: |
+      - name: Install fpm
+        run: |
           sudo apt-get update && sudo apt-get install -y ruby ruby-dev
           sudo gem install fpm
-      - run: |
-          pip install .
-          fpm -s python -t deb \
+      - name: Build deb package
+        run: |
+          python -m venv /tmp/leetha-venv
+          /tmp/leetha-venv/bin/pip install .
+          fpm -s dir -t deb \
             --name leetha \
             --version 0.1.0 \
+            --architecture amd64 \
             --depends python3 \
             --depends libpcap0.8 \
             --description "Passive network fingerprinting and analysis engine" \
-            .
+            --url "https://github.com/tjnull/leetha" \
+            --license "GPL-3.0" \
+            --after-install /dev/null \
+            /tmp/leetha-venv/lib/=/usr/lib/leetha/ \
+            /tmp/leetha-venv/bin/leetha=/usr/bin/leetha
       - uses: actions/upload-artifact@v4
         with:
           name: leetha-deb
@@ -137,18 +145,25 @@ jobs:
         with:
           name: frontend-dist
           path: src/leetha/ui/web/dist/
-      - run: |
+      - name: Install fpm
+        run: |
           sudo apt-get update && sudo apt-get install -y ruby ruby-dev rpm
           sudo gem install fpm
-      - run: |
-          pip install .
-          fpm -s python -t rpm \
+      - name: Build rpm package
+        run: |
+          python -m venv /tmp/leetha-venv
+          /tmp/leetha-venv/bin/pip install .
+          fpm -s dir -t rpm \
             --name leetha \
             --version 0.1.0 \
+            --architecture x86_64 \
             --depends python3 \
             --depends libpcap \
             --description "Passive network fingerprinting and analysis engine" \
-            .
+            --url "https://github.com/tjnull/leetha" \
+            --license "GPL-3.0" \
+            /tmp/leetha-venv/lib/=/usr/lib/leetha/ \
+            /tmp/leetha-venv/bin/leetha=/usr/bin/leetha
       - uses: actions/upload-artifact@v4
         with:
           name: leetha-rpm
