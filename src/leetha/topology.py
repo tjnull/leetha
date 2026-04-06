@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 _INFRA_TYPES = frozenset({
     "router", "switch", "access_point", "firewall",
     "gateway", "load_balancer", "mesh_router",
+    "network_device",
     "unifi switch", "unifi ap", "unifi gateway",
 })
 
@@ -1813,6 +1814,28 @@ def build_topology_graph(
         device_type = _infer_type_from_vendor(device_type, d.get("manufacturer"))
         mdns_svcs = (device_mdns_services or {}).get(mac)
         device_type = _refine_type_from_context(device_type, d.get("hostname"), mdns_svcs)
+
+        # Refine "network_device" using LLDP presence and model/hostname hints
+        if device_type == "network_device":
+            model = (d.get("model") or d.get("hostname") or "").lower()
+            has_lldp = mac in {n.get("device_mac") for n in lldp_neighbors}
+            has_cdp = mac in {n.get("device_mac") for n in lldp_neighbors if n.get("port_id")}
+            # Check for AP indicators in model/hostname
+            ap_keywords = ("uap", "u6", "u7", "ap ", "access point", "nanostation",
+                           "litebeam", "nanobeam", "powerbeam", "unifi ap", "ac-lite",
+                           "ac-lr", "ac-pro", "ac-hd", "ac-mesh", "flexhd", "in-wall",
+                           "basestation", "-ap-", "eap", "wap", "aruba ap", "ruckus")
+            switch_keywords = ("usw", "switch", "us-", "us8", "us16", "us24", "us48",
+                               "unifi switch", "catalyst", "prosafe", "gs1", "gs3")
+            if any(kw in model for kw in ap_keywords):
+                device_type = "access_point"
+            elif any(kw in model for kw in switch_keywords):
+                device_type = "switch"
+            elif has_lldp and not any(kw in model for kw in switch_keywords):
+                # LLDP-capable "network_device" without switch keywords — likely AP
+                # (switches usually have switch-specific model names)
+                pass  # keep as network_device, let other signals decide
+
         is_gw = mac in gateway_macs
         is_infra = device_type in _INFRA_TYPES and not is_gw
         subnet = _subnet_for_ip(d.get("ip_v4"))
@@ -1870,15 +1893,17 @@ def build_topology_graph(
         if m:
             arp_by_mac[m] = arp_by_mac.get(m, 0) + e.get("packet_count", 0)
 
-    # Core switch = non-AP infrastructure device with the most ARP traffic
-    switch_nodes = [n for n in device_nodes if n["is_infrastructure"] and n["type"] != "access_point"]
+    # Core switch = actual switch with the most ARP traffic
+    switch_nodes = [n for n in device_nodes if n["is_infrastructure"]
+                    and n["type"] in ("switch", "unifi switch") and not n["is_gateway"]]
     core_switch_mac = None
     if switch_nodes:
         switch_by_arp = sorted(switch_nodes, key=lambda n: arp_by_mac.get(n["id"], 0), reverse=True)
         core_switch_mac = switch_by_arp[0]["id"]
 
     # --- Categorize infrastructure ---
-    switches = [n for n in device_nodes if n["is_infrastructure"] and n["type"] != "access_point"]
+    switches = [n for n in device_nodes if n["is_infrastructure"]
+                and n["type"] in ("switch", "unifi switch") and not n["is_gateway"]]
     aps = [n for n in device_nodes if n["is_infrastructure"] and n["type"] == "access_point"]
 
     # --- Build output nodes (no subnet group nodes — devices connect directly) ---
@@ -2004,7 +2029,7 @@ def build_topology_graph(
 
     # Build list of all switches (including core) for wired client distribution
     all_switches = [n["id"] for n in device_nodes
-                    if n["is_infrastructure"] and n["type"] != "access_point" and not n["is_gateway"]]
+                    if n["is_infrastructure"] and n["type"] in ("switch", "unifi switch") and not n["is_gateway"]]
 
     # Detect VM-to-host relationships for bridged VMs.
     # VM MACs (VMware 00:0C:29/00:50:56, QEMU 52:54:00, etc.) on the same
