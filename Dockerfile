@@ -36,7 +36,9 @@ COPY --from=compile /src/wheels/*.whl /tmp/
 RUN pip install --no-cache-dir /tmp/*.whl && rm -f /tmp/*.whl
 
 # Non-root user for safety
-RUN useradd --system --create-home --shell /usr/sbin/nologin appuser
+RUN useradd --system --create-home --shell /usr/sbin/nologin appuser \
+    && mkdir -p /home/appuser/.local/share/leetha /home/appuser/.leetha \
+    && chown -R appuser:appuser /home/appuser/.local /home/appuser/.leetha
 USER appuser
 
 # Persistent storage for fingerprint databases and SQLite

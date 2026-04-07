@@ -324,6 +324,7 @@ class Database:
 
     async def initialize(self) -> None:
         """Open the database, create tables, apply migrations, build indexes."""
+        self._path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = await aiosqlite.connect(str(self._path), isolation_level=None)
         self._conn.row_factory = aiosqlite.Row
 
