@@ -48,6 +48,16 @@ fastapi_app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 
+# CORS — allow access through reverse proxies (Dockhand, nginx, etc.)
+from starlette.middleware.cors import CORSMiddleware
+fastapi_app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 import re as _re
 
 def _validate_mac(mac: str) -> str | None:
