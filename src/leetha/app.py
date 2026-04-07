@@ -195,8 +195,9 @@ class LeethaApp:
         """
         from leetha.platform import has_capture_privilege
         if not has_capture_privilege():
-            logger.debug(
-                "Cannot start capture — insufficient privileges."
+            logger.error(
+                "Cannot start capture — insufficient privileges. "
+                "Run as root, with sudo, or grant CAP_NET_RAW."
             )
             return False
 

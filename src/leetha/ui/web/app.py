@@ -1121,22 +1121,37 @@ async def enable_interface(name: str):
     # If capture engine is already active, hot-add the interface.
     # Otherwise do a full start_capture() to activate the engine,
     # processing pipeline, and packet queue consumer.
-    if app_instance.capture_engine.is_running:
-        app_instance.capture_engine.add_interface(config)
-    else:
-        # start_capture() creates async tasks (_process_loop, etc.) that
-        # must run on the app's event loop, not uvicorn's.  When
-        # run_web() uses a background thread, schedule there.
-        import asyncio
-        app_loop = getattr(app_instance, "_app_loop", None)
-        if app_loop is not None and app_loop is not asyncio.get_running_loop():
-            future = asyncio.run_coroutine_threadsafe(
-                app_instance.start_capture(interfaces=current), app_loop)
-            future.result(timeout=10)
+    try:
+        if app_instance.capture_engine.is_running:
+            app_instance.capture_engine.add_interface(config)
         else:
-            await app_instance.start_capture(interfaces=current)
+            import asyncio
+            app_loop = getattr(app_instance, "_app_loop", None)
+            if app_loop is not None and app_loop is not asyncio.get_running_loop():
+                future = asyncio.run_coroutine_threadsafe(
+                    app_instance.start_capture(interfaces=current), app_loop)
+                result = await asyncio.get_running_loop().run_in_executor(
+                    None, future.result, 10)
+            else:
+                result = await app_instance.start_capture(interfaces=current)
 
-    return {"status": "ok", "interface": name}
+            if not result:
+                return JSONResponse(
+                    status_code=500,
+                    content={"error": "Capture failed — insufficient privileges (NET_RAW required)"})
+    except Exception as exc:
+        logger.error("enable_interface failed: %s", exc)
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Capture failed: {exc}"})
+
+    # Verify the interface is actually capturing before returning success
+    if name not in app_instance.capture_engine.interfaces:
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Capture engine did not register interface"})
+
+    return {"status": "ok", "interface": name, "capturing": True}
 
 
 @fastapi_app.post("/api/interfaces/{name}/disable")
