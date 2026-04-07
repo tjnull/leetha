@@ -48,16 +48,6 @@ fastapi_app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 
-# CORS — allow access through reverse proxies (Dockhand, nginx, etc.)
-from starlette.middleware.cors import CORSMiddleware
-fastapi_app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 import re as _re
 
 def _validate_mac(mac: str) -> str | None:
@@ -192,6 +182,22 @@ async def _auth_middleware(request: Request, call_next):
 # GZip compression for all responses > 500 bytes
 from starlette.middleware.gzip import GZipMiddleware
 fastapi_app.add_middleware(GZipMiddleware, minimum_size=500)
+
+# CORS — must be the OUTERMOST middleware so OPTIONS preflight requests
+# are handled before auth rejects them.  Starlette's add_middleware()
+# inserts at position 0 and reverses during build, so we append to the
+# END of the list to make it outermost (first to execute).
+from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware import Middleware
+fastapi_app.user_middleware.append(
+    Middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+)
 
 
 def _require_app():
