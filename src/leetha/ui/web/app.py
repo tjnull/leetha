@@ -1131,10 +1131,10 @@ async def enable_interface(name: str):
         app_loop = getattr(app_instance, "_app_loop", None)
         if app_loop is not None and app_loop is not asyncio.get_running_loop():
             future = asyncio.run_coroutine_threadsafe(
-                app_instance.start_capture(), app_loop)
+                app_instance.start_capture(interfaces=current), app_loop)
             future.result(timeout=10)
         else:
-            await app_instance.start_capture()
+            await app_instance.start_capture(interfaces=current)
 
     return {"status": "ok", "interface": name}
 
