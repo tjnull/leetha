@@ -1848,17 +1848,19 @@ def build_topology_graph(
                 # LLDP-capable network_device — check if on same subnet as known APs
                 dev_subnet = _subnet_for_ip(d.get("ip_v4"))
                 ap_subnets = set()
-                switch_subnets = set()
                 for other in devices:
                     otype = _normalize_device_type(other.get("device_type"))
                     osub = _subnet_for_ip(other.get("ip_v4"))
                     if otype == "access_point" and osub:
                         ap_subnets.add(osub)
-                    elif otype == "switch" and osub:
-                        switch_subnets.add(osub)
                 if dev_subnet and dev_subnet in ap_subnets:
                     device_type = "access_point"
-                # Otherwise keep as network_device
+            else:
+                # Ubiquiti network_device with NO LLDP: likely an AP.
+                # Switches always send LLDP; APs often don't on monitored VLANs.
+                mfr = (d.get("manufacturer") or "").lower()
+                if mfr in ("ubiquiti", "ubiquiti inc", "ubiquiti networks"):
+                    device_type = "access_point"
 
         is_gw = mac in gateway_macs
         is_infra = device_type in _INFRA_TYPES and not is_gw
