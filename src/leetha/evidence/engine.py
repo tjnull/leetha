@@ -95,6 +95,15 @@ _SOURCE_WEIGHTS: dict[str, float] = {
     "mdns_service_map": 0.70,
     "manual": 0.99,
     "active_probe": 0.85,
+    # New protocol sources
+    "igmp": 0.35,
+    "eap": 0.60,
+    "stun": 0.45,
+    "quic_sni": 0.60,
+    "radius": 0.65,
+    "upnp": 0.55,
+    "apple_model": 0.90,
+    "mdns_apple_model": 0.90,
 }
 
 # Agreement boost: when N independent sources agree, multiply certainty

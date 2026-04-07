@@ -232,3 +232,46 @@ def parse_llmnr_netbios(packet) -> CapturedPacket | None:
             fields=fields, raw=bytes(packet) if hasattr(packet, '__bytes__') else None,
         )
     return None
+
+
+def parse_upnp(packet) -> CapturedPacket | None:
+    """Detect UPnP device description requests on common ports."""
+    try:
+        from scapy.layers.inet import IP, TCP
+        from scapy.packet import Raw
+    except ImportError:
+        return None
+
+    if not packet.haslayer(TCP) or not packet.haslayer(IP):
+        return None
+
+    tcp = packet[TCP]
+    upnp_ports = {2869, 5000, 49152, 49153, 49154, 49155, 8008, 8443, 8080}
+    if tcp.dport not in upnp_ports and tcp.sport not in upnp_ports:
+        return None
+
+    # Look for UPnP HTTP requests/responses
+    if not packet.haslayer(Raw):
+        return None
+    try:
+        payload = bytes(packet[Raw]).decode('utf-8', errors='replace')[:500]
+    except Exception:
+        return None
+
+    # Check for UPnP XML or HTTP headers
+    upnp_indicators = ("upnp", "urn:schemas-upnp-org", "rootdevice",
+                       "WANIPConnection", "WANPPPConnection", "InternetGateway",
+                       "MediaRenderer", "MediaServer", "ContentDirectory")
+    if not any(ind.lower() in payload.lower() for ind in upnp_indicators):
+        return None
+
+    return CapturedPacket(
+        protocol="upnp",
+        hw_addr=packet.src,
+        ip_addr=packet[IP].src,
+        target_ip=packet[IP].dst,
+        fields={
+            "dst_port": tcp.dport,
+            "payload_preview": payload[:200],
+        },
+    )

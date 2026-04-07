@@ -11,7 +11,7 @@ from leetha.evidence.models import Evidence
 _MAC_RE = re.compile(r"^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$")
 
 
-@register_processor("arp", "dhcpv4", "dhcpv6", "icmpv6")
+@register_processor("arp", "dhcpv4", "dhcpv6", "icmpv6", "igmp", "eap")
 class NetworkDiscoveryProcessor(Processor):
     """Handles protocols that reveal host presence and basic identity."""
 
@@ -25,6 +25,10 @@ class NetworkDiscoveryProcessor(Processor):
             return self._analyze_dhcpv6(packet)
         elif protocol == "icmpv6":
             return self._analyze_icmpv6(packet)
+        elif protocol == "igmp":
+            return self._analyze_igmp(packet)
+        elif protocol == "eap":
+            return self._analyze_eap(packet)
         return []
 
     def _analyze_arp(self, packet: CapturedPacket) -> list[Evidence]:
@@ -153,6 +157,40 @@ class NetworkDiscoveryProcessor(Processor):
                 raw={"duid": duid},
             ))
 
+        return evidence
+
+    def _analyze_igmp(self, packet: CapturedPacket) -> list[Evidence]:
+        """IGMP membership — reveals multicast subscriptions (streaming, casting)."""
+        group = packet.get("group")
+        type_name = packet.get("type_name", "")
+        evidence = [Evidence(
+            source="igmp", method="heuristic", certainty=0.40,
+            raw={"group": group, "type": type_name},
+        )]
+        # Common multicast groups reveal device type
+        if group:
+            if group.startswith("239.255.255."):
+                # SSDP/UPnP multicast
+                pass
+            elif group == "224.0.0.251":
+                # mDNS multicast — device supports Bonjour
+                pass
+            elif group.startswith("239."):
+                # Private multicast — often streaming/IPTV
+                evidence[0].category = "media_device"
+                evidence[0].certainty = 0.30
+        return evidence
+
+    def _analyze_eap(self, packet: CapturedPacket) -> list[Evidence]:
+        """EAP/802.1X — reveals authentication type."""
+        eap_type_name = packet.get("eap_type_name", "")
+        identity = packet.get("identity")
+        evidence = [Evidence(
+            source="eap", method="exact", certainty=0.60,
+            raw={"eap_type": eap_type_name, "identity": identity},
+        )]
+        if identity:
+            evidence[0].hostname = identity
         return evidence
 
     def _analyze_icmpv6(self, packet: CapturedPacket) -> list[Evidence]:

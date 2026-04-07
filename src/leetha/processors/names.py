@@ -28,7 +28,7 @@ _NTP_VENDOR_MAP: dict[str, tuple[str | None, str | None]] = {
 }
 
 
-@register_processor("dns", "dns_answer", "mdns", "netbios", "ssdp")
+@register_processor("dns", "dns_answer", "mdns", "netbios", "ssdp", "upnp")
 class NameResolutionProcessor(Processor):
     """Handles protocols that reveal hostnames, services, and device names."""
 
@@ -44,6 +44,8 @@ class NameResolutionProcessor(Processor):
             return self._analyze_netbios(packet)
         elif protocol == "ssdp":
             return self._analyze_ssdp(packet)
+        elif protocol == "upnp":
+            return self._analyze_upnp(packet)
         return []
 
     def _analyze_dns(self, packet: CapturedPacket) -> list[Evidence]:
@@ -203,6 +205,43 @@ class NameResolutionProcessor(Processor):
                     raw={"txt_records": txt_records},
                 ))
 
+        # Apple model code lookup from mDNS TXT 'am' field
+        apple_model_code = packet.get("apple_model")
+        if apple_model_code:
+            try:
+                from leetha.fingerprint.lookup import ModelLookup
+                amap = ModelLookup.APPLE_MODEL_MAP
+                friendly = amap.get(apple_model_code, apple_model_code)
+                # Infer category from the model code prefix
+                if apple_model_code.startswith("iPhone"):
+                    a_cat = "phone"
+                elif apple_model_code.startswith("iPad"):
+                    a_cat = "tablet"
+                elif apple_model_code.startswith("AudioAccessory"):
+                    a_cat = "smart_speaker"
+                elif apple_model_code.startswith("AppleTV"):
+                    a_cat = "media_player"
+                elif apple_model_code.startswith("Watch"):
+                    a_cat = "wearable"
+                elif apple_model_code.startswith("MacBook"):
+                    a_cat = "laptop"
+                elif apple_model_code.startswith(("iMac", "Mac")):
+                    a_cat = "desktop"
+                else:
+                    a_cat = None
+                evidence.append(Evidence(
+                    source="mdns_apple_model", method="exact",
+                    certainty=0.92,
+                    vendor="Apple",
+                    model=friendly,
+                    category=a_cat,
+                    platform="iOS/macOS",
+                    raw={"apple_model_code": apple_model_code,
+                         "resolved_name": friendly},
+                ))
+            except (ImportError, AttributeError):
+                pass
+
         # Use mDNS name or TXT 'md' (model description) as hostname fallback
         hostname = name or (txt_records.get("fn") if txt_records else None)
         if hostname:
@@ -242,6 +281,23 @@ class NameResolutionProcessor(Processor):
                     hostname=query_name,
                     raw={"query_name": query_name, "match": host_match},
                 ))
+        return evidence
+
+    def _analyze_upnp(self, packet: CapturedPacket) -> list[Evidence]:
+        """UPnP device description — reveals device services."""
+        payload = packet.get("payload_preview", "")
+        evidence = [Evidence(
+            source="upnp", method="pattern", certainty=0.60,
+            raw={"dst_port": packet.get("dst_port"), "preview": payload[:100]},
+        )]
+        # Check for specific UPnP device types
+        payload_lower = payload.lower()
+        if "mediarenderer" in payload_lower:
+            evidence[0].category = "media_player"
+        elif "mediaserver" in payload_lower:
+            evidence[0].category = "media_server"
+        elif "internetgateway" in payload_lower:
+            evidence[0].category = "router"
         return evidence
 
     def _analyze_ssdp(self, packet: CapturedPacket) -> list[Evidence]:

@@ -35,21 +35,31 @@ from leetha.capture.protocols.iot_scada import parse_mqtt as _new_parse_mqtt
 from leetha.capture.protocols.iot_scada import parse_enip as _new_parse_enip
 from leetha.capture.protocols.tcp_syn import parse_tcp_syn as _new_parse_tcp_syn
 from leetha.capture.protocols.banner import parse_service_banner as _new_parse_service_banner
+from leetha.capture.protocols.igmp import parse_igmp as _new_parse_igmp
+from leetha.capture.protocols.stun import parse_stun as _new_parse_stun
+from leetha.capture.protocols.quic import parse_quic as _new_parse_quic
+from leetha.capture.protocols.eap import parse_eap as _new_parse_eap
+from leetha.capture.protocols.radius import parse_radius as _new_parse_radius
+from leetha.capture.protocols.discovery import parse_upnp as _new_parse_upnp
 
 # Ordered parser chain -- most specific first, fallback last
 PARSER_CHAIN = [
     _new_parse_lldp, _new_parse_cdp, _new_parse_stp,
+    _new_parse_eap,
     _new_parse_arp,
     _new_parse_dhcp_server, _new_parse_dhcpv4, _new_parse_dhcpv6,
-    _new_parse_tcp_syn, _new_parse_tls_client_hello, _new_parse_http_useragent,
+    _new_parse_tcp_syn, _new_parse_tls_client_hello, _new_parse_quic,
+    _new_parse_http_useragent,
     _new_parse_dns, _new_parse_dns_answer,
     _new_parse_mdns, _new_parse_ssdp, _new_parse_llmnr_netbios,
     _new_parse_ws_discovery,
     _new_parse_snmp,
     _new_parse_icmpv6,
+    _new_parse_igmp,
     _new_parse_ntp,
     _new_parse_modbus, _new_parse_bacnet, _new_parse_coap,
     _new_parse_mqtt, _new_parse_enip,
+    _new_parse_stun, _new_parse_radius, _new_parse_upnp,
     _new_parse_service_banner,
     _new_parse_ip_observed,
 ]

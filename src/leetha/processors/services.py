@@ -8,7 +8,7 @@ from leetha.evidence.models import Evidence
 from leetha.patterns.tls import lookup_ja3
 
 
-@register_processor("tcp_syn", "tls", "http_useragent")
+@register_processor("tcp_syn", "tls", "http_useragent", "stun", "quic", "radius")
 class ServiceFingerprintProcessor(Processor):
     """Handles protocols that reveal services, applications, and OS hints."""
 
@@ -20,6 +20,12 @@ class ServiceFingerprintProcessor(Processor):
             return self._analyze_tls(packet)
         elif protocol == "http_useragent":
             return self._analyze_http_useragent(packet)
+        elif protocol == "stun":
+            return self._analyze_stun(packet)
+        elif protocol == "quic":
+            return self._analyze_quic(packet)
+        elif protocol == "radius":
+            return self._analyze_radius(packet)
         return []
 
     def _analyze_tcp_syn(self, packet: CapturedPacket) -> list[Evidence]:
@@ -103,6 +109,35 @@ class ServiceFingerprintProcessor(Processor):
                 raw={"host": host},
             ))
 
+        return evidence
+
+    def _analyze_stun(self, packet: CapturedPacket) -> list[Evidence]:
+        """STUN/TURN — reveals WebRTC usage (video conferencing, streaming)."""
+        type_name = packet.get("type_name", "")
+        return [Evidence(
+            source="stun", method="heuristic", certainty=0.50,
+            raw={"type": type_name, "dst_port": packet.get("dst_port")},
+        )]
+
+    def _analyze_quic(self, packet: CapturedPacket) -> list[Evidence]:
+        """QUIC HTTP/3 — extract SNI like TLS."""
+        sni = packet.get("sni")
+        evidence = [Evidence(
+            source="quic_sni", method="exact", certainty=0.65,
+            raw={"sni": sni},
+        )]
+        return evidence
+
+    def _analyze_radius(self, packet: CapturedPacket) -> list[Evidence]:
+        """RADIUS — enterprise authentication."""
+        code_name = packet.get("code_name", "")
+        is_server = packet.get("is_server", False)
+        evidence = [Evidence(
+            source="radius", method="exact", certainty=0.70,
+            raw={"code": code_name},
+        )]
+        if is_server:
+            evidence[0].category = "server"
         return evidence
 
     @staticmethod
