@@ -28,15 +28,19 @@ FROM python:3.11-slim
 LABEL maintainer="leetha" \
       description="Network host identification and threat surface analysis"
 
-# libpcap required for scapy packet capture
+# libpcap + setcap for baking capture privileges into the image
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libpcap0.8 iproute2 curl \
+    && apt-get install -y --no-install-recommends libpcap0.8 iproute2 curl libcap2-bin \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY --from=compile /src/wheels/*.whl /tmp/
 RUN pip install --no-cache-dir /tmp/*.whl && rm -f /tmp/*.whl
 
-# Non-root user — Docker grants NET_RAW/NET_ADMIN caps directly to PID 1
+# Grant packet capture capabilities to the Python interpreter so
+# capture works even without docker run --cap-add (e.g., Dockhand).
+RUN setcap 'cap_net_raw,cap_net_admin+eip' /usr/local/bin/python3.11
+
+# Non-root user for safety
 RUN useradd --system --create-home --shell /usr/sbin/nologin appuser \
     && mkdir -p /home/appuser/.leetha/cache \
     && chown -R appuser:appuser /home/appuser/.leetha
