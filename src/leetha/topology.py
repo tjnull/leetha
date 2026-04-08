@@ -2139,6 +2139,11 @@ def build_topology_graph(
                 edges.append({"source": ap_target, "target": mac, "type": "wireless_link"})
             elif core_switch_mac:
                 edges.append({"source": core_switch_mac, "target": mac, "type": "wireless_link"})
+            else:
+                # No APs or core switch — fall back to gateway
+                gw = gateway_subnet_to_mac.get(subnet) or next(iter(gateway_macs), None)
+                if gw:
+                    edges.append({"source": gw, "target": mac, "type": "wireless_link"})
         elif conn_type == "unknown" and aps:
             # Unknown with both APs and switches — route through AP if device
             # type suggests a client device (not infrastructure)
@@ -2155,11 +2160,19 @@ def build_topology_graph(
                     edges.append({"source": ap_target, "target": mac, "type": "wireless_link"})
                 elif core_switch_mac:
                     edges.append({"source": core_switch_mac, "target": mac, "type": "client_link"})
+                else:
+                    gw = gateway_subnet_to_mac.get(subnet) or next(iter(gateway_macs), None)
+                    if gw:
+                        edges.append({"source": gw, "target": mac, "type": "client_link"})
             elif all_switches:
                 target_switch = all_switches[hash(mac) % len(all_switches)]
                 edges.append({"source": target_switch, "target": mac, "type": "client_link"})
             elif core_switch_mac:
                 edges.append({"source": core_switch_mac, "target": mac, "type": "client_link"})
+            else:
+                gw = gateway_subnet_to_mac.get(subnet) or next(iter(gateway_macs), None)
+                if gw:
+                    edges.append({"source": gw, "target": mac, "type": "client_link"})
         elif all_switches and conn_type == "wired":
             # Definitively wired → distribute across switches
             target_switch = all_switches[hash(mac) % len(all_switches)]

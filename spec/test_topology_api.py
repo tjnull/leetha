@@ -136,6 +136,31 @@ def test_device_tiers():
     assert tiers["33:44:55:66:77:88"] == "client"
 
 
+def test_wireless_clients_fallback_to_gateway():
+    """Wireless clients must connect to gateway when no APs or switches exist."""
+    devices = [
+        {"mac": "aa:bb:cc:dd:ee:ff", "hostname": "router", "ip_v4": "192.168.1.1",
+         "device_type": "router", "manufacturer": "Google", "confidence": 90,
+         "os_family": "Linux", "last_seen": "2026-04-01T12:00:00"},
+        {"mac": "11:22:33:44:55:66", "hostname": "phone", "ip_v4": "192.168.1.50",
+         "device_type": "phone", "manufacturer": "Apple", "confidence": 75,
+         "os_family": "iOS", "last_seen": "2026-04-01T12:00:00",
+         "connection_type": "wireless"},
+        {"mac": "22:33:44:55:66:77", "hostname": "iot-sensor", "ip_v4": "192.168.1.60",
+         "device_type": "iot", "manufacturer": "Expressif", "confidence": 60,
+         "os_family": None, "last_seen": "2026-04-01T12:00:00",
+         "connection_type": "wireless"},
+    ]
+    gateways = [{"mac": "aa:bb:cc:dd:ee:ff", "ip": "192.168.1.1", "source": "dhcp_server"}]
+    result = build_topology_graph(devices=devices, gateways=gateways, arp_entries=[], lldp_neighbors=[])
+
+    # Both wireless clients must have edges to the gateway
+    client_edges = [e for e in result["edges"] if e["target"] in ("11:22:33:44:55:66", "22:33:44:55:66:77")]
+    assert len(client_edges) == 2
+    for edge in client_edges:
+        assert edge["source"] == "aa:bb:cc:dd:ee:ff"
+
+
 def test_internet_node_always_present():
     result = build_topology_graph(devices=[], gateways=[], arp_entries=[], lldp_neighbors=[])
     internet = [n for n in result["nodes"] if n["id"] == "internet"]
