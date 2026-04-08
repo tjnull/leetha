@@ -22,30 +22,6 @@ def _get_helpers():
     return _validate_mac, _sanitize_hostname, _build_device_dict
 
 
-def _load_overrides() -> dict:
-    """Load manual overrides from file-based store."""
-    app_instance = _get_app()
-    data_dir = getattr(app_instance.config, "data_dir", None)
-    if not data_dir:
-        return {}
-    path = data_dir / "device_overrides.json"
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError):
-        return {}
-
-
-def _save_overrides(overrides: dict):
-    """Persist manual overrides to file."""
-    app_instance = _get_app()
-    data_dir = getattr(app_instance.config, "data_dir", None)
-    if not data_dir:
-        return
-    path = data_dir / "device_overrides.json"
-    path.write_text(json.dumps(overrides, indent=2))
-
 
 async def _get_arp_history_from_sightings(mac: str | None = None, ip: str | None = None) -> list:
     """Derive ARP history from sightings table."""
@@ -153,7 +129,8 @@ async def export_devices(
     all_devices = []
     for v in verdicts:
         h = await app_instance.store.hosts.find_by_addr(v.hw_addr)
-        all_devices.append(_build_device_dict(v, h))
+        ovr = await app_instance.store.overrides.find_by_addr(v.hw_addr)
+        all_devices.append(_build_device_dict(v, h, ovr))
 
     # Apply filters
     if q:
@@ -249,7 +226,8 @@ async def api_device(mac: str):
     host = await app_instance.store.hosts.find_by_addr(mac)
     if not verdict and not host:
         return JSONResponse(status_code=404, content={"error": "Device not found"})
-    device = _build_device_dict(verdict, host)
+    override = await app_instance.store.overrides.find_by_addr(mac)
+    device = _build_device_dict(verdict, host, override)
     device["hostname"] = _sanitize_hostname(device.get("hostname"))
     # Include sightings as observations for compatibility
     try:
@@ -275,12 +253,13 @@ async def api_device(mac: str):
 async def get_device_override(mac: str):
     """Get the manual override for a device."""
     _validate_mac, _sanitize_hostname, _build_device_dict = _get_helpers()
+    app_instance = _get_app()
 
     mac = _validate_mac(mac)
     if not mac:
         return JSONResponse(status_code=400, content={"error": "Invalid MAC address format"})
-    overrides = _load_overrides()
-    return {"mac": mac, "override": overrides.get(mac)}
+    override = await app_instance.store.overrides.find_by_addr(mac)
+    return {"mac": mac, "override": override}
 
 
 @router.put("/api/devices/{mac}/override")
@@ -293,36 +272,46 @@ async def set_device_override(mac: str, request: Request):
     if not mac:
         return JSONResponse(status_code=400, content={"error": "Invalid MAC address format"})
 
-    # Verify device exists in new Store
     verdict = await app_instance.store.verdicts.find_by_addr(mac)
     host = await app_instance.store.hosts.find_by_addr(mac)
     if not verdict and not host:
         return JSONResponse(status_code=404, content={"error": "Device not found"})
 
     override_data = await request.json()
-    allowed_fields = {"device_type", "manufacturer", "os_family", "os_version", "model"}
-    filtered = {k: v for k, v in override_data.items() if k in allowed_fields}
+    from leetha.store.overrides import ALLOWED_FIELDS
+    filtered = {k: v for k, v in override_data.items() if k in ALLOWED_FIELDS}
 
     if not filtered:
         return JSONResponse(status_code=400, content={"error": "No valid override fields provided"})
 
-    overrides = _load_overrides()
-    overrides[mac] = filtered
-    _save_overrides(overrides)
-    return {"status": "ok", "mac": mac, "override": filtered}
+    result = await app_instance.store.overrides.upsert(mac, filtered)
+
+    # Sync disposition to Host if overridden
+    if "disposition" in filtered and filtered["disposition"] and host:
+        host.disposition = filtered["disposition"]
+        await app_instance.store.hosts.upsert(host)
+
+    return {"status": "ok", "mac": mac, "override": result}
 
 
 @router.delete("/api/devices/{mac}/override")
 async def delete_device_override(mac: str):
     """Clear the manual override for a device."""
     _validate_mac, _sanitize_hostname, _build_device_dict = _get_helpers()
+    app_instance = _get_app()
 
     mac = _validate_mac(mac)
     if not mac:
         return JSONResponse(status_code=400, content={"error": "Invalid MAC address format"})
-    overrides = _load_overrides()
-    overrides.pop(mac, None)
-    _save_overrides(overrides)
+
+    override = await app_instance.store.overrides.find_by_addr(mac)
+    if override and override.get("disposition"):
+        host = await app_instance.store.hosts.find_by_addr(mac)
+        if host and host.disposition != "self":
+            host.disposition = "new"
+            await app_instance.store.hosts.upsert(host)
+
+    await app_instance.store.overrides.delete(mac)
     return {"status": "ok", "mac": mac}
 
 
@@ -354,7 +343,8 @@ async def get_device_detail(mac: str):
     if not verdict and not host:
         raise HTTPException(404, "Device not found")
 
-    device = _build_device_dict(verdict, host)
+    override = await app_instance.store.overrides.find_by_addr(mac)
+    device = _build_device_dict(verdict, host, override)
     device["hostname"] = _sanitize_hostname(device.get("hostname"))
     evidence = device.get("raw_evidence", {})
 
@@ -378,7 +368,8 @@ async def get_device_coverage(mac: str):
     if not verdict and not host:
         return JSONResponse(status_code=404, content={"error": "Device not found"})
 
-    device = _build_device_dict(verdict, host)
+    override = await app_instance.store.overrides.find_by_addr(mac)
+    device = _build_device_dict(verdict, host, override)
 
     # Get observation source types from sightings
     try:
@@ -567,7 +558,8 @@ async def get_device_timeline(mac: str, limit: int = 100):
 
     verdict = await app_instance.store.verdicts.find_by_addr(mac)
     host = await app_instance.store.hosts.find_by_addr(mac)
-    device_dict = _build_device_dict(verdict, host) if (verdict or host) else None
+    override = await app_instance.store.overrides.find_by_addr(mac) if (verdict or host) else None
+    device_dict = _build_device_dict(verdict, host, override) if (verdict or host) else None
 
     # Get sightings as observations
     try:

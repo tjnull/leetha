@@ -105,7 +105,7 @@ class _RateLimiter:
 _rate_limiter = _RateLimiter(max_requests=120, window_seconds=60)
 
 
-def _build_device_dict(verdict, host) -> dict:
+def _build_device_dict(verdict, host, override: dict | None = None) -> dict:
     """Map Verdict + Host to the JSON shape the frontend expects."""
     d = {
         "mac": verdict.hw_addr if verdict else (host.hw_addr if host else ""),
@@ -132,6 +132,22 @@ def _build_device_dict(verdict, host) -> dict:
         }
     else:
         d["raw_evidence"] = {}
+
+    # Apply manual override on top
+    if override:
+        d["manual_override"] = override
+        for ovr_key in ("hostname", "device_type", "manufacturer", "os_family",
+                        "os_version", "model", "connection_type"):
+            val = override.get(ovr_key)
+            if val:
+                d[ovr_key] = val
+        if override.get("disposition"):
+            d["alert_status"] = override["disposition"]
+        if override.get("notes"):
+            d["notes"] = override["notes"]
+    else:
+        d["manual_override"] = None
+
     return d
 
 
@@ -1431,7 +1447,8 @@ async def api_incident_detail(incident_id: str):
     if not verdict and not host:
         return JSONResponse(status_code=404, content={"error": "Device not found"})
 
-    device_dict = _build_device_dict(verdict, host)
+    override = await app_instance.store.overrides.find_by_addr(mac)
+    device_dict = _build_device_dict(verdict, host, override)
 
     # Evidence from verdict
     evidence = device_dict.get("raw_evidence", {})
@@ -1856,7 +1873,8 @@ async def api_topology():
         devices = []
         for v in verdicts:
             h = await app_instance.store.hosts.find_by_addr(v.hw_addr)
-            d = _build_device_dict(v, h)
+            ovr = await app_instance.store.overrides.find_by_addr(v.hw_addr)
+            d = _build_device_dict(v, h, ovr)
             devices.append(d)
 
         # 1b. Gather mDNS services and LLDP/CDP presence per device for connection type
