@@ -1,4 +1,5 @@
 """Tests for OverrideRepository."""
+import json
 import pytest
 import aiosqlite
 from datetime import datetime, timezone
@@ -92,6 +93,27 @@ async def test_updated_at_set_automatically(repo):
     after = datetime.now(timezone.utc).isoformat()
     assert result["updated_at"] is not None
     assert before <= result["updated_at"] <= after
+
+
+@pytest.mark.asyncio
+async def test_migrate_from_json_file(repo, tmp_path):
+    json_path = tmp_path / "device_overrides.json"
+    json_path.write_text(json.dumps({
+        "aa:bb:cc:dd:ee:ff": {"device_type": "printer", "manufacturer": "HP"},
+        "11:22:33:44:55:66": {"os_family": "Linux"},
+    }))
+    migrated = await repo.migrate_from_json(json_path)
+    assert migrated == 2
+    assert (tmp_path / "device_overrides.json.bak").exists()
+    assert not json_path.exists()
+    r1 = await repo.find_by_addr("aa:bb:cc:dd:ee:ff")
+    assert r1["device_type"] == "printer"
+
+
+@pytest.mark.asyncio
+async def test_migrate_no_file(repo, tmp_path):
+    migrated = await repo.migrate_from_json(tmp_path / "device_overrides.json")
+    assert migrated == 0
 
 
 @pytest.mark.asyncio

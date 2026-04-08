@@ -1,7 +1,9 @@
 """Override repository -- CRUD operations for manual device overrides."""
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 
 ALLOWED_FIELDS: frozenset[str] = frozenset({
@@ -93,6 +95,19 @@ class OverrideRepository:
         cursor = await self._conn.execute("SELECT * FROM device_overrides")
         rows = await cursor.fetchall()
         return [self._row_to_dict(r) for r in rows]
+
+    async def migrate_from_json(self, json_path: str | Path) -> int:
+        """Migrate file-based overrides into the DB. Returns count migrated."""
+        json_path = Path(json_path)
+        if not json_path.exists():
+            return 0
+        data = json.loads(json_path.read_text())
+        count = 0
+        for mac, fields in data.items():
+            await self.upsert(mac, fields)
+            count += 1
+        json_path.rename(json_path.with_suffix(".json.bak"))
+        return count
 
     def _row_to_dict(self, row) -> dict:
         return {

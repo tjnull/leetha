@@ -14,6 +14,7 @@ from leetha.store.sightings import SightingRepository
 from leetha.store.verdicts import VerdictRepository
 from leetha.store.identities import IdentityRepository
 from leetha.store.snapshots import SnapshotRepository
+from leetha.store.overrides import OverrideRepository
 
 
 class Store:
@@ -28,6 +29,7 @@ class Store:
         self.verdicts: VerdictRepository | None = None
         self.identities: IdentityRepository | None = None
         self.snapshots: SnapshotRepository | None = None
+        self.overrides: OverrideRepository | None = None
 
     async def initialize(self):
         """Open connection and create all tables."""
@@ -49,10 +51,16 @@ class Store:
         await self.verdicts.create_tables()
         await self.identities.create_tables()
         await self.snapshots.create_tables()
+        self.overrides = OverrideRepository(self._conn)
+        await self.overrides.create_tables()
+
+        # One-time migration from file-based overrides
+        data_dir = Path(self.db_path).parent
+        json_overrides = data_dir / "device_overrides.json"
+        await self.overrides.migrate_from_json(json_overrides)
 
         # Fix DB file ownership when running under sudo
         from leetha.platform import fix_ownership
-        from pathlib import Path
         db_file = Path(self.db_path)
         fix_ownership(db_file)
         for suffix in ("-wal", "-shm"):
