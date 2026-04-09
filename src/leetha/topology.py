@@ -1787,6 +1787,7 @@ def build_topology_graph(
     arp_entries: list[dict],
     lldp_neighbors: list[dict],
     device_mdns_services: dict[str, list[str]] | None = None,
+    overrides: dict[str, str] | None = None,
 ) -> dict:
     gateway_macs = {g["mac"] for g in gateways}
     device_by_mac: dict[str, dict] = {}
@@ -2203,6 +2204,25 @@ def build_topology_graph(
                 # Last resort: connect to any infrastructure node or internet
                 any_infra = next((n["id"] for n in device_nodes if n["is_infrastructure"] or n["is_gateway"]), None)
                 edges.append({"source": any_infra or "internet", "target": mac, "type": "client_link"})
+
+    # --- Apply manual topology overrides ---
+    if overrides:
+        for child_mac, parent_mac in overrides.items():
+            # Only apply if both devices exist in the graph
+            if child_mac not in device_by_mac:
+                continue
+            if parent_mac != "internet" and parent_mac not in device_by_mac:
+                continue
+
+            # Remove all auto-generated edges where this device is the TARGET
+            edges = [e for e in edges if e["target"] != child_mac]
+
+            # Add the manual edge
+            edges.append({
+                "source": parent_mac,
+                "target": child_mac,
+                "type": "manual_link",
+            })
 
     return {
         "nodes": nodes,
