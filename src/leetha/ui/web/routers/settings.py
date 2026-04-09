@@ -149,6 +149,73 @@ async def db_info():
     }
 
 
+@router.get("/api/settings/db-export")
+async def db_export(request: Request):
+    from leetha.ui.web.app import app_instance
+    from fastapi.responses import FileResponse, StreamingResponse
+    import io
+
+    fmt = request.query_params.get("format", "sqlite")
+    config = app_instance.config
+    db_path = config.db_path
+
+    if not db_path.exists():
+        return JSONResponse(status_code=404, content={"error": "Database file not found"})
+
+    if fmt == "sqlite":
+        # Flush WAL to main DB file first
+        try:
+            conn = app_instance.store.connection
+            await conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except Exception:
+            pass
+        return FileResponse(
+            path=str(db_path),
+            media_type="application/x-sqlite3",
+            filename="leetha.db",
+        )
+
+    elif fmt == "sql":
+        import aiosqlite
+        lines: list[str] = []
+
+        async with aiosqlite.connect(str(db_path)) as db:
+            # Schema
+            cursor = await db.execute(
+                "SELECT sql FROM sqlite_master WHERE type IN ('table', 'index') AND sql IS NOT NULL ORDER BY type DESC, name"
+            )
+            rows = await cursor.fetchall()
+            for (ddl,) in rows:
+                lines.append(f"{ddl};\n")
+            lines.append("\n")
+
+            # Data per table
+            cursor = await db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            )
+            tables = [r[0] for r in await cursor.fetchall()]
+            for table in tables:
+                cursor = await db.execute(f"SELECT * FROM [{table}]")  # noqa: S608
+                col_names = [d[0] for d in cursor.description] if cursor.description else []
+                async for row in cursor:
+                    values = ", ".join(
+                        "NULL" if v is None else f"'{str(v).replace(chr(39), chr(39)+chr(39))}'" if isinstance(v, str) else str(v)
+                        for v in row
+                    )
+                    cols = ", ".join(f"[{c}]" for c in col_names)
+                    lines.append(f"INSERT INTO [{table}] ({cols}) VALUES ({values});\n")
+                lines.append("\n")
+
+        content = "".join(lines)
+        return StreamingResponse(
+            io.BytesIO(content.encode("utf-8")),
+            media_type="application/sql",
+            headers={"Content-Disposition": "attachment; filename=leetha-dump.sql"},
+        )
+
+    return JSONResponse(status_code=400, content={"error": "Invalid format. Use 'sqlite' or 'sql'."})
+
+
 @router.post("/api/settings/query")
 async def run_query(request: Request):
     from leetha.ui.web.app import app_instance
