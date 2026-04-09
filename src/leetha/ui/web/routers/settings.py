@@ -90,20 +90,62 @@ async def import_settings(request: Request):
 @router.get("/api/settings/db-info")
 async def db_info():
     from leetha.ui.web.app import app_instance
+    import os
 
     config = app_instance.config
+    db_path = config.db_path
     db_size = 0
-    if config.db_path.exists():
-        db_size = config.db_path.stat().st_size
+    wal_size = 0
+    if db_path.exists():
+        db_size = db_path.stat().st_size
+        wal_path = db_path.with_suffix(".db-wal")
+        if wal_path.exists():
+            wal_size = wal_path.stat().st_size
+
+    # Table row counts
+    table_counts = {}
+    conn = app_instance.store.connection
+    for table in ("hosts", "verdicts", "sightings", "findings", "fingerprint_snapshots", "identities"):
+        try:
+            cursor = await conn.execute(f"SELECT COUNT(*) FROM {table}")  # noqa: S608
+            row = await cursor.fetchone()
+            table_counts[table] = row[0] if row else 0
+        except Exception:
+            table_counts[table] = 0
+
+    # SQLite page info
+    page_count = 0
+    page_size = 0
+    try:
+        cursor = await conn.execute("PRAGMA page_count")
+        row = await cursor.fetchone()
+        page_count = row[0] if row else 0
+        cursor = await conn.execute("PRAGMA page_size")
+        row = await cursor.fetchone()
+        page_size = row[0] if row else 0
+    except Exception:
+        pass
+
+    # Last modified time
+    last_modified = None
+    if db_path.exists():
+        last_modified = os.path.getmtime(db_path)
+
     try:
         device_count = await app_instance.store.hosts.count()
     except Exception:
         device_count = await app_instance.db.get_identity_count()
+
     return {
-        "db_path": str(config.db_path),
+        "db_path": str(db_path),
         "db_size_bytes": db_size,
+        "wal_size_bytes": wal_size,
         "device_count": device_count,
         "cache_dir": str(config.cache_dir),
+        "table_counts": table_counts,
+        "page_count": page_count,
+        "page_size": page_size,
+        "last_modified": last_modified,
     }
 
 
