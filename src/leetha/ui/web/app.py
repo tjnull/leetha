@@ -66,7 +66,7 @@ def _sanitize_hostname(name: str | None) -> str | None:
         parts = c.split("._")
         instance = parts[0]
         service = parts[1] if len(parts) > 1 else ""
-        instance = _re.sub(r'-[0-9a-f]{12,}$', '', instance, flags=_re.IGNORECASE)
+        instance = _re.sub(r'-[0-9a-f]{6,}$', '', instance, flags=_re.IGNORECASE)
         if len(instance) <= 5 and service and service not in ("tcp", "udp"):
             c = service
         else:
@@ -74,7 +74,13 @@ def _sanitize_hostname(name: str | None) -> str | None:
     if c.endswith(".local"):
         c = c[:-6]
     c = c.rstrip(".")
-    return c or name
+    result = c or name
+
+    # Final safety net: reject hostnames that are UUIDs, hex strings, or domains
+    from leetha.evidence.hostname import is_valid_hostname
+    if not is_valid_hostname(result):
+        return None
+    return result
 
 
 # --- Rate limiting (in-memory token bucket) ---
