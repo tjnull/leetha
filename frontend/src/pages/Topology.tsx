@@ -13,15 +13,17 @@ import {
   type Node,
   type Edge,
   type NodeMouseHandler,
+  type Connection,
   BackgroundVariant,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import ELK from "elkjs/lib/elk.bundled.js";
-import { fetchTopology } from "@/lib/api";
+import { fetchTopology, createTopologyOverride, deleteTopologyOverride } from "@/lib/api";
+import { toast } from "sonner";
 import { TopologyNode } from "@/components/topology/TopologyNode";
 import { DeviceDrawer } from "@/components/shared/DeviceDrawer";
 import { DEVICE_TYPE_COLORS } from "@/lib/constants";
-import { Loader2, Filter, ChevronDown, Maximize } from "lucide-react";
+import { Loader2, Filter, ChevronDown, Maximize, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const elk = new ELK();
@@ -132,6 +134,11 @@ function TopologyInner({ subscribe }: TopologyInnerProps) {
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
   const [hiddenSubnets, setHiddenSubnets] = useState<Set<string>>(new Set());
 
+  // Context menu for manual edge deletion
+  const [contextMenu, setContextMenu] = useState<{
+    x: number; y: number; edgeId: string; childMac: string;
+  } | null>(null);
+
   const activeFilterCount = hiddenTypes.size + hiddenSubnets.size;
 
   // Close filter dropdown when clicking outside
@@ -218,8 +225,11 @@ function TopologyInner({ subscribe }: TopologyInnerProps) {
           stroke = "#64748b"; strokeWidth = 1.5; strokeDasharray = "5 4";  // Gray dashed — wired client
         } else if (t === "member") {
           stroke = "#475569"; strokeWidth = 1; strokeDasharray = "4 4";
+        } else if (t === "manual_link") {
+          stroke = "#ffffff"; strokeWidth = 2.5; animated = true;
         }
 
+        const isManual = t === "manual_link";
         return {
           id: `e-${i}`,
           source: e.source,
@@ -227,6 +237,11 @@ function TopologyInner({ subscribe }: TopologyInnerProps) {
           type: "smoothstep",
           style: { stroke, strokeWidth, strokeDasharray },
           animated,
+          ...(isManual ? {
+            label: "📌",
+            labelStyle: { fontSize: 12 },
+            labelBgStyle: { fill: "transparent" },
+          } : {}),
         };
       });
 
@@ -245,6 +260,54 @@ function TopologyInner({ subscribe }: TopologyInnerProps) {
       setDrawerMac(node.id);
     }
   }, []);
+
+  const onConnect = useCallback(
+    async (connection: Connection) => {
+      if (!connection.source || !connection.target) return;
+      // User drags from child's bottom handle (source) to parent's top handle (target)
+      const childMac = connection.source;
+      const parentMac = connection.target;
+      try {
+        await createTopologyOverride(childMac, parentMac);
+        queryClient.invalidateQueries({ queryKey: ["topology"] });
+        toast.success("Connection override created");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to create connection");
+      }
+    },
+    [queryClient],
+  );
+
+  const onEdgeContextMenu = useCallback(
+    (event: React.MouseEvent, edge: Edge) => {
+      event.preventDefault();
+      // Only show context menu for manual edges (white stroke)
+      const edgeStroke = (edge.style as Record<string, unknown> | undefined)?.stroke;
+      if (edgeStroke !== "#ffffff") return;
+      setContextMenu({ x: event.clientX, y: event.clientY, edgeId: edge.id, childMac: edge.target });
+    },
+    [],
+  );
+
+  const handleRemoveOverride = useCallback(async () => {
+    if (!contextMenu) return;
+    try {
+      await deleteTopologyOverride(contextMenu.childMac);
+      queryClient.invalidateQueries({ queryKey: ["topology"] });
+      toast.success("Override removed");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to remove override");
+    }
+    setContextMenu(null);
+  }, [contextMenu, queryClient]);
+
+  // Close context menu on click anywhere
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handler = () => setContextMenu(null);
+    window.addEventListener("click", handler);
+    return () => window.removeEventListener("click", handler);
+  }, [contextMenu]);
 
   const toggleType = (type: string) => {
     setHiddenTypes((prev) => {
@@ -286,6 +349,8 @@ function TopologyInner({ subscribe }: TopologyInnerProps) {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeClick={onNodeClick}
+        onConnect={onConnect}
+        onEdgeContextMenu={onEdgeContextMenu}
         nodeTypes={nodeTypes}
         fitView
         fitViewOptions={{ padding: 0.2, maxZoom: 1.5 }}
@@ -293,6 +358,7 @@ function TopologyInner({ subscribe }: TopologyInnerProps) {
         maxZoom={3}
         colorMode="dark"
         proOptions={{ hideAttribution: true }}
+        connectionLineStyle={{ stroke: "#ffffff", strokeWidth: 2 }}
       >
         <Controls position="bottom-left" />
         <MiniMap
@@ -313,6 +379,22 @@ function TopologyInner({ subscribe }: TopologyInnerProps) {
         />
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#ffffff08" />
       </ReactFlow>
+
+      {/* Right-click context menu for manual edges */}
+      {contextMenu && (
+        <div
+          className="fixed z-50 rounded-lg border border-border bg-card shadow-xl py-1 min-w-[180px]"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          <button
+            onClick={handleRemoveOverride}
+            className="flex items-center gap-2 w-full px-3 py-2 text-sm text-left hover:bg-secondary/80 text-destructive"
+          >
+            <X size={14} />
+            Remove override
+          </button>
+        </div>
+      )}
 
       {/* Floating toolbar — top left */}
       <div className="absolute top-3 left-3 flex items-center gap-2 z-10">
