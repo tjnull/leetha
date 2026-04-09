@@ -2336,17 +2336,25 @@ async def websocket_endpoint(websocket: WebSocket):
     if not app_instance or not getattr(app_instance, "_running", False):
         await websocket.close(code=1013, reason="Service initializing")
         return
+    # Determine which subprotocol to echo back (required by WebSocket spec)
+    accepted_subprotocol = None
     if _auth_enabled:
         token = _extract_ws_token(websocket)
         if not token:
             await websocket.close(code=1008, reason="Token required")
             return
+        # Echo the auth subprotocol so the handshake succeeds
+        for proto in (websocket.headers.get("sec-websocket-protocol") or "").split(","):
+            proto = proto.strip()
+            if proto.startswith("auth."):
+                accepted_subprotocol = proto
+                break
         from leetha.auth.tokens import hash_token
         token_info = await app_instance.db.validate_token(hash_token(token))
         if token_info is None:
             await websocket.close(code=1008, reason="Invalid token")
             return
-    await websocket.accept()
+    await websocket.accept(subprotocol=accepted_subprotocol)
     events = app_instance.subscribe()
     try:
         while True:
@@ -2444,17 +2452,23 @@ async def websocket_console(websocket: WebSocket):
     if not app_instance or not getattr(app_instance, "_running", False):
         await websocket.close(code=1013, reason="Service initializing")
         return
+    accepted_subprotocol = None
     if _auth_enabled:
         token = _extract_ws_token(websocket)
         if not token:
             await websocket.close(code=1008, reason="Token required")
             return
+        for proto in (websocket.headers.get("sec-websocket-protocol") or "").split(","):
+            proto = proto.strip()
+            if proto.startswith("auth."):
+                accepted_subprotocol = proto
+                break
         from leetha.auth.tokens import hash_token
         token_info = await app_instance.db.validate_token(hash_token(token))
         if token_info is None:
             await websocket.close(code=1008, reason="Invalid token")
             return
-    await websocket.accept()
+    await websocket.accept(subprotocol=accepted_subprotocol)
     events = app_instance.subscribe()
     try:
         while True:
