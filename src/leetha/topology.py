@@ -17,8 +17,7 @@ logger = logging.getLogger(__name__)
 _INFRA_TYPES = frozenset({
     "router", "switch", "access_point", "firewall",
     "gateway", "load_balancer", "mesh_router",
-    "network_device",
-    "unifi switch", "unifi ap", "unifi gateway",
+    "network_device", "wireless_bridge", "cable_modem",
 })
 
 # Normalize non-standard device_type strings to canonical forms
@@ -296,7 +295,7 @@ _DEVICE_TYPE_NORMALIZE: dict[str, str] = {
 
     # --- IoT / ICS / SCADA ---
     "microcontroller": "iot",
-    "robot_vacuum": "iot",
+    "robot_vacuum": "robot_vacuum",
     "health_device": "iot",
     "medical_device": "iot",
     "sensor": "iot",
@@ -560,9 +559,9 @@ _VENDOR_DEVICE_TYPE_HINTS: dict[str, str] = {
     "roku": "streaming_device",
     "nvidia": "streaming_device",
     # --- IoT Sensors / Vacuums ---
-    "roborock": "iot",
-    "irobot": "iot",
-    "ecovacs": "iot",
+    "roborock": "robot_vacuum",
+    "irobot": "robot_vacuum",
+    "ecovacs": "robot_vacuum",
     "espressif": "iot",
     "withings": "iot",
     "tuya": "iot",
@@ -671,6 +670,21 @@ _VENDOR_DEVICE_TYPE_HINTS: dict[str, str] = {
     "hashicorp": "server",
     "docker": "server",
     "kubernetes": "server",
+    # --- Multi-product vendors (best guess when no hostname/mDNS clues) ---
+    "google": "smart_speaker",  # Nest/Home speakers are most common Google IoT
+    "apple": "smartphone",       # iPhones are most common Apple device on networks
+    "samsung": "smartphone",     # Galaxy phones are most common Samsung device
+    "asus": "workstation",       # ASUS devices without specific type are usually PCs
+    "asustek": "workstation",
+    "dell": "workstation",
+    "lenovo": "workstation",
+    "hp": "workstation",
+    "hewlett packard": "workstation",
+    "intel": "workstation",
+    "acer": "workstation",
+    "msi": "workstation",
+    "gigabyte": "workstation",
+    "microsoft": "workstation",
     # --- Phone/Tablet manufacturers ---
     "oneplus": "smartphone",
     "xiaomi": "smartphone",
@@ -731,8 +745,8 @@ _VENDOR_DEVICE_TYPE_HINTS: dict[str, str] = {
     "sengled": "smart_lighting",
     "tado": "thermostat",
     "honeywell home": "thermostat",
-    "irobot": "iot",
-    "ecovacs": "iot",
+    "irobot": "robot_vacuum",
+    "ecovacs": "robot_vacuum",
     "kwikset": "smart_lock",
     "schlage": "smart_lock",
     # --- Appliances ---
@@ -1148,8 +1162,8 @@ _HOSTNAME_DEVICE_HINTS: list[tuple[str, str]] = [
     ("camera", "camera"),
     ("cam-", "camera"),
     ("thermostat", "thermostat"),
-    ("vacuum", "iot"),
-    ("roborock", "iot"),
+    ("vacuum", "robot_vacuum"),
+    ("roborock", "robot_vacuum"),
     ("printer", "printer"),
     ("nas", "nas"),
     ("proxmox", "server"),
@@ -1280,8 +1294,8 @@ _HOSTNAME_DEVICE_HINTS: list[tuple[str, str]] = [
     ("shield", "streaming_device"),
     # --- IoT/Smart Home ---
     ("ecobee", "thermostat"),
-    ("roomba", "iot"),
-    ("roborock", "iot"),
+    ("roomba", "robot_vacuum"),
+    ("roborock", "robot_vacuum"),
     ("dyson-pure", "air_purifier"),
     ("dyson", "air_purifier"),
     # --- Ubiquiti model codes ---
@@ -1814,9 +1828,9 @@ def build_topology_graph(
     device_nodes = []
     for d in devices:
         mac = d["mac"]
-        # Skip devices with no IP — they have no network presence to map
+        # Skip devices with no IP at all — they have no network presence to map
         # (e.g., monitoring interfaces that only see LLDP)
-        if not d.get("ip_v4"):
+        if not d.get("ip_v4") and not d.get("ip_v6"):
             continue
         device_type = _normalize_device_type(d.get("device_type"))
         device_type = _infer_type_from_vendor(device_type, d.get("manufacturer"))
@@ -1884,7 +1898,7 @@ def build_topology_graph(
             "type": device_type,
             "hostname": _clean_hostname(d.get("hostname"), device_type,
                                         d.get("manufacturer"), d.get("model")),
-            "ip": d.get("ip_v4"),
+            "ip": d.get("ip_v4") or d.get("ip_v6"),
             "model": d.get("model"),
             "manufacturer": d.get("manufacturer"),
             "confidence": d.get("confidence", 0),
@@ -2144,6 +2158,8 @@ def build_topology_graph(
                 gw = gateway_subnet_to_mac.get(subnet) or next(iter(gateway_macs), None)
                 if gw:
                     edges.append({"source": gw, "target": mac, "type": "wireless_link"})
+                else:
+                    edges.append({"source": "internet", "target": mac, "type": "client_link"})
         elif conn_type == "unknown" and aps:
             # Unknown with both APs and switches — route through AP if device
             # type suggests a client device (not infrastructure)
@@ -2183,6 +2199,10 @@ def build_topology_graph(
             gw = gateway_subnet_to_mac.get(subnet) or next(iter(gateway_macs), None)
             if gw:
                 edges.append({"source": gw, "target": mac, "type": "client_link"})
+            else:
+                # Last resort: connect to any infrastructure node or internet
+                any_infra = next((n["id"] for n in device_nodes if n["is_infrastructure"] or n["is_gateway"]), None)
+                edges.append({"source": any_infra or "internet", "target": mac, "type": "client_link"})
 
     return {
         "nodes": nodes,
