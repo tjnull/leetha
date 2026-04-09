@@ -59,10 +59,10 @@ export function useWebSocket(path = "/ws") {
     setStatus("connecting");
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     const token = localStorage.getItem("leetha_token");
-    const wsUrl = token
-      ? `${proto}//${location.host}${pathRef.current}?token=${encodeURIComponent(token)}`
-      : `${proto}//${location.host}${pathRef.current}`;
-    const ws = new WebSocket(wsUrl);
+    const wsUrl = `${proto}//${location.host}${pathRef.current}`;
+    const ws = token
+      ? new WebSocket(wsUrl, [`auth.${token}`])
+      : new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {

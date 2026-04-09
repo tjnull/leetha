@@ -2316,10 +2316,28 @@ async def api_sync_all_stream():
 
 # --- WebSocket ---
 
+def _extract_ws_token(websocket: WebSocket) -> str | None:
+    """Extract auth token from WebSocket without exposing it in the URL.
+
+    Checks (in order):
+    1. Sec-WebSocket-Protocol header with "auth.<token>" subprotocol
+    2. Query param fallback for backward compatibility
+    """
+    # Prefer subprotocol: client sends ["auth.<token>"] as requested subprotocols
+    for proto in (websocket.headers.get("sec-websocket-protocol") or "").split(","):
+        proto = proto.strip()
+        if proto.startswith("auth."):
+            return proto[5:]
+    # Fallback to query param (deprecated — will be removed)
+    return websocket.query_params.get("token")
+
 @fastapi_app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    if not app_instance or not getattr(app_instance, "_running", False):
+        await websocket.close(code=1013, reason="Service initializing")
+        return
     if _auth_enabled:
-        token = websocket.query_params.get("token")
+        token = _extract_ws_token(websocket)
         if not token:
             await websocket.close(code=1008, reason="Token required")
             return
@@ -2423,8 +2441,11 @@ async def websocket_endpoint(websocket: WebSocket):
 @fastapi_app.websocket("/ws/console")
 async def websocket_console(websocket: WebSocket):
     """WebSocket for live packet stream (console page)."""
+    if not app_instance or not getattr(app_instance, "_running", False):
+        await websocket.close(code=1013, reason="Service initializing")
+        return
     if _auth_enabled:
-        token = websocket.query_params.get("token")
+        token = _extract_ws_token(websocket)
         if not token:
             await websocket.close(code=1008, reason="Token required")
             return
@@ -2584,9 +2605,8 @@ def run_web(interfaces: list | None = None, host: str = "0.0.0.0", port: int = 8
                     raw = load_admin_token()
                     if raw:
                         rc = RichConsole()
-                        rc.print("\n[bold green]Admin token:[/bold green]")
-                        rc.print(f"[bold yellow]{raw}[/bold yellow]")
-                        rc.print("[dim]Saved at ~/.leetha/admin-token[/dim]\n")
+                        rc.print(f"\n[bold green]Admin token:[/bold green] [dim]{raw[:8]}{'*' * 24}[/dim]")
+                        rc.print("[dim]Full token in ~/.leetha/admin-token[/dim]\n")
                 # Keep the event loop running so background tasks continue
                 loop.run_forever()
             except Exception as e:
@@ -2617,9 +2637,8 @@ async def run_web_async(interfaces: list | None = None, host: str = "0.0.0.0", p
         raw = load_admin_token()
         if raw:
             rc = RichConsole()
-            rc.print("\n[bold green]Admin token:[/bold green]")
-            rc.print(f"[bold yellow]{raw}[/bold yellow]")
-            rc.print("[dim]Saved at ~/.leetha/admin-token[/dim]\n")
+            rc.print(f"\n[bold green]Admin token:[/bold green] [dim]{raw[:8]}{'*' * 24}[/dim]")
+            rc.print("[dim]Full token in ~/.leetha/admin-token[/dim]\n")
 
     config = uvicorn.Config(_wrapped_app, host=host, port=port, log_level="info")
     server = uvicorn.Server(config)

@@ -70,10 +70,10 @@ function _ensureConsoleWs() {
   if (_consoleWs && (_consoleWs.readyState === WebSocket.OPEN || _consoleWs.readyState === WebSocket.CONNECTING)) return;
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   const token = localStorage.getItem("leetha_token");
-  const wsUrl = token
-    ? `${proto}//${window.location.host}/ws/console?token=${encodeURIComponent(token)}`
-    : `${proto}//${window.location.host}/ws/console`;
-  const ws = new WebSocket(wsUrl);
+  const wsUrl = `${proto}//${window.location.host}/ws/console`;
+  const ws = token
+    ? new WebSocket(wsUrl, [`auth.${token}`])
+    : new WebSocket(wsUrl);
   _consoleWs = ws;
 
   ws.onmessage = (event) => {
