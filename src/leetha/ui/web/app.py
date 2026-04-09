@@ -807,26 +807,26 @@ async def _build_context_from_store(store, data_dir, interface=None,
     from leetha.analysis.attack_surface import AnalysisContext
     from leetha.store.models import Device, Observation
 
-    # Build Device objects from verdicts + hosts
-    verdicts = await store.verdicts.find_all(limit=1000)
+    # Build Device objects from ALL hosts (including those without verdicts)
+    all_hosts = await store.hosts.find_all(limit=1000)
     devices = []
-    for v in verdicts:
-        h = await store.hosts.find_by_addr(v.hw_addr)
+    for h in all_hosts:
+        v = await store.verdicts.find_by_addr(h.hw_addr)
         devices.append(Device(
-            mac=v.hw_addr,
-            ip_v4=h.ip_addr if h else None,
-            ip_v6=h.ip_v6 if h else None,
-            manufacturer=v.vendor,
-            device_type=v.category,
-            os_family=v.platform,
-            os_version=v.platform_version,
-            hostname=v.hostname,
-            confidence=v.certainty,
-            first_seen=h.discovered_at if h and h.discovered_at else datetime.now(),
-            last_seen=h.last_active if h and h.last_active else datetime.now(),
-            alert_status=h.disposition if h else "new",
-            is_randomized_mac=h.mac_randomized if h else False,
-            correlated_mac=h.real_hw_addr if h else None,
+            mac=h.hw_addr,
+            ip_v4=h.ip_addr,
+            ip_v6=h.ip_v6,
+            manufacturer=v.vendor if v else None,
+            device_type=v.category if v else None,
+            os_family=v.platform if v else None,
+            os_version=v.platform_version if v else None,
+            hostname=v.hostname if v else None,
+            confidence=v.certainty if v else 0,
+            first_seen=h.discovered_at if h.discovered_at else datetime.now(),
+            last_seen=h.last_active if h.last_active else datetime.now(),
+            alert_status=h.disposition or "new",
+            is_randomized_mac=h.mac_randomized,
+            correlated_mac=h.real_hw_addr,
         ))
     device_map = {d.mac: d for d in devices}
 
@@ -1886,12 +1886,12 @@ async def api_topology():
         return _topology_cache["data"]
 
     try:
-        # 1. Devices — from verdicts + hosts
-        verdicts = await app_instance.store.verdicts.find_all(limit=1000)
+        # 1. Devices — from ALL hosts (including those without verdicts)
+        all_hosts = await app_instance.store.hosts.find_all(limit=1000)
         devices = []
-        for v in verdicts:
-            h = await app_instance.store.hosts.find_by_addr(v.hw_addr)
-            ovr = await app_instance.store.overrides.find_by_addr(v.hw_addr)
+        for h in all_hosts:
+            v = await app_instance.store.verdicts.find_by_addr(h.hw_addr)
+            ovr = await app_instance.store.overrides.find_by_addr(h.hw_addr)
             d = _build_device_dict(v, h, ovr)
             devices.append(d)
 

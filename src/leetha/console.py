@@ -992,12 +992,12 @@ class LeethaConsole:
             self._error("Store not initialized")
             return
 
-        verdicts = await store.verdicts.find_all(limit=500)
-        if not verdicts:
+        all_hosts = await store.hosts.find_all(limit=500)
+        if not all_hosts:
             self._hint("No devices discovered yet — start a capture first")
             return
 
-        self._section("Discovered Devices", f"{len(verdicts)} hosts")
+        self._section("Discovered Devices", f"{len(all_hosts)} hosts")
 
         table = Table(
             show_header=True, show_edge=False, pad_edge=True, box=None,
@@ -1010,30 +1010,28 @@ class LeethaConsole:
         table.add_column("OS", style="white", width=12)
         table.add_column("Conf", justify="right", width=6)
 
-        for v in verdicts:
-            h = await store.hosts.find_by_addr(v.hw_addr)
-            mac = v.hw_addr
-            ip = h.ip_addr if h else None
-            vendor = v.vendor or "Unknown"
-            category = v.category or "unknown"
-            platform = v.platform or None
-            hostname = v.hostname or None
-            certainty = v.certainty or 0
+        for h in all_hosts:
+            v = await store.verdicts.find_by_addr(h.hw_addr)
+            mac = h.hw_addr
+            ip = h.ip_addr
+            vendor = v.vendor if v else None
+            category = v.category if v else None
+            platform = v.platform if v else None
+            hostname = v.hostname if v else None
+            certainty = v.certainty if v else 0
 
             # Show randomized MAC indicator
             mac_display = mac
-            if h and h.mac_randomized:
+            if h.mac_randomized:
                 mac_display = f"{mac} [magenta]R[/magenta]"
 
-            name = hostname or vendor
-            if name == "Unknown":
-                name = "[dim]—[/dim]"
+            name = hostname or vendor or "[dim]—[/dim]"
 
             table.add_row(
                 name,
                 mac_display,
                 ip or "[dim]—[/dim]",
-                _display_type(category),
+                _display_type(category or "unknown"),
                 platform or "[dim]—[/dim]",
                 self._confidence_bar(certainty),
             )

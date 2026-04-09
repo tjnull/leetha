@@ -177,16 +177,8 @@ class Pipeline:
         except Exception:
             logger.debug("Sighting record failed", exc_info=True)
 
-        if not evidence_list:
-            return
-
-        # 3. Accumulate evidence and compute verdict
-        self._evidence_buffer[hw_addr].extend(evidence_list)
-        verdict = self.verdict_engine.compute(hw_addr, self._evidence_buffer[hw_addr])
-        # Write capped evidence back to prevent unbounded growth
-        self._evidence_buffer[hw_addr] = list(verdict.evidence_chain)
-
-        # 4. Upsert host — split IPv4 vs IPv6, detect MAC randomization
+        # 3. ALWAYS upsert host so every MAC we see appears in the devices
+        # list, even if no processor generated evidence for this packet.
         raw_ip = packet.ip_addr
         ip_v4 = None
         ip_v6 = None
@@ -241,7 +233,16 @@ class Pipeline:
         except Exception:
             logger.debug("Host upsert failed for %s", hw_addr, exc_info=True)
 
-        # 5. Evaluate finding rules BEFORE storing verdict
+        if not evidence_list:
+            return
+
+        # 5. Accumulate evidence and compute verdict
+        self._evidence_buffer[hw_addr].extend(evidence_list)
+        verdict = self.verdict_engine.compute(hw_addr, self._evidence_buffer[hw_addr])
+        # Write capped evidence back to prevent unbounded growth
+        self._evidence_buffer[hw_addr] = list(verdict.evidence_chain)
+
+        # 6. Evaluate finding rules BEFORE storing verdict
         #    so identity_shift can compare old vs new verdict
         for rule in self._rule_instances:
             try:
@@ -251,7 +252,7 @@ class Pipeline:
             except Exception:
                 logger.debug("Rule %s failed", type(rule).__name__, exc_info=True)
 
-        # 6. Transition disposition from "new" to "known" after rules
+        # 7. Transition disposition from "new" to "known" after rules
         if host.disposition == "new":
             host.disposition = "known"
             try:
@@ -259,13 +260,13 @@ class Pipeline:
             except Exception:
                 pass
 
-        # 7. Store verdict AFTER rules (so identity_shift sees the old verdict)
+        # 8. Store verdict AFTER rules (so identity_shift sees the old verdict)
         try:
             await self.store.verdicts.upsert(verdict)
         except Exception:
             logger.debug("Verdict upsert failed for %s", hw_addr, exc_info=True)
 
-        # 8. Resolve device identity
+        # 9. Resolve device identity
         try:
             await self._resolve_identity(hw_addr, verdict, host)
         except Exception:

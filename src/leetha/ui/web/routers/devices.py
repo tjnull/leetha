@@ -124,12 +124,12 @@ async def export_devices(
     _validate_mac, _sanitize_hostname, _build_device_dict = _get_helpers()
     app_instance = _get_app()
 
-    # Build device dicts from verdicts+hosts
-    verdicts = await app_instance.store.verdicts.find_all(limit=10000)
+    # Build device dicts from ALL hosts (including those without verdicts)
+    hosts = await app_instance.store.hosts.find_all(limit=10000)
     all_devices = []
-    for v in verdicts:
-        h = await app_instance.store.hosts.find_by_addr(v.hw_addr)
-        ovr = await app_instance.store.overrides.find_by_addr(v.hw_addr)
+    for h in hosts:
+        v = await app_instance.store.verdicts.find_by_addr(h.hw_addr)
+        ovr = await app_instance.store.overrides.find_by_addr(h.hw_addr)
         all_devices.append(_build_device_dict(v, h, ovr))
 
     # Apply filters

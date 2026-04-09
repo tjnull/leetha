@@ -84,20 +84,22 @@ class VerdictRepository:
         Performs a single JOIN between verdicts and hosts instead of N+1 queries.
         Returns (rows, total_count).
         """
+        # Query from hosts LEFT JOIN verdicts so every discovered device
+        # appears even if no verdict has been computed yet.
         select = """
-            SELECT v.hw_addr, v.category, v.vendor, v.platform,
+            SELECT h.hw_addr, v.category, v.vendor, v.platform,
                    v.platform_version, v.model, v.hostname, v.certainty,
                    v.evidence_chain,
                    h.ip_addr, h.ip_v6, h.discovered_at, h.last_active,
                    h.mac_randomized, h.real_hw_addr, h.disposition,
                    h.identity_id
-            FROM verdicts v
-            LEFT JOIN hosts h ON v.hw_addr = h.hw_addr
+            FROM hosts h
+            LEFT JOIN verdicts v ON h.hw_addr = v.hw_addr
         """
         count_select = """
             SELECT COUNT(*)
-            FROM verdicts v
-            LEFT JOIN hosts h ON v.hw_addr = h.hw_addr
+            FROM hosts h
+            LEFT JOIN verdicts v ON h.hw_addr = v.hw_addr
         """
 
         conditions: list[str] = []
@@ -105,7 +107,7 @@ class VerdictRepository:
 
         if q:
             conditions.append(
-                "(v.hw_addr LIKE ? OR v.hostname LIKE ? OR v.vendor LIKE ? OR h.ip_addr LIKE ?)"
+                "(h.hw_addr LIKE ? OR v.hostname LIKE ? OR v.vendor LIKE ? OR h.ip_addr LIKE ?)"
             )
             like = f"%{q}%"
             params.extend([like, like, like, like])
@@ -122,11 +124,11 @@ class VerdictRepository:
             conditions.append("h.disposition = ?")
             params.append(alert_status)
         if confidence_min is not None:
-            conditions.append("v.certainty >= ?")
+            conditions.append("COALESCE(v.certainty, 0) >= ?")
             params.append(confidence_min)
         if interface:
             conditions.append(
-                "v.hw_addr IN (SELECT DISTINCT hw_addr FROM sightings WHERE interface = ?)"
+                "h.hw_addr IN (SELECT DISTINCT hw_addr FROM sightings WHERE interface = ?)"
             )
             params.append(interface)
 
@@ -137,8 +139,8 @@ class VerdictRepository:
         sort_col_map = {
             "last_seen": "h.last_active",
             "first_seen": "h.discovered_at",
-            "confidence": "v.certainty",
-            "mac": "v.hw_addr",
+            "confidence": "COALESCE(v.certainty, 0)",
+            "mac": "h.hw_addr",
             "manufacturer": "v.vendor",
             "device_type": "v.category",
             "hostname": "v.hostname",
@@ -163,7 +165,7 @@ class VerdictRepository:
                 "os_family": row["platform"],
                 "os_version": row["platform_version"],
                 "hostname": row["hostname"],
-                "confidence": row["certainty"],
+                "confidence": row["certainty"] or 0,
                 "model": row["model"],
                 "ip_v4": row["ip_addr"],
                 "ip_v6": row["ip_v6"],
