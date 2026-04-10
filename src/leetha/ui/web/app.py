@@ -246,6 +246,10 @@ fastapi_app.include_router(_auth_router)
 from leetha.ui.web.routers.notifications import router as _notifications_router
 fastapi_app.include_router(_notifications_router)
 
+# --- Remote Sensor Endpoints ---
+from leetha.ui.web.routers.remote import router as _remote_router
+fastapi_app.include_router(_remote_router)
+
 
 @fastapi_app.get("/health")
 async def health():
