@@ -529,8 +529,11 @@ class LeethaConsole:
                 )
             else:
                 self.console.print(
-                    "  [dim]No sensors connected. Build a sensor from the web UI or use[/dim] "
-                    "[bold cyan]start web[/bold cyan]"
+                    "  [yellow]\u25cb[/yellow] No sensors connected\n"
+                    "  [dim]To deploy remote sensors:[/dim]\n"
+                    "    [dim]1.[/dim] [bold cyan]start web[/bold cyan]         [dim]Launch the web dashboard[/dim]\n"
+                    "    [dim]2.[/dim] [dim]Go to[/dim] [bold]Adapters > Remote Sensors > Build Sensor[/bold]\n"
+                    "    [dim]3.[/dim] [dim]Configure, build, and deploy the binary to your remote device[/dim]"
                 )
         else:
             self.console.print(
