@@ -10,6 +10,8 @@ import {
   type AttackFinding,
   type AttackChain,
   type AttackExclusion,
+  type ToolRecommendation,
+  type AffectedDevice,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,6 +32,9 @@ import {
   Plus,
   Trash2,
   Search,
+  ExternalLink,
+  Terminal,
+  Download,
 } from "lucide-react";
 import {
   BarChart,
@@ -110,27 +115,59 @@ function copyCmd(text: string, btn: HTMLButtonElement) {
   );
 }
 
-function DeviceChip({ dev }: { dev: { mac: string; ip?: string; hostname?: string; port?: string } }) {
+function DeviceChip({ dev }: { dev: AffectedDevice }) {
   let label = dev.ip || dev.mac || "?";
   if (dev.hostname) label = `${dev.hostname} (${label})`;
   if (dev.port) label += `:${dev.port}`;
+  const version = dev.service_version;
   return (
-    <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-secondary border border-border text-muted-foreground">
+    <span className="inline-flex items-center gap-1.5 text-[11px] font-mono px-2 py-0.5 rounded bg-secondary border border-border text-muted-foreground">
       {label}
+      {version && <span className="text-[10px] text-primary/70">{version}</span>}
     </span>
   );
 }
 
-function ToolRow({ tool }: { tool: { name: string; command: string } }) {
+function ToolCard({ tool }: { tool: ToolRecommendation }) {
   return (
-    <div className="flex items-center gap-2 rounded bg-secondary border border-border px-3 py-2">
-      <span className="text-xs font-semibold text-primary whitespace-nowrap min-w-[6rem]">{tool.name}</span>
-      <code className="flex-1 text-xs font-mono text-green-400 bg-background rounded px-2 py-1 overflow-x-auto whitespace-nowrap">
-        {tool.command}
-      </code>
-      <Button variant="ghost" size="sm" className="shrink-0 text-xs h-7" onClick={(e) => copyCmd(tool.command, e.currentTarget)}>
-        <Copy size={12} className="mr-1" /> Copy
-      </Button>
+    <div className="rounded-lg bg-background/60 border border-border overflow-hidden">
+      {/* Tool header */}
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-border/50">
+        <Terminal size={12} className="text-primary shrink-0" />
+        <span className="text-xs font-semibold text-primary">{tool.name}</span>
+        {tool.description && (
+          <span className="text-[11px] text-muted-foreground flex-1 truncate">{tool.description}</span>
+        )}
+        {tool.url && (
+          <a
+            href={tool.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-muted-foreground hover:text-primary transition-colors shrink-0"
+            title={tool.url}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <ExternalLink size={12} />
+          </a>
+        )}
+      </div>
+      {/* Command block */}
+      <div className="flex items-center gap-2 px-3 py-2">
+        <span className="text-green-500/60 text-xs select-none shrink-0">$</span>
+        <code className="flex-1 text-xs font-mono text-green-400 overflow-x-auto whitespace-nowrap scrollbar-none">
+          {tool.command}
+        </code>
+        <Button variant="ghost" size="sm" className="shrink-0 text-xs h-6 px-2 text-muted-foreground hover:text-foreground" onClick={(e) => { e.stopPropagation(); copyCmd(tool.command, e.currentTarget); }}>
+          <Copy size={11} className="mr-1" /> Copy
+        </Button>
+      </div>
+      {/* Install hint */}
+      {tool.install_hint && (
+        <div className="flex items-center gap-1.5 px-3 py-1.5 border-t border-border/30 bg-secondary/30">
+          <Download size={10} className="text-muted-foreground/50 shrink-0" />
+          <code className="text-[10px] font-mono text-muted-foreground/60">{tool.install_hint}</code>
+        </div>
+      )}
     </div>
   );
 }
@@ -661,16 +698,17 @@ function CollapsibleChainCard({
   const triggeredCount = chain.triggered_by?.length ?? chain.findings?.length ?? 0;
 
   return (
-    <div id={`chain-${chain.chain_id ?? index}`} className="rounded-lg border border-yellow-500/30 bg-yellow-500/[0.04]">
+    <div id={`chain-${chain.chain_id ?? index}`} className="rounded-xl border border-yellow-500/25 bg-yellow-500/[0.03] overflow-hidden">
       {/* Header — always visible */}
       <button
         onClick={onToggle}
-        className="w-full flex items-center gap-2 flex-wrap px-4 py-3 text-left hover:bg-yellow-500/[0.06] transition-colors rounded-lg"
+        className="w-full flex items-center gap-2 flex-wrap px-4 py-3 text-left hover:bg-yellow-500/[0.06] transition-colors"
       >
         <SeverityBadge severity={chain.severity} />
+        {chain.chain_id && <span className="text-[10px] font-mono text-muted-foreground/60">{chain.chain_id}</span>}
         <span className="font-semibold text-sm flex-1 min-w-0 truncate">{chain.name}</span>
         {chain.interface && (
-          <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-blue-500/15 text-blue-400">{chain.interface}</span>
+          <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-blue-500/15 text-blue-400">{chain.interface}</span>
         )}
         <span className="text-xs text-muted-foreground">{triggeredCount} finding{triggeredCount !== 1 ? "s" : ""}</span>
         {expanded ? <ChevronUp size={16} className="text-muted-foreground shrink-0" /> : <ChevronDown size={16} className="text-muted-foreground shrink-0" />}
@@ -678,49 +716,80 @@ function CollapsibleChainCard({
 
       {/* Expanded content */}
       {expanded && (
-        <div className="px-4 pb-4 pt-1 space-y-3">
-          <p className="text-sm text-muted-foreground">{chain.description}</p>
+        <div className="border-t border-yellow-500/15">
+          {/* Description */}
+          <div className="px-4 py-3">
+            <p className="text-sm text-muted-foreground leading-relaxed">{chain.description}</p>
+          </div>
 
+          {/* Section 1: Trigger — why this chain was identified */}
           {chain.triggered_by && chain.triggered_by.length > 0 && (
-            <div className="rounded bg-black/15 border-l-2 border-l-yellow-500 p-3">
-              <div className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Identified because</div>
-              {chain.triggered_by.map((trigger, ti) => (
-                <div key={ti} className="mb-2">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <SeverityBadge severity={trigger.severity} small />
-                    <span className="text-xs font-mono text-muted-foreground">{trigger.rule_id}</span>
-                    <span className="text-sm font-medium">{trigger.name}</span>
-                  </div>
-                  {trigger.evidence && trigger.evidence.filter(Boolean).length > 0 && (
-                    <div className="text-xs text-muted-foreground ml-6 mb-1">{trigger.evidence.filter(Boolean).join(" · ")}</div>
-                  )}
-                  {trigger.affected_devices && trigger.affected_devices.length > 0 && (
-                    <div className="flex flex-wrap gap-1 ml-6">
-                      {trigger.affected_devices.slice(0, 6).map((dev, di) => <DeviceChip key={di} dev={dev} />)}
-                      {trigger.affected_devices.length > 6 && (
-                        <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-secondary border border-border text-muted-foreground">+{trigger.affected_devices.length - 6} more</span>
-                      )}
+            <div className="mx-4 mb-3 rounded-lg border border-border/50 overflow-hidden">
+              <div className="flex items-center gap-2 px-3 py-2 bg-yellow-500/[0.06] border-b border-border/50">
+                <div className="w-1 h-4 rounded-full bg-yellow-500 shrink-0" />
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-yellow-400/80">Identified Because</span>
+              </div>
+              <div className="p-3 space-y-3">
+                {chain.triggered_by.map((trigger, ti) => (
+                  <div key={ti}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <SeverityBadge severity={trigger.severity} small />
+                      <span className="text-[10px] font-mono text-muted-foreground/60">{trigger.rule_id}</span>
+                      <span className="text-sm font-medium">{trigger.name}</span>
                     </div>
-                  )}
-                </div>
-              ))}
+                    {trigger.evidence && trigger.evidence.filter(Boolean).length > 0 && (
+                      <p className="text-[11px] text-muted-foreground/70 ml-6 mb-1">{trigger.evidence.filter(Boolean).join(" · ")}</p>
+                    )}
+                    {trigger.affected_devices && trigger.affected_devices.length > 0 && (
+                      <div className="flex flex-wrap gap-1 ml-6">
+                        {trigger.affected_devices.slice(0, 8).map((dev, di) => <DeviceChip key={di} dev={dev} />)}
+                        {trigger.affected_devices.length > 8 && (
+                          <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-secondary border border-border text-muted-foreground">+{trigger.affected_devices.length - 8} more</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
+          {/* Section 2: Attack Path — ordered steps */}
           {chain.steps && chain.steps.length > 0 && (
-            <div className="space-y-2">
-              {chain.steps.map((step) => (
-                <div key={step.order} className="flex items-start gap-3">
-                  <span className="flex items-center justify-center w-6 h-6 rounded-full bg-yellow-500 text-black text-xs font-bold shrink-0">{step.order}</span>
-                  <span className="text-sm text-muted-foreground pt-0.5">{step.description}</span>
-                </div>
-              ))}
+            <div className="mx-4 mb-3 rounded-lg border border-border/50 overflow-hidden">
+              <div className="flex items-center gap-2 px-3 py-2 bg-secondary/40 border-b border-border/50">
+                <div className="w-1 h-4 rounded-full bg-primary shrink-0" />
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Attack Path</span>
+              </div>
+              <div className="p-3 space-y-0">
+                {chain.steps.map((step, si) => (
+                  <div key={step.order} className="flex items-start gap-3 relative">
+                    {/* Connector line */}
+                    {si < chain.steps!.length - 1 && (
+                      <div className="absolute left-[11px] top-6 w-px h-[calc(100%-4px)] bg-border/60" />
+                    )}
+                    <span className="flex items-center justify-center w-6 h-6 rounded-full bg-primary/15 text-primary text-[11px] font-bold shrink-0 relative z-10 border border-primary/30">
+                      {step.order}
+                    </span>
+                    <span className="text-sm text-muted-foreground pt-0.5 pb-3">{step.description}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
+          {/* Section 3: Arsenal — tools with full details */}
           {chain.tools && chain.tools.length > 0 && (
-            <div className="space-y-1.5">
-              {chain.tools.map((tool, ti) => <ToolRow key={ti} tool={tool} />)}
+            <div className="mx-4 mb-4 rounded-lg border border-border/50 overflow-hidden">
+              <div className="flex items-center gap-2 px-3 py-2 bg-green-500/[0.05] border-b border-border/50">
+                <div className="w-1 h-4 rounded-full bg-green-500 shrink-0" />
+                <Terminal size={12} className="text-green-400" />
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-green-400/80">Arsenal</span>
+                <span className="text-[10px] text-muted-foreground/50">{chain.tools.length} tool{chain.tools.length !== 1 ? "s" : ""}</span>
+              </div>
+              <div className="p-3 space-y-2">
+                {chain.tools.map((tool, ti) => <ToolCard key={ti} tool={tool} />)}
+              </div>
             </div>
           )}
         </div>
@@ -740,46 +809,71 @@ function CollapsibleFindingCard({
   expanded: boolean;
   onToggle: () => void;
 }) {
+  const catColor = CATEGORY_COLORS[finding.category] ?? "#6b7280";
+  const deviceCount = finding.affected_devices?.length ?? 0;
+  const toolCount = finding.tools?.length ?? 0;
+
   return (
-    <div className="rounded-lg border border-border bg-secondary/40 hover:border-muted transition-colors">
+    <div className="rounded-xl border border-border bg-secondary/30 hover:border-muted-foreground/20 transition-colors overflow-hidden">
       {/* Header — always visible */}
       <button
         onClick={onToggle}
-        className="w-full flex items-center gap-2 flex-wrap px-4 py-3 text-left hover:bg-secondary/60 transition-colors rounded-lg"
+        className="w-full flex items-center gap-2 flex-wrap px-4 py-3 text-left hover:bg-secondary/50 transition-colors"
       >
         <SeverityBadge severity={finding.severity} />
-        <span className="text-xs font-mono text-muted-foreground">{finding.rule_id}</span>
+        <span className="text-[10px] font-mono text-muted-foreground/50">{finding.rule_id}</span>
         <span className="font-semibold text-sm flex-1 min-w-0 truncate">{finding.title || finding.name}</span>
-        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border border-border text-muted-foreground">
+        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border text-muted-foreground" style={{ borderColor: `${catColor}40`, color: catColor }}>
           {CATEGORY_LABELS[finding.category] ?? finding.category}
         </span>
+        {deviceCount > 0 && <span className="text-[10px] text-muted-foreground/60">{deviceCount} host{deviceCount !== 1 ? "s" : ""}</span>}
         {expanded ? <ChevronUp size={16} className="text-muted-foreground shrink-0" /> : <ChevronDown size={16} className="text-muted-foreground shrink-0" />}
       </button>
 
       {/* Expanded content */}
       {expanded && (
-        <div className="px-4 pb-4 pt-1 space-y-3">
-          <p className="text-sm text-muted-foreground leading-relaxed">{finding.description}</p>
+        <div className="border-t border-border/50">
+          {/* Description */}
+          <div className="px-4 py-3">
+            <p className="text-sm text-muted-foreground leading-relaxed">{finding.description}</p>
+          </div>
 
+          {/* Evidence */}
           {finding.evidence?.filter(Boolean).length > 0 && (
-            <p className="text-xs font-mono text-muted-foreground/70">{finding.evidence.filter(Boolean).join(" | ")}</p>
+            <div className="mx-4 mb-3 rounded-lg bg-secondary/40 border border-border/40 px-3 py-2">
+              <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 mr-2">Evidence</span>
+              <span className="text-[11px] font-mono text-muted-foreground/80">{finding.evidence.filter(Boolean).join(" · ")}</span>
+            </div>
           )}
 
-          {finding.affected_devices?.length > 0 && (
-            <div>
-              <span className="text-xs font-semibold">Affected hosts:</span>
-              <div className="flex flex-wrap gap-1.5 mt-1">
-                {finding.affected_devices.slice(0, 10).map((dev, i) => <DeviceChip key={i} dev={dev} />)}
-                {finding.affected_devices.length > 10 && (
-                  <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-secondary border border-border text-muted-foreground">+{finding.affected_devices.length - 10} more</span>
+          {/* Affected hosts */}
+          {deviceCount > 0 && (
+            <div className="mx-4 mb-3">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">Affected Hosts</span>
+                <span className="text-[10px] text-muted-foreground/40">{deviceCount}</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {finding.affected_devices.slice(0, 12).map((dev, i) => <DeviceChip key={i} dev={dev} />)}
+                {deviceCount > 12 && (
+                  <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-secondary border border-border text-muted-foreground">+{deviceCount - 12} more</span>
                 )}
               </div>
             </div>
           )}
 
-          {finding.tools?.length > 0 && (
-            <div className="space-y-1.5">
-              {finding.tools.map((tool, i) => <ToolRow key={i} tool={tool} />)}
+          {/* Arsenal */}
+          {toolCount > 0 && (
+            <div className="mx-4 mb-4 rounded-lg border border-border/50 overflow-hidden">
+              <div className="flex items-center gap-2 px-3 py-2 bg-green-500/[0.05] border-b border-border/50">
+                <div className="w-1 h-4 rounded-full bg-green-500 shrink-0" />
+                <Terminal size={12} className="text-green-400" />
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-green-400/80">Arsenal</span>
+                <span className="text-[10px] text-muted-foreground/50">{toolCount} tool{toolCount !== 1 ? "s" : ""}</span>
+              </div>
+              <div className="p-3 space-y-2">
+                {finding.tools.map((tool, i) => <ToolCard key={i} tool={tool} />)}
+              </div>
             </div>
           )}
         </div>

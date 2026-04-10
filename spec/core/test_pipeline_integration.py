@@ -116,9 +116,11 @@ class TestPipelineIntegration:
             await pipeline.process(CapturedPacket(
                 protocol="unknown_proto", hw_addr="aa:bb:cc:dd:ee:ff",
                 ip_addr="192.168.1.1", fields={}))
-            # Should not crash, just skip
+            # Should not crash; host must ALWAYS be stored even without
+            # a matching processor so every MAC appears in the inventory.
             host = await store.hosts.find_by_addr("aa:bb:cc:dd:ee:ff")
-            assert host is None  # nothing stored for unknown protocol
+            assert host is not None
+            assert host.hw_addr == "aa:bb:cc:dd:ee:ff"
             await store.close()
         self._run(_test())
 

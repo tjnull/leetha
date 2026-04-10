@@ -333,7 +333,7 @@ class Database:
         # Performance pragmas
         await self._conn.execute("PRAGMA journal_mode=WAL")
         await self._conn.execute("PRAGMA synchronous=NORMAL")
-        await self._conn.execute("PRAGMA busy_timeout=5000")
+        await self._conn.execute("PRAGMA busy_timeout=30000")
 
         # Schema migrations MUST run before index creation — migrations
         # add columns (interface, network, identity_id) that indexes reference.

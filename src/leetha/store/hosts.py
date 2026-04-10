@@ -40,7 +40,10 @@ class HostRepository:
             ON CONFLICT(hw_addr) DO UPDATE SET
                 ip_addr = COALESCE(excluded.ip_addr, hosts.ip_addr),
                 ip_v6 = COALESCE(excluded.ip_v6, hosts.ip_v6),
-                last_active = excluded.last_active,
+                last_active = CASE
+                    WHEN (julianday(excluded.last_active) - julianday(hosts.last_active)) * 86400 >= 30
+                    THEN excluded.last_active
+                    ELSE hosts.last_active END,
                 mac_randomized = MAX(hosts.mac_randomized, excluded.mac_randomized),
                 real_hw_addr = COALESCE(excluded.real_hw_addr, hosts.real_hw_addr),
                 disposition = CASE WHEN hosts.disposition = 'self' THEN 'self'

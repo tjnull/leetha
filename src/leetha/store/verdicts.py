@@ -86,13 +86,34 @@ class VerdictRepository:
         """
         # Query from hosts LEFT JOIN verdicts so every discovered device
         # appears even if no verdict has been computed yet.
-        select = """
+        # ip_sort_key: convert dotted-quad IPv4 to a 32-bit integer for
+        # correct numeric sorting (e.g. .2 before .100).
+        _IP_SORT_EXPR = (
+            "CASE WHEN h.ip_addr IS NOT NULL AND INSTR(h.ip_addr, '.') > 0 THEN"
+            "  CAST(SUBSTR(h.ip_addr, 1, INSTR(h.ip_addr, '.') - 1) AS INTEGER) * 16777216"
+            " + CAST(SUBSTR(h.ip_addr, INSTR(h.ip_addr, '.') + 1,"
+            "    INSTR(SUBSTR(h.ip_addr, INSTR(h.ip_addr, '.') + 1), '.') - 1) AS INTEGER) * 65536"
+            " + CAST(SUBSTR(h.ip_addr,"
+            "    INSTR(h.ip_addr, '.') + INSTR(SUBSTR(h.ip_addr, INSTR(h.ip_addr, '.') + 1), '.') + 1,"
+            "    INSTR(SUBSTR(h.ip_addr,"
+            "      INSTR(h.ip_addr, '.') + INSTR(SUBSTR(h.ip_addr, INSTR(h.ip_addr, '.') + 1), '.') + 1"
+            "    ), '.') - 1) AS INTEGER) * 256"
+            " + CAST(SUBSTR(h.ip_addr,"
+            "    INSTR(h.ip_addr, '.') + INSTR(SUBSTR(h.ip_addr, INSTR(h.ip_addr, '.') + 1), '.')"
+            "    + INSTR(SUBSTR(h.ip_addr,"
+            "        INSTR(h.ip_addr, '.') + INSTR(SUBSTR(h.ip_addr, INSTR(h.ip_addr, '.') + 1), '.') + 1"
+            "      ), '.') + 1"
+            "  ) AS INTEGER)"
+            " ELSE 4294967295 END"
+        )
+        select = f"""
             SELECT h.hw_addr, v.category, v.vendor, v.platform,
                    v.platform_version, v.model, v.hostname, v.certainty,
                    v.evidence_chain,
                    h.ip_addr, h.ip_v6, h.discovered_at, h.last_active,
                    h.mac_randomized, h.real_hw_addr, h.disposition,
-                   h.identity_id
+                   h.identity_id,
+                   {_IP_SORT_EXPR} AS ip_sort_key
             FROM hosts h
             LEFT JOIN verdicts v ON h.hw_addr = v.hw_addr
         """
@@ -144,8 +165,14 @@ class VerdictRepository:
             "manufacturer": "v.vendor",
             "device_type": "v.category",
             "hostname": "v.hostname",
+            "os_family": "v.platform",
+            "alert_status": "h.disposition",
+            # Sort IPv4 numerically. SQLite CAST('192.168.1.2' AS INTEGER)
+            # only parses the first octet, so we compute a full 32-bit
+            # integer from the four octets for correct ordering.
+            "ip_v4": "ip_sort_key",
         }
-        sort_col = sort_col_map.get(sort, "h.last_active")
+        sort_col = sort_col_map.get(sort, "h.discovered_at")
         sort_dir = "DESC" if order == "desc" else "ASC"
 
         cursor = await self._conn.execute(count_select + where, params)

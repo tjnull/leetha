@@ -70,9 +70,14 @@ export function useWebSocket(path = "/ws") {
       if (mountedRef.current) setStatus("connected");
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       wsRef.current = null;
       if (!mountedRef.current) return;
+      // Don't reconnect on auth rejection — token is invalid
+      if (event.code === 1008) {
+        setStatus("idle");
+        return;
+      }
       // Only reconnect if there are subscribers
       if (handlersRef.current.size > 0) {
         setStatus("reconnecting");

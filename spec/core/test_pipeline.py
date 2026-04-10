@@ -95,7 +95,10 @@ async def test_pipeline_handles_unknown_protocol(pipeline):
     )
     await pipeline.process(pkt)  # Should not crash
     host = await pipeline.store.hosts.find_by_addr("aa:bb:cc:dd:ee:ff")
-    assert host is None  # No processor matched, nothing stored
+    # Host must ALWAYS be stored even when no processor matched,
+    # so every discovered MAC appears in the inventory.
+    assert host is not None
+    assert host.hw_addr == "aa:bb:cc:dd:ee:ff"
 
 
 @pytest.mark.asyncio

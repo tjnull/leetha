@@ -371,13 +371,15 @@ def main():
         signal.signal(signal.SIGINT, _fast_exit)
         signal.signal(signal.SIGTERM, _fast_exit)
 
-        # Load saved interfaces for auto-capture
-        from leetha.capture.interfaces import load_interface_config
-        from leetha.config import get_config
-        config = get_config()
-        saved = load_interface_config(config.data_dir)
-        if saved:
-            iface_configs = saved
+        # Load saved interfaces for auto-capture, but only if the user
+        # didn't explicitly specify interfaces with -i
+        if not iface_configs:
+            from leetha.capture.interfaces import load_interface_config
+            from leetha.config import get_config
+            config = get_config()
+            saved = load_interface_config(config.data_dir)
+            if saved:
+                iface_configs = saved
 
         from leetha.ui.web.app import run_web
         try:

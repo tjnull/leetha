@@ -32,10 +32,11 @@ class FindingRepository:
         await self._conn.commit()
         return cursor.lastrowid
 
-    async def list_active(self, limit: int = 100) -> list[Finding]:
+    async def list_active(self, limit: int = 100, offset: int = 0) -> list[Finding]:
         cursor = await self._conn.execute(
-            "SELECT * FROM findings WHERE resolved = 0 ORDER BY timestamp DESC LIMIT ?",
-            (limit,))
+            "SELECT * FROM findings WHERE resolved = 0 "
+            "ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+            (limit, offset))
         rows = await cursor.fetchall()
         return [self._row_to_finding(r) for r in rows]
 
@@ -43,6 +44,18 @@ class FindingRepository:
         await self._conn.execute(
             "UPDATE findings SET resolved = 1 WHERE id = ?", (finding_id,))
         await self._conn.commit()
+
+    async def resolve_many(self, finding_ids: list[int]) -> int:
+        """Resolve multiple findings in a single transaction."""
+        if not finding_ids:
+            return 0
+        placeholders = ",".join("?" for _ in finding_ids)
+        cursor = await self._conn.execute(
+            f"UPDATE findings SET resolved = 1 WHERE id IN ({placeholders})",
+            finding_ids,
+        )
+        await self._conn.commit()
+        return cursor.rowcount
 
     async def count_active(self) -> int:
         cursor = await self._conn.execute(

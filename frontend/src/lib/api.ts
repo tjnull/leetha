@@ -153,7 +153,11 @@ export async function fetchAlerts(params?: {
     });
   }
   const qs = searchParams.toString();
-  return apiFetch(`/api/alerts${qs ? `?${qs}` : ""}`);
+  const data = await apiFetch<{ alerts: Alert[] } | Alert[]>(
+    `/api/alerts${qs ? `?${qs}` : ""}`
+  );
+  // Handle both paginated response {alerts: [...]} and legacy array
+  return Array.isArray(data) ? data : data.alerts;
 }
 
 // --- Stats endpoints ---

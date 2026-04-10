@@ -107,7 +107,8 @@ class LeethaApp:
             self.config.interfaces = iface_configs
 
         self.capture_engine = CaptureEngine(interfaces=iface_configs)
-        self.packet_queue: asyncio.Queue[ParsedPacket] = asyncio.Queue()
+        import queue as _queue_mod
+        self.packet_queue: _queue_mod.Queue = _queue_mod.Queue()
         self.event_subscribers: list[asyncio.Queue] = []
         try:
             from leetha.notifications import NotificationDispatcher
@@ -126,6 +127,7 @@ class LeethaApp:
 
         # Sharded pipeline (only when worker_count > 1)
         self._router: PacketRouter | None = None
+        self._worker_pipelines: list[Pipeline] = []  # per-worker pipeline instances
         self._tasks: list[asyncio.Task] = []
 
     async def start(self):
@@ -160,6 +162,7 @@ class LeethaApp:
             on_dhcp=self._on_dhcp_packet,
             on_gateway_hint=self._on_gateway_hint,
             is_local_mac=self.is_local_device,
+            on_new_host=self._on_new_host_discovered,
         )
 
         self._running = True
@@ -184,6 +187,9 @@ class LeethaApp:
 
         # Start periodic analysis loop (stale source checks, etc.)
         self._tasks.append(asyncio.create_task(self._analysis_loop()))
+
+        # Watchdog: monitor the process loop and restart it if it dies
+        self._tasks.append(asyncio.create_task(self._watchdog()))
 
         # Start Unix socket server if configured
         if self.config.socket_path:
@@ -222,7 +228,7 @@ class LeethaApp:
             return False
 
         loop = getattr(self, "_app_loop", None) or asyncio.get_running_loop()
-        self.capture_engine.start(self.packet_queue, loop)
+        self.capture_engine.start(self.packet_queue, loop)  # loop kept for compat
 
         # Detect local MACs from capture interfaces for self-identification
         self._detect_local_macs()
@@ -233,16 +239,137 @@ class LeethaApp:
         if self.config.worker_count > 1:
             self._router = PacketRouter(num_workers=self.config.worker_count)
             self._tasks.append(asyncio.create_task(self._dispatch_loop()))
+            # Create per-worker pipeline instances to avoid shared-state
+            # race conditions (_evidence_buffer, _oui_vendors, etc.)
+            self._worker_pipelines = [
+                Pipeline(
+                    store=self.store,
+                    on_verdict=self._on_verdict_event,
+                    on_arp=self._on_arp_packet,
+                    on_dhcp=self._on_dhcp_packet,
+                    on_gateway_hint=self._on_gateway_hint,
+                    is_local_mac=self.is_local_device,
+                    on_new_host=self._on_new_host_discovered,
+                )
+                for _ in range(self.config.worker_count)
+            ]
             for shard_id in range(self.config.worker_count):
                 self._tasks.append(asyncio.create_task(
                     self._worker_loop(shard_id, self._router.workers[shard_id])
                 ))
         else:
-            self._tasks.append(asyncio.create_task(self._process_loop()))
+            task = asyncio.create_task(self._process_loop())
+            task.add_done_callback(self._on_task_done)
+            self._tasks.append(task)
+            # Also start a thread-based consumer as a fallback — if the
+            # asyncio process_loop freezes (event loop contention), this
+            # thread drains the queue independently.
+            import threading
+            self._drain_thread = threading.Thread(
+                target=self._drain_queue_thread, daemon=True,
+                name="queue-drain")
+            self._drain_thread.start()
 
         logger.info("Capture started on %s",
                      ", ".join(i.name for i in self.config.interfaces))
         return True
+
+    def _on_task_done(self, task: asyncio.Task) -> None:
+        """Callback when a background task finishes — log if it crashed."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc:
+            logger.error("Background task %s crashed: %s",
+                         task.get_name(), exc, exc_info=exc)
+
+    def _process_thread(self):
+        """Dedicated thread for packet processing with its own event loop
+        and its own database connection.
+
+        Completely independent of the main background event loop — can't be
+        frozen by DB contention, analysis tasks, or WebSocket handlers.
+        """
+        import asyncio as _aio
+        import queue as _queue_mod
+
+        loop = _aio.new_event_loop()
+        _aio.set_event_loop(loop)
+
+        # Create a separate Store + Pipeline for this thread — aiosqlite
+        # connections are NOT thread-safe and must be used from the thread
+        # that created them.
+        from leetha.store.store import Store
+        from leetha.core.pipeline import Pipeline
+        thread_store = Store(self.config.db_path)
+        loop.run_until_complete(thread_store.initialize())
+
+        import leetha.processors  # noqa: F401  — ensure all processors registered
+        thread_pipeline = Pipeline(
+            store=thread_store,
+            on_verdict=self._on_verdict_event,
+            on_arp=self._on_arp_packet,
+            on_dhcp=self._on_dhcp_packet,
+            on_gateway_hint=self._on_gateway_hint,
+            is_local_mac=self.is_local_device,
+            on_new_host=self._on_new_host_discovered,
+        )
+
+        processed = 0
+        errors = 0
+        while self._running:
+            try:
+                pkt = self.packet_queue.get(timeout=1.0)
+            except _queue_mod.Empty:
+                continue
+            except Exception:
+                continue
+
+            try:
+                loop.run_until_complete(thread_pipeline.process(pkt))
+                processed += 1
+            except Exception:
+                errors += 1
+                if errors <= 5 or errors % 100 == 0:
+                    logger.warning("Pipeline thread error #%d", errors, exc_info=True)
+
+        loop.run_until_complete(thread_store.close())
+        loop.close()
+
+    async def _watchdog(self):
+        """Monitor the process loop task and restart it if it dies.
+
+        The process loop is the critical path for all packet processing.
+        If it dies for any reason, no new devices appear in the inventory.
+        This watchdog checks every 10 seconds and restarts it.
+        """
+        await asyncio.sleep(5)  # let everything initialize
+        process_task = None
+        # Find the process loop task in self._tasks
+        for t in self._tasks:
+            if t.get_coro().__qualname__ == "LeethaApp._process_loop":
+                process_task = t
+                break
+
+        try:
+            while self._running:
+                await asyncio.sleep(10)
+                if process_task is None or process_task.done():
+                    if process_task and process_task.done():
+                        exc = process_task.exception() if not process_task.cancelled() else None
+                        with open("/tmp/leetha_watchdog.txt", "a") as f:
+                            import datetime as _dt
+                            f.write(f"{_dt.datetime.now().isoformat()} Process loop DEAD "
+                                    f"cancelled={process_task.cancelled()} exc={exc}\n")
+                    # Restart it
+                    process_task = asyncio.create_task(self._process_loop())
+                    process_task.add_done_callback(self._on_task_done)
+                    self._tasks.append(process_task)
+                    with open("/tmp/leetha_watchdog.txt", "a") as f:
+                        import datetime as _dt
+                        f.write(f"{_dt.datetime.now().isoformat()} Process loop RESTARTED\n")
+        except asyncio.CancelledError:
+            return
 
     def _preload_caches(self):
         """Preload large Huginn JSON caches in a background thread.
@@ -428,21 +555,13 @@ class LeethaApp:
                 pass
 
     async def _process_loop(self):
-        """Single-worker packet processing loop using new Pipeline."""
-        error_count = 0
+        """Placeholder — kept for backward compatibility.
+        The actual processing now happens in _process_thread().
+        """
+        # Just keep this task alive so the watchdog doesn't restart it
         try:
             while self._running:
-                try:
-                    packet = await asyncio.wait_for(self.packet_queue.get(), timeout=1.0)
-                except asyncio.TimeoutError:
-                    continue
-                try:
-                    await self.pipeline.process(packet)
-                except Exception:
-                    error_count += 1
-                    if error_count <= 5 or error_count % 100 == 0:
-                        logger.warning("Pipeline error #%d processing %s",
-                                      error_count, packet.protocol, exc_info=True)
+                await asyncio.sleep(10)
         except asyncio.CancelledError:
             return
 
@@ -713,7 +832,8 @@ class LeethaApp:
             return
 
     async def _worker_loop(self, shard_id: int, queue):
-        """Process packets from a shard queue using new Pipeline."""
+        """Process packets from a shard queue using per-worker Pipeline."""
+        worker_pipeline = self._worker_pipelines[shard_id]
         try:
             while self._running:
                 try:
@@ -721,7 +841,7 @@ class LeethaApp:
                 except asyncio.TimeoutError:
                     continue
                 try:
-                    await self.pipeline.process(packet)
+                    await worker_pipeline.process(packet)
                 except Exception:
                     logger.debug("Worker %d pipeline failed", shard_id, exc_info=True)
         except asyncio.CancelledError:
@@ -758,20 +878,61 @@ class LeethaApp:
 
     # -- Pipeline side-effect callbacks ----------------------------------
 
+    async def _on_new_host_discovered(self, hw_addr, host, packet):
+        """Emit WebSocket event when a new device is first discovered.
+
+        This fires immediately on first sighting — before any verdict is
+        computed — so the UI updates in real time for every new MAC.
+        """
+        event = {
+            "type": "device_discovered",
+            "mac": hw_addr,
+            "device": {
+                "mac": hw_addr,
+                "ip_v4": host.ip_addr,
+                "ip_v6": host.ip_v6,
+                "alert_status": host.disposition,
+                "is_randomized_mac": host.mac_randomized,
+            },
+        }
+        for sub in self.event_subscribers:
+            try:
+                sub.put_nowait(event)
+            except asyncio.QueueFull:
+                try:
+                    sub.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+                try:
+                    sub.put_nowait(event)
+                except asyncio.QueueFull:
+                    pass
+
     async def _on_verdict_event(self, hw_addr, verdict, packet):
         """Emit WebSocket event after verdict computed, run spoofing checks."""
         # Run MAC spoofing / fingerprint drift detection on every verdict
         await self._check_device_spoofing(hw_addr, verdict)
 
-        # Include packet info for the console live stream
+        # Include packet info for the console live stream.
+        # Sanitize fields: convert bytes to strings so JSON serialization
+        # doesn't crash the WebSocket handler.
         packet_info = None
         if packet:
+            def _sanitize(obj):
+                if isinstance(obj, bytes):
+                    return obj.decode("utf-8", errors="replace")
+                if isinstance(obj, dict):
+                    return {k: _sanitize(v) for k, v in obj.items()}
+                if isinstance(obj, (list, tuple)):
+                    return [_sanitize(v) for v in obj]
+                return obj
+
             packet_info = {
                 "protocol": packet.protocol,
                 "src_mac": packet.hw_addr,
                 "src_ip": packet.ip_addr,
                 "dst_ip": getattr(packet, "target_ip", None),
-                "fields": packet.fields,
+                "fields": _sanitize(packet.fields),
                 "interface": packet.interface,
                 "timestamp": packet.captured_at.isoformat() if hasattr(packet, "captured_at") and packet.captured_at else None,
             }

@@ -41,8 +41,33 @@ def parse_mdns(packet) -> CapturedPacket | None:
             except (IndexError, AttributeError):
                 continue
 
-    # Check answers for service names and TXT records
+    # For unsolicited mDNS announcements (qdcount=0), extract service_type
+    # from answer PTR records (rrname like "_lutron._tcp.local.")
+    if service_type is None and dns.an:
+        an_count = dns.ancount if dns.ancount is not None else len(dns.an) if hasattr(dns.an, '__len__') else 0
+        for i in range(an_count):
+            try:
+                rr = dns.an[i]
+                rrname = rr.rrname.decode() if isinstance(rr.rrname, bytes) else str(rr.rrname)
+                if "._tcp." in rrname or "._udp." in rrname:
+                    parts = rrname.rstrip(".").split(".")
+                    for j, part in enumerate(parts):
+                        if part.startswith("_") and j + 1 < len(parts) and parts[j+1] in ("_tcp", "_udp"):
+                            service_type = f"{part}.{parts[j+1]}"
+                            break
+                    if service_type:
+                        # Also grab the instance name from PTR rdata
+                        if getattr(rr, 'type', 0) == 12 and hasattr(rr, 'rdata') and rr.rdata:
+                            rdata = rr.rdata.decode() if isinstance(rr.rdata, bytes) else str(rr.rdata)
+                            name = rdata
+                        break
+            except (IndexError, AttributeError):
+                continue
+
+    # Check answers for service names, TXT records, and SRV target hostname
     txt_records = {}
+    srv_target = None   # SRV record target = the device's real .local hostname
+    srv_port = None     # SRV record port = service port number
     if dns.an:
         an_count = dns.ancount if dns.ancount is not None else len(dns.an) if hasattr(dns.an, '__len__') else 0
         for i in range(an_count):
@@ -52,31 +77,70 @@ def parse_mdns(packet) -> CapturedPacket | None:
                     break
                 rrname = rr.rrname.decode() if isinstance(rr.rrname, bytes) else str(rr.rrname)
 
-                if hasattr(rr, 'rdata'):
-                    if hasattr(rr, 'type') and rr.type == 16:
-                        rdata = rr.rdata
-                        if isinstance(rdata, (bytes, bytearray)):
-                            pos = 0
-                            while pos < len(rdata):
-                                length = rdata[pos]
-                                pos += 1
-                                if length == 0 or pos + length > len(rdata):
-                                    break
-                                txt_field = rdata[pos:pos + length].decode('utf-8', errors='replace')
-                                pos += length
-                                if '=' in txt_field:
-                                    key, _, val = txt_field.partition('=')
-                                    txt_records[key.strip().lower()] = val.strip()
-                        elif isinstance(rdata, list):
-                            for item in rdata:
-                                s = item.decode('utf-8', errors='replace') if isinstance(item, bytes) else str(item)
-                                if '=' in s:
-                                    key, _, val = s.partition('=')
-                                    txt_records[key.strip().lower()] = val.strip()
-                    else:
-                        rdata = rr.rdata.decode() if isinstance(rr.rdata, bytes) else str(rr.rdata)
-                        if "._tcp." in rrname or "._udp." in rrname:
-                            name = rdata
+                rr_type = getattr(rr, 'type', 0)
+
+                # SRV record (type 33): target hostname + port.
+                # Scapy stores these as direct attributes, NOT in rdata.
+                if rr_type == 33:
+                    target = getattr(rr, 'target', None)
+                    if target:
+                        t = target.decode() if isinstance(target, bytes) else str(target)
+                        t = t.rstrip(".")
+                        if t.endswith(".local"):
+                            t = t[:-6]
+                        if t:
+                            srv_target = t
+                    port = getattr(rr, 'port', None)
+                    if port:
+                        srv_port = int(port)
+
+                # TXT record (type 16): key=value pairs
+                elif rr_type == 16 and hasattr(rr, 'rdata'):
+                    rdata = rr.rdata
+                    if isinstance(rdata, (bytes, bytearray)):
+                        pos = 0
+                        while pos < len(rdata):
+                            length = rdata[pos]
+                            pos += 1
+                            if length == 0 or pos + length > len(rdata):
+                                break
+                            txt_field = rdata[pos:pos + length].decode('utf-8', errors='replace')
+                            pos += length
+                            if '=' in txt_field:
+                                key, _, val = txt_field.partition('=')
+                                txt_records[key.strip().lower()] = val.strip()
+                    elif isinstance(rdata, list):
+                        for item in rdata:
+                            s = item.decode('utf-8', errors='replace') if isinstance(item, bytes) else str(item)
+                            if '=' in s:
+                                key, _, val = s.partition('=')
+                                txt_records[key.strip().lower()] = val.strip()
+
+                # PTR / other records with rdata
+                elif hasattr(rr, 'rdata') and rr.rdata:
+                    rdata = rr.rdata.decode() if isinstance(rr.rdata, bytes) else str(rr.rdata)
+                    if "._tcp." in rrname or "._udp." in rrname:
+                        name = rdata
+            except (IndexError, AttributeError):
+                continue
+    # Also check additional records for SRV target
+    for section in ('ar', 'ns'):
+        rr_section = getattr(dns, section, None)
+        if not rr_section:
+            continue
+        count = getattr(dns, f'{section}count', 0) or 0
+        for i in range(count):
+            try:
+                rr = rr_section[i]
+                if hasattr(rr, 'type') and rr.type == 33 and not srv_target:
+                    target = getattr(rr, 'target', None)
+                    if target:
+                        t = target.decode() if isinstance(target, bytes) else str(target)
+                        t = t.rstrip(".")
+                        if t.endswith(".local"):
+                            t = t[:-6]
+                        if t:
+                            srv_target = t
             except (IndexError, AttributeError):
                 continue
 
@@ -100,6 +164,11 @@ def parse_mdns(packet) -> CapturedPacket | None:
         "service_type": service_type,
         "name": clean_name,
     }
+
+    if srv_target:
+        fields['srv_target'] = srv_target
+    if srv_port:
+        fields['srv_port'] = srv_port
 
     if txt_records:
         fields['txt_records'] = txt_records

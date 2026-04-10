@@ -66,7 +66,7 @@ def _sanitize_hostname(name: str | None) -> str | None:
         parts = c.split("._")
         instance = parts[0]
         service = parts[1] if len(parts) > 1 else ""
-        instance = _re.sub(r'-[0-9a-f]{6,}$', '', instance, flags=_re.IGNORECASE)
+        instance = _re.sub(r'-[0-9a-f]{12,}$', '', instance, flags=_re.IGNORECASE)
         if len(instance) <= 5 and service and service not in ("tcp", "udp"):
             c = service
         else:
@@ -2691,6 +2691,15 @@ def run_web(interfaces: list | None = None, host: str = "0.0.0.0", port: int = 8
 
         def _init_app():
             global app_instance
+            try:
+                _init_app_inner()
+            except BaseException as e:
+                import traceback
+                with open("/tmp/leetha_thread_crash.txt", "a") as f:
+                    f.write(f"\n=== THREAD CRASH ===\n{traceback.format_exc()}\n")
+
+        def _init_app_inner():
+            global app_instance
             app_instance = LeethaApp(interfaces=interfaces)
             logger.info("LeethaApp constructed — starting capture engine...")
             # Start the app in a new event loop on this thread.
@@ -2699,6 +2708,18 @@ def run_web(interfaces: list | None = None, host: str = "0.0.0.0", port: int = 8
             import asyncio as _aio
             loop = _aio.new_event_loop()
             _aio.set_event_loop(loop)
+
+            def _handle_task_exception(loop, context):
+                """Log unhandled task exceptions instead of letting them
+                crash the event loop silently."""
+                exc = context.get("exception")
+                msg = context.get("message", "")
+                task = context.get("task")
+                logger.error("Unhandled asyncio exception: %s (task=%s, msg=%s)",
+                             exc, task, msg, exc_info=exc)
+
+            loop.set_exception_handler(_handle_task_exception)
+
             try:
                 loop.run_until_complete(app_instance.start())
                 logger.info("Backend fully initialized — all services ready")
@@ -2713,8 +2734,14 @@ def run_web(interfaces: list | None = None, host: str = "0.0.0.0", port: int = 8
                         rc.print("[dim]To view token use: leetha auth show-token[/dim]\n")
                 # Keep the event loop running so background tasks continue
                 loop.run_forever()
-            except Exception as e:
-                logger.error(f"Backend start failed: {e}")
+                # If we get here, something called loop.stop()
+                import sys
+                print("CRITICAL: Background event loop exited run_forever()!", file=sys.stderr, flush=True)
+                logger.error("Backend event loop stopped unexpectedly")
+            except BaseException as e:
+                import sys
+                print(f"CRITICAL: Backend event loop exception: {e}", file=sys.stderr, flush=True)
+                logger.error("Backend event loop exited: %s", e, exc_info=True)
             finally:
                 loop.close()
 

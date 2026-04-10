@@ -9,11 +9,23 @@ router = APIRouter()
 
 
 @router.get("/api/alerts")
-async def api_alerts():
+async def api_alerts(page: int = 1, per_page: int = 100):
     from leetha.ui.web.app import app_instance, _finding_to_alert_dict
 
-    findings = await app_instance.store.findings.list_active(limit=100)
-    return [_finding_to_alert_dict(f) for f in findings]
+    # Clamp per_page to prevent abuse
+    per_page = min(max(per_page, 1), 500)
+    offset = (page - 1) * per_page
+    findings = await app_instance.store.findings.list_active(
+        limit=per_page, offset=offset,
+    )
+    total = await app_instance.store.findings.count_active()
+    return {
+        "alerts": [_finding_to_alert_dict(f) for f in findings],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": (total + per_page - 1) // per_page,
+    }
 
 
 @router.get("/api/alerts/export")
@@ -64,15 +76,13 @@ async def bulk_alert_action(request: Request):
     action = data.get("action")  # "acknowledge" | "delete"
 
     if action == "acknowledge":
-        for aid in alert_ids:
-            await app_instance.store.findings.resolve(aid)
-        return {"status": "ok", "updated": len(alert_ids)}
+        count = await app_instance.store.findings.resolve_many(alert_ids)
+        return {"status": "ok", "updated": count}
 
     elif action == "delete":
         # Findings table doesn't support hard delete; resolve instead
-        for aid in alert_ids:
-            await app_instance.store.findings.resolve(aid)
-        return {"status": "ok", "deleted": len(alert_ids)}
+        count = await app_instance.store.findings.resolve_many(alert_ids)
+        return {"status": "ok", "deleted": count}
 
     else:
         raise HTTPException(400, "Invalid action")
@@ -97,8 +107,11 @@ async def api_delete_resolved_alerts():
         )
         await app_instance.store.connection.commit()
         return {"deleted": cursor.rowcount}
-    except Exception:
-        return {"deleted": 0}
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Failed to delete resolved alerts: {e}"},
+        )
 
 
 @router.delete("/api/alerts/all")
@@ -106,12 +119,18 @@ async def api_delete_all_alerts(confirm: bool = False):
     from leetha.ui.web.app import app_instance
 
     if not confirm:
-        return {"error": "Pass ?confirm=true to delete all alerts"}
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Pass ?confirm=true to delete all alerts"},
+        )
     try:
         cursor = await app_instance.store.connection.execute(
             "DELETE FROM findings"
         )
         await app_instance.store.connection.commit()
         return {"deleted": cursor.rowcount}
-    except Exception:
-        return {"deleted": 0}
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Failed to delete alerts: {e}"},
+        )

@@ -84,7 +84,7 @@ export default function Dashboard({ wsStatus, subscribe }: DashboardProps) {
   const [drawerMac, setDrawerMac] = useState<string | null>(null);
 
   // --- Queries ---
-  const { data: statsData } = useQuery({ queryKey: ["stats"], queryFn: fetchStats, staleTime: 15000, refetchInterval: 30000 });
+  const { data: statsData, isError: statsError } = useQuery({ queryKey: ["stats"], queryFn: fetchStats, staleTime: 15000, refetchInterval: 30000 });
   const { data: recentDevices } = useQuery({ queryKey: ["dashboard-recent-devices"], queryFn: () => fetchDevices({ sort: "first_seen", order: "desc", per_page: 10, raw: true }), staleTime: 15000, refetchInterval: 30000 });
   const { data: alerts = [] } = useQuery({ queryKey: ["dashboard-alerts"], queryFn: () => fetchAlerts(), staleTime: 15000, refetchInterval: 30000 });
   const { data: activityStats } = useQuery({ queryKey: ["stats-activity"], queryFn: fetchActivityStats, staleTime: 30000, refetchInterval: 30000 });
@@ -140,6 +140,11 @@ export default function Dashboard({ wsStatus, subscribe }: DashboardProps) {
 
   return (
     <div className="space-y-4">
+      {statsError && (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          Unable to connect to backend. Make sure leetha is running.
+        </div>
+      )}
       {/* Row 1: Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard icon={Monitor} label="Hosts Identified" value={deviceCount.toLocaleString()} sub="identified on the wire" accent="primary" />

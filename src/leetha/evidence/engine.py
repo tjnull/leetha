@@ -34,7 +34,8 @@ _SOURCE_WEIGHTS: dict[str, float] = {
     "http_useragent": 0.75,
     "ssdp": 0.65,
     "mdns": 0.70,
-    "mdns_exclusive": 0.96,  # vendor-exclusive services (Apple, Google, etc.)
+    "mdns_exclusive": 0.80,  # vendor-exclusive services — below OUI (0.90) because
+                              # routers/gateways forward mDNS, rewriting source MAC
     "mdns_txt": 0.75,
     "tls_sni": 0.50,
     "dns": 0.50,
@@ -57,6 +58,7 @@ _SOURCE_WEIGHTS: dict[str, float] = {
     "dns_ntp_hint": 0.55,
     # mDNS sources
     "mdns_service": 0.65,
+    "mdns_srv": 0.85,    # SRV target = device's actual .local hostname
     "mdns_name": 0.60,
     # Banner source
     "passive_banner": 0.85,
@@ -189,11 +191,18 @@ class VerdictEngine:
         if chosen_hostname:
             import re
             from leetha.evidence.hostname import is_valid_hostname
+            # Strip AirPlay-style "<hex_id>@<name>" prefix — the hex is
+            # the advertising device's ID, not a hostname component.
+            chosen_hostname = re.sub(
+                r'^[0-9A-Fa-f]{6,12}@', '', chosen_hostname,
+            )
             # Strip mDNS service type suffix: "Name._service._tcp.local" -> "Name"
             if "._" in chosen_hostname:
                 chosen_hostname = chosen_hostname.split("._")[0]
-            # Strip trailing hex: "Google-Nest-Hub-Max-6aa3e8" -> "Google-Nest-Hub-Max"
-            chosen_hostname = re.sub(r'-[0-9a-f]{6,}$', '', chosen_hostname, flags=re.IGNORECASE)
+            # Strip trailing hex suffixes that look like auto-generated device
+            # IDs (12+ lowercase hex chars, e.g. "-6aa3e8f01b2c"), but keep
+            # short suffixes that are likely human-assigned (e.g. "DESKTOP-ABC123").
+            chosen_hostname = re.sub(r'-[0-9a-f]{12,}$', '', chosen_hostname, flags=re.IGNORECASE)
             # Strip .local suffix
             if chosen_hostname.endswith(".local"):
                 chosen_hostname = chosen_hostname[:-6]
@@ -202,6 +211,14 @@ class VerdictEngine:
             # If the cleaned winner is still invalid, try the next-best candidate
             if not is_valid_hostname(chosen_hostname):
                 chosen_hostname = self._next_valid_hostname(evidence)
+
+        # Cross-check: reject hostnames that belong to a different vendor
+        # than the resolved identity. This catches forwarded mDNS names that
+        # leaked through (e.g., a Lutron bridge name on a Ubiquiti router).
+        if chosen_hostname and vendor[0]:
+            chosen_hostname = self._validate_hostname_coherence(
+                chosen_hostname, vendor[0], category[0], evidence,
+            )
 
         return Verdict(
             hw_addr=hw_addr,
@@ -274,9 +291,10 @@ class VerdictEngine:
                 continue
 
             # Clean before validating
+            value = re.sub(r'^[0-9A-Fa-f]{6,12}@', '', value)
             if "._" in value:
                 value = value.split("._")[0]
-            value = re.sub(r'-[0-9a-f]{6,}$', '', value, flags=re.IGNORECASE)
+            value = re.sub(r'-[0-9a-f]{12,}$', '', value, flags=re.IGNORECASE)
             if value.endswith(".local"):
                 value = value[:-6]
             value = value.strip(".-")
@@ -300,3 +318,85 @@ class VerdictEngine:
             candidates[value] *= boost
 
         return max(candidates, key=candidates.get)  # type: ignore[arg-type]
+
+    # Known vendor/product keywords that appear in mDNS hostnames from
+    # devices other than the one whose MAC is being fingerprinted.
+    # Format: keyword -> set of vendor names that legitimately use it.
+    _HOSTNAME_VENDOR_KEYWORDS: dict[str, set[str]] = {
+        "lutron": {"Lutron"},
+        "hue": {"Philips", "Signify"},
+        "sonos": {"Sonos"},
+        "roku": {"Roku"},
+        "nest": {"Google"},
+        "echo": {"Amazon"},
+        "alexa": {"Amazon"},
+        "homepod": {"Apple"},
+        "office speaker": {"Apple"},
+        "living room speaker": {"Apple", "Google"},
+        "chromecast": {"Google"},
+        "firestick": {"Amazon"},
+        "ring": {"Amazon", "Ring"},
+    }
+
+    def _validate_hostname_coherence(
+        self,
+        hostname: str,
+        resolved_vendor: str,
+        resolved_category: str | None,
+        evidence: list[Evidence],
+    ) -> str | None:
+        """Reject a hostname that clearly belongs to a different vendor.
+
+        Returns the hostname if it's coherent, or the next best hostname
+        from evidence that is, or None.
+        """
+        hn_lower = hostname.lower()
+        for keyword, legit_vendors in self._HOSTNAME_VENDOR_KEYWORDS.items():
+            if keyword in hn_lower:
+                # This hostname contains a vendor keyword — check if
+                # the resolved device vendor matches
+                if resolved_vendor and resolved_vendor not in legit_vendors:
+                    # Hostname belongs to a different vendor — reject it
+                    # and try to find a coherent alternative
+                    return self._find_coherent_hostname(
+                        resolved_vendor, evidence,
+                    )
+        return hostname
+
+    def _find_coherent_hostname(
+        self, resolved_vendor: str, evidence: list[Evidence],
+    ) -> str | None:
+        """Find the best hostname from evidence that is coherent with the vendor."""
+        import re
+        from leetha.evidence.hostname import is_valid_hostname
+
+        candidates: list[tuple[str, float]] = []
+        for e in evidence:
+            if not e.hostname:
+                continue
+            # Skip hostnames from mDNS sources with wrong or missing vendor
+            if e.source.startswith("mdns"):
+                if e.vendor and e.vendor != resolved_vendor:
+                    continue
+                if not e.vendor:
+                    continue  # mDNS hostname with no vendor — suspect
+
+            hn = e.hostname
+            hn = re.sub(r'^[0-9A-Fa-f]{6,12}@', '', hn)
+            if "._" in hn:
+                hn = hn.split("._")[0]
+            hn = re.sub(r'-[0-9a-f]{12,}$', '', hn, flags=re.IGNORECASE)
+            if hn.endswith(".local"):
+                hn = hn[:-6]
+            hn = hn.strip(".-")
+            if not hn or not is_valid_hostname(hn):
+                continue
+
+            weight = _SOURCE_WEIGHTS.get(e.source, 0.5)
+            score = e.certainty * weight
+            candidates.append((hn, score))
+
+        if not candidates:
+            return None
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        return candidates[0][0]

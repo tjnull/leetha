@@ -992,7 +992,8 @@ class LeethaConsole:
             self._error("Store not initialized")
             return
 
-        all_hosts = await store.hosts.find_all(limit=500)
+        total = await store.hosts.count()
+        all_hosts = await store.hosts.find_all(limit=total or 500)
         if not all_hosts:
             self._hint("No devices discovered yet — start a capture first")
             return

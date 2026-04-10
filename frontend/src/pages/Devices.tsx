@@ -91,8 +91,8 @@ export default function Devices({ subscribe }: DevicesProps) {
   const page = Number(searchParams.get("page")) || 1;
   const perPage =
     (Number(searchParams.get("per_page")) as 25 | 50 | 100) || 50;
-  const sort = searchParams.get("sort") ?? "last_seen";
-  const order = searchParams.get("order") ?? "desc";
+  const sort = searchParams.get("sort") ?? "ip_v4";
+  const order = searchParams.get("order") ?? "asc";
   const q = searchParams.get("q") ?? "";
   const deviceType = searchParams.get("device_type") ?? "";
   const osFamily = searchParams.get("os_family") ?? "";
@@ -165,12 +165,12 @@ export default function Devices({ subscribe }: DevicesProps) {
     [page, perPage, sort, order, q, deviceType, osFamily, manufacturer, statusFilter, confidenceMin]
   );
 
-  const { data: deviceData, isFetching } = useQuery({
+  const { data: deviceData, isFetching, isError, error } = useQuery({
     queryKey: ["devices", queryParams],
     queryFn: () => fetchDevices(queryParams),
     placeholderData: (prev) => prev,
-    refetchInterval: 30000,  // Refresh every 30s to keep status indicators live
-    staleTime: 15000,
+    refetchInterval: 60000,  // Refresh every 60s — status indicators use last_seen timestamps
+    staleTime: 30000,
   });
 
   const devices = deviceData?.devices ?? [];
@@ -185,7 +185,7 @@ export default function Devices({ subscribe }: DevicesProps) {
     return subscribe((msg) => {
       if (msg.device) {
         const now = Date.now();
-        if (now - lastInvalidate.current > 2000) {
+        if (now - lastInvalidate.current > 10000) {
           lastInvalidate.current = now;
           queryClient.invalidateQueries({ queryKey: ["devices"] });
         } else if (!invalidateTimer.current) {
@@ -193,7 +193,7 @@ export default function Devices({ subscribe }: DevicesProps) {
             invalidateTimer.current = null;
             lastInvalidate.current = Date.now();
             queryClient.invalidateQueries({ queryKey: ["devices"] });
-          }, 2000);
+          }, 10000);
         }
       }
     });
@@ -404,6 +404,13 @@ export default function Devices({ subscribe }: DevicesProps) {
         </div>
       </div>
 
+      {/* Error banner */}
+      {isError && (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          Failed to load devices{error instanceof Error ? `: ${error.message}` : ""}. Retrying...
+        </div>
+      )}
+
       {/* Table */}
       <div className="rounded-xl border border-border overflow-hidden">
         <div className="overflow-x-auto">
@@ -466,7 +473,7 @@ export default function Devices({ subscribe }: DevicesProps) {
                   }
                   return (
                     <tr
-                      key={mac + "-" + i}
+                      key={mac}
                       onClick={() => setDrawerMac(mac)}
                       className={cn(
                         "cursor-pointer transition-colors group",

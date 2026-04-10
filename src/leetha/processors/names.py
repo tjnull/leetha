@@ -107,11 +107,22 @@ class NameResolutionProcessor(Processor):
         hostname = packet.get("hostname")  # Only set by PTR records in DNS parser
 
         if hostname:
+            import re as _re
             from leetha.evidence.hostname import is_valid_hostname
-            if is_valid_hostname(hostname):
+            # Strip mDNS service suffixes from PTR records:
+            # "ESDK_7893c366477c._spotify-connect._tcp.local" -> "ESDK_7893c366477c"
+            clean = hostname
+            if "._" in clean:
+                clean = clean.split("._")[0]
+            if clean.endswith(".local"):
+                clean = clean[:-6]
+            clean = _re.sub(r'^[0-9A-Fa-f]{6,12}@', '', clean)
+            clean = clean.strip(".-") or hostname
+
+            if is_valid_hostname(clean):
                 evidence.append(Evidence(
                     source="dns_answer", method="exact", certainty=0.60,
-                    hostname=hostname,
+                    hostname=clean,
                     raw={"query_name": packet.get("query_name"), "hostname": hostname},
                 ))
         return evidence
@@ -147,6 +158,13 @@ class NameResolutionProcessor(Processor):
         "_lgtvremote._tcp": {"vendor": "LG", "category": "smart_tv", "platform": "webOS", "certainty": 0.95},
     }
 
+    # Regex for AirPlay/RAOP instance names: "<hex_id>@<friendly_name>"
+    # The hex_id is the advertising device's MAC or device ID — if it
+    # doesn't match the packet source MAC, this mDNS belongs to another device.
+    _AIRPLAY_NAME_RE = __import__("re").compile(
+        r"^([0-9A-Fa-f]{6,12})@(.+)$"
+    )
+
     def _analyze_mdns(self, packet: CapturedPacket) -> list[Evidence]:
         from leetha.evidence.hostname import is_valid_hostname
         evidence = []
@@ -154,18 +172,36 @@ class NameResolutionProcessor(Processor):
         name = packet.get("name")
         txt_records = packet.get("txt_records", {})
 
+        # Detect AirPlay/RAOP-style names: "<hex_id>@<friendly_name>".
+        # If the hex ID doesn't match the source MAC, this mDNS service
+        # belongs to a DIFFERENT device (e.g., a HomePod advertising through
+        # an iPhone or router).  Flag it so we don't adopt another device's
+        # identity, hostname, or category.
+        belongs_to_other_device = False
+        if name:
+            m = self._AIRPLAY_NAME_RE.match(name)
+            if m:
+                advertised_id = m.group(1).upper()
+                src_mac_norm = packet.hw_addr.replace(":", "").upper()
+                if advertised_id not in src_mac_norm and src_mac_norm not in advertised_id:
+                    belongs_to_other_device = True
+
         if service_type:
             # Check for vendor-exclusive services FIRST — these are definitive
             exclusive = self._EXCLUSIVE_SERVICES.get(service_type)
             if exclusive:
+                # If this mDNS name contains another device's ID, only keep
+                # vendor (still useful for vendor identification) but strip
+                # category/platform which belong to the other device.
                 evidence.append(Evidence(
                     source="mdns_exclusive", method="exact",
-                    certainty=exclusive["certainty"],
+                    certainty=exclusive["certainty"] if not belongs_to_other_device else min(exclusive["certainty"], 0.50),
                     vendor=exclusive.get("vendor"),
-                    category=exclusive.get("category"),
-                    platform=exclusive.get("platform"),
+                    category=None if belongs_to_other_device else exclusive.get("category"),
+                    platform=None if belongs_to_other_device else exclusive.get("platform"),
                     raw={"service_type": service_type, "name": name,
-                         "exclusive_match": True},
+                         "exclusive_match": True,
+                         "cross_device": belongs_to_other_device},
                 ))
             else:
                 evidence.append(Evidence(
@@ -192,11 +228,41 @@ class NameResolutionProcessor(Processor):
             vendor = txt_records.get("manufacturer") or txt_records.get("vendor")
             friendly_name = txt_records.get("fn")
             validated_fn = friendly_name if is_valid_hostname(friendly_name) else None
+
+            # SYSTYPE/devtype TXT fields — used by Lutron, Belkin, etc. to
+            # advertise the device's platform/model (e.g. "SmartBridge").
+            systype = txt_records.get("systype") or txt_records.get("devtype")
+            if systype:
+                model = model or systype
+
+            # AirPlay/HAP TXT records carry rich device metadata:
+            #   deviceid  = real device MAC (may differ from Ethernet src)
+            #   serialnumber = hardware serial
+            #   ci        = HAP category integer (2=bridge, 14=outlet, etc.)
+            # Use ci to infer category for HomeKit devices
+            hap_ci = txt_records.get("ci")
+            hap_category = None
+            if hap_ci:
+                _HAP_CATEGORIES = {
+                    "1": "other", "2": "bridge", "3": "fan",
+                    "5": "garage_door", "6": "smart_lighting",
+                    "7": "smart_lock", "8": "smart_plug",
+                    "9": "smart_plug", "10": "sensor",
+                    "11": "smart_plug", "12": "thermostat",
+                    "13": "sensor", "14": "security_system",
+                    "17": "sensor", "22": "sensor",
+                    "28": "sprinkler", "29": "faucet",
+                    "30": "smart_display", "31": "smart_speaker",
+                    "32": "media_player",
+                }
+                hap_category = _HAP_CATEGORIES.get(str(hap_ci))
+
             if model or vendor:
                 evidence.append(Evidence(
                     source="mdns_txt", method="exact", certainty=0.80,
                     model=model,
                     vendor=vendor,
+                    category=hap_category,
                     hostname=validated_fn,
                     raw={"txt_records": txt_records},
                 ))
@@ -244,21 +310,43 @@ class NameResolutionProcessor(Processor):
             except (ImportError, AttributeError):
                 pass
 
-        # Prefer friendly name (fn) over raw mDNS instance name, which is
-        # often a UUID for IoT devices.
+        # Hostname priority (best to worst):
+        # 1. SRV target hostname (e.g. "Lutron-06847038") — the device's
+        #    actual .local hostname, most reliable
+        # 2. TXT friendly name (fn) — human-readable name from TXT records
+        # 3. mDNS instance name — often a service description, not a hostname
+        #
+        # If the mDNS name belongs to a different device (detected via hex ID
+        # mismatch), do NOT use it as this device's hostname.
+        srv_target = packet.get("srv_target")
         friendly = txt_records.get("fn") if txt_records else None
         mdns_hostname = None
-        if friendly and is_valid_hostname(friendly):
-            mdns_hostname = friendly
-        elif name and is_valid_hostname(name):
-            mdns_hostname = name
+        if not belongs_to_other_device:
+            if srv_target and is_valid_hostname(srv_target):
+                mdns_hostname = srv_target
+            elif friendly and is_valid_hostname(friendly):
+                mdns_hostname = friendly
+            elif name and is_valid_hostname(name):
+                mdns_hostname = name
 
         if mdns_hostname:
+            # SRV target is the device's actual .local hostname — higher
+            # certainty than instance names which are often service descriptions
+            if srv_target and mdns_hostname == srv_target:
+                hn_certainty = 0.85
+                hn_source = "mdns_srv"
+            elif friendly and mdns_hostname == friendly:
+                hn_certainty = 0.75
+                hn_source = "mdns_name"
+            else:
+                hn_certainty = 0.65
+                hn_source = "mdns_name"
             evidence.append(Evidence(
-                source="mdns_name", method="exact", certainty=0.65,
+                source=hn_source, method="exact", certainty=hn_certainty,
                 hostname=mdns_hostname,
                 raw={"name": name, "service_type": service_type,
-                     "friendly_name": friendly},
+                     "friendly_name": friendly,
+                     "srv_target": srv_target},
             ))
 
         return evidence

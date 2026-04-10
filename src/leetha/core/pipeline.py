@@ -29,6 +29,24 @@ def _is_private_ip(ip: str) -> bool:
     except (ValueError, TypeError):
         return False
 
+
+import re as _re
+_VALID_MAC_RE = _re.compile(r'^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$')
+
+
+def _is_valid_mac(mac: str) -> bool:
+    """Return True if *mac* is a valid unicast Ethernet MAC address.
+
+    Rejects IPs misidentified as MACs (from TUN interfaces), broadcast
+    addresses, and empty/malformed strings.
+    """
+    if not mac or not _VALID_MAC_RE.match(mac):
+        return False
+    # Reject broadcast (ff:ff:ff:ff:ff:ff) and all-zeros
+    if mac in ("ff:ff:ff:ff:ff:ff", "00:00:00:00:00:00"):
+        return False
+    return True
+
 logger = logging.getLogger(__name__)
 
 
@@ -57,6 +75,8 @@ class Pipeline:
         self._gateway_macs: set[str] = set()  # MACs known to be gateways/routers
         self._lookup_done: set = set()  # (MAC, protocol) pairs already looked up
         self._batch_queue: list = []
+        self._last_seen: dict[str, float] = {}  # MAC -> monotonic timestamp (for LRU)
+        self._max_tracked_macs = 20_000  # cleanup threshold
         self._processor_instances: dict[str, object] = {}
         self._rule_instances: list = []
         self._running = False
@@ -77,9 +97,13 @@ class Pipeline:
         for name, cls in get_all_rules().items():
             self._rule_instances.append(cls())
 
-    _MDNS_EVIDENCE_SOURCES = frozenset((
+    # Evidence sources that can carry forwarded/reflected traffic from other
+    # devices. Routers relay mDNS multicast AND respond to mDNS-related DNS
+    # queries (PTR records), so dns_answer is included here.
+    _FORWARDED_EVIDENCE_SOURCES = frozenset((
         "mdns_service", "mdns_exclusive", "mdns",
-        "mdns_txt", "mdns_name", "mdns_apple_model",
+        "mdns_txt", "mdns_name", "mdns_srv", "mdns_apple_model",
+        "dns_answer",
     ))
 
     def _scrub_infra_mdns(self, hw_addr: str) -> None:
@@ -95,7 +119,7 @@ class Pipeline:
             return
         ref_vendor = self._oui_vendors.get(hw_addr)
         for ev in buf:
-            if ev.source not in self._MDNS_EVIDENCE_SOURCES:
+            if ev.source not in self._FORWARDED_EVIDENCE_SOURCES:
                 continue
             # Keep mDNS evidence that matches the device's own vendor
             if ref_vendor and ev.vendor:
@@ -112,8 +136,34 @@ class Pipeline:
             ev.model = None
             ev.hostname = None
 
+    def _evict_stale_macs(self) -> None:
+        """Remove the oldest half of tracked MACs when the cache exceeds the
+        threshold.  Keeps memory bounded on long-running deployments with
+        large networks."""
+        import time as _time
+        if len(self._evidence_buffer) <= self._max_tracked_macs:
+            return
+        # Sort by last-seen time, evict oldest half
+        sorted_macs = sorted(self._last_seen, key=self._last_seen.get)
+        evict = sorted_macs[:len(sorted_macs) // 2]
+        for mac in evict:
+            self._evidence_buffer.pop(mac, None)
+            self._oui_vendors.pop(mac, None)
+            self._oui_device_types.pop(mac, None)
+            self._last_seen.pop(mac, None)
+            # Remove all (mac, proto) tuples from _lookup_done
+            self._lookup_done -= {k for k in self._lookup_done if k[0] == mac}
+        # Don't evict _gateway_macs — those are small and important
+        logger.info("Evicted %d stale MACs from pipeline cache (%d remaining)",
+                     len(evict), len(self._evidence_buffer))
+
     async def process(self, packet: CapturedPacket) -> None:
         """Process a single captured packet through the full pipeline."""
+        # Reject packets with invalid MAC addresses (e.g. TUN interfaces
+        # where scapy returns the IP as packet.src instead of a MAC)
+        if not _is_valid_mac(packet.hw_addr):
+            return
+
         protocol = packet.protocol
 
         # Side effects: fire before main processing
@@ -142,7 +192,7 @@ class Pipeline:
                             packet.hw_addr, packet.ip_addr, "dhcp_server",
                             packet.interface or "")
                     except Exception:
-                        pass
+                        logger.debug("Gateway hint callback failed for %s", packet.hw_addr, exc_info=True)
         elif packet.protocol == "icmpv6":
             if packet.fields.get("icmpv6_type") == "router_advertisement" and packet.ip_addr:
                 self._gateway_macs.add(packet.hw_addr)
@@ -153,7 +203,7 @@ class Pipeline:
                             packet.hw_addr, packet.ip_addr, "auto_gateway",
                             packet.interface or "")
                     except Exception:
-                        pass
+                        logger.debug("Gateway RA hint callback failed for %s", packet.hw_addr, exc_info=True)
 
         # 1. Find and run the registered processor.
         # NEVER return early here — the host upsert and sighting record
@@ -170,6 +220,23 @@ class Pipeline:
                 logger.debug("Processor failed for %s", protocol, exc_info=True)
 
         hw_addr = packet.hw_addr
+
+        # Sanitize packet fields: scapy can produce bytes objects (e.g.
+        # mDNS SRV target) that crash JSON serialization downstream.
+        def _sanitize_fields(obj):
+            if isinstance(obj, bytes):
+                return obj.decode("utf-8", errors="replace")
+            if isinstance(obj, dict):
+                return {k: _sanitize_fields(v) for k, v in obj.items()}
+            if isinstance(obj, (list, tuple)):
+                return [_sanitize_fields(v) for v in obj]
+            return obj
+        packet.fields = _sanitize_fields(packet.fields)
+
+        # Track last-seen for LRU eviction and periodically clean up
+        import time as _time
+        self._last_seen[hw_addr] = _time.monotonic()
+        self._evict_stale_macs()
 
         # Enrich with MAC OUI lookup (only on first sighting per MAC)
         if hw_addr not in self._evidence_buffer:
@@ -212,10 +279,6 @@ class Pipeline:
         # For randomized MACs (no OUI), we use the dominant vendor from
         # accumulated evidence (e.g. Apple from _apple-mobdev2._tcp) as the
         # reference vendor to catch conflicting mDNS from other devices.
-        _MDNS_SOURCES = frozenset((
-            "mdns_service", "mdns_exclusive", "mdns",
-            "mdns_txt", "mdns_name", "mdns_apple_model",
-        ))
         oui_vendor = self._oui_vendors.get(hw_addr)
         is_infra = hw_addr in self._gateway_macs
 
@@ -232,7 +295,7 @@ class Pipeline:
 
         if ref_vendor:
             for ev in evidence_list:
-                if ev.source not in _MDNS_SOURCES:
+                if ev.source not in self._FORWARDED_EVIDENCE_SOURCES:
                     continue
 
                 def _vendors_match(a: str | None, b: str) -> bool:
@@ -295,6 +358,13 @@ class Pipeline:
 
         # 3. ALWAYS upsert host so every MAC we see appears in the devices
         # list, even if no processor generated evidence for this packet.
+        #
+        # IP assignment rules:
+        # - Only trust MAC-IP bindings from ARP or DHCP (layer 2/3 binding)
+        # - For forwarded protocols (mDNS, DNS), the source IP belongs to the
+        #   original sender, not the forwarding router. Skip IP update for
+        #   infrastructure devices receiving these protocols.
+        # - Never overwrite a private IP with a public one (NAT traffic)
         raw_ip = packet.ip_addr
         ip_v4 = None
         ip_v6 = None
@@ -303,6 +373,25 @@ class Pipeline:
                 ip_v6 = raw_ip
             else:
                 ip_v4 = raw_ip
+
+        # Infrastructure devices (routers/APs) forward multicast — the IP in
+        # those packets belongs to the original device, not the router.
+        # Only trust ARP/DHCP for IP assignment on infrastructure MACs.
+        # Also: once a gateway has an IP, don't overwrite with a different
+        # subnet (routers have IPs on multiple VLANs — keep the first one).
+        _TRUSTED_IP_PROTOCOLS = ("arp", "dhcpv4", "dhcpv6", "icmpv6")
+        if ip_v4 and hw_addr in self._gateway_macs:
+            if protocol not in _TRUSTED_IP_PROTOCOLS:
+                ip_v4 = None  # don't overwrite gateway IP with forwarded traffic
+            else:
+                # Even for trusted protocols, don't overwrite an existing
+                # gateway IP with a different subnet's IP
+                try:
+                    existing = await self.store.hosts.find_by_addr(hw_addr)
+                    if existing and existing.ip_addr and existing.ip_addr != ip_v4:
+                        ip_v4 = None  # keep existing gateway IP
+                except Exception:
+                    pass
 
         # Don't overwrite a private IP with a public one — the public IP
         # is likely from NAT'd traffic (e.g., router forwarding DNS responses
@@ -313,7 +402,7 @@ class Pipeline:
                 if existing and existing.ip_addr and _is_private_ip(existing.ip_addr):
                     ip_v4 = None  # keep existing private IP
             except Exception:
-                pass
+                logger.debug("IP overwrite check failed for %s", hw_addr, exc_info=True)
 
         # MAC randomization detection
         from leetha.fingerprint.mac_intel import is_randomized_mac
@@ -385,7 +474,7 @@ class Pipeline:
             try:
                 await self.store.hosts.upsert(host)
             except Exception:
-                pass
+                logger.debug("Disposition update failed for %s", hw_addr, exc_info=True)
 
         # 8. Store verdict AFTER rules (so identity_shift sees the old verdict)
         try:
