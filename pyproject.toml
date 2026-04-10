@@ -23,6 +23,7 @@ dependencies = [
     "markdown>=3.4",
     "apprise>=1.7",
     "prometheus-client>=0.20",
+    "cryptography>=42.0",
 ]
 
 [project.scripts]
