@@ -115,12 +115,8 @@ async def list_server_addresses():
     addresses = []
     for name, addrs in psutil.net_if_addrs().items():
         for addr in addrs:
+            # Only include IPv4 addresses, skip loopback
             if addr.family.name == "AF_INET" and addr.address != "127.0.0.1":
-                addresses.append({
-                    "interface": name,
-                    "address": addr.address,
-                })
-            elif addr.family.name == "AF_INET6" and not addr.address.startswith("fe80") and addr.address != "::1":
                 addresses.append({
                     "interface": name,
                     "address": addr.address,

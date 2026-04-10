@@ -171,7 +171,8 @@ export default function Interfaces() {
   // Build sensor state
   const [buildDialogOpen, setBuildDialogOpen] = useState(false);
   const [buildName, setBuildName] = useState("");
-  const [buildServer, setBuildServer] = useState("");
+  const [buildServerIp, setBuildServerIp] = useState("");
+  const [buildServerPort, setBuildServerPort] = useState("8443");
   const [buildTarget, setBuildTarget] = useState("linux-x86_64");
   const [buildBufferMb, setBuildBufferMb] = useState(100);
   const [buildInProgress, setBuildInProgress] = useState(false);
@@ -182,10 +183,10 @@ export default function Interfaces() {
 
   // Auto-select first server address
   useEffect(() => {
-    if (serverAddresses.length > 0 && !buildServer) {
-      setBuildServer(`${serverAddresses[0].address}:8443`);
+    if (serverAddresses.length > 0 && !buildServerIp) {
+      setBuildServerIp(serverAddresses[0].address);
     }
-  }, [serverAddresses, buildServer]);
+  }, [serverAddresses, buildServerIp]);
 
   // Auto-scroll build log
   useEffect(() => {
@@ -204,6 +205,10 @@ export default function Interfaces() {
   const handleBuildSensor = async () => {
     if (!buildName.trim()) {
       toast.error("Sensor name is required");
+      return;
+    }
+    if (!buildServerIp) {
+      toast.error("Server address is required");
       return;
     }
 
@@ -225,7 +230,7 @@ export default function Interfaces() {
 
     const body: BuildRequestBody = {
       name: buildName,
-      server: buildServer,
+      server: `${buildServerIp}:${buildServerPort}`,
       target: buildTarget,
       buffer_size_mb: buildBufferMb,
     };
@@ -680,7 +685,7 @@ export default function Interfaces() {
 
       {/* Build Sensor Dialog */}
       <Dialog open={buildDialogOpen} onOpenChange={(open) => { if (!open && !buildInProgress) setBuildDialogOpen(false); }}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Build Sensor Binary</DialogTitle>
             <DialogDescription>
@@ -702,51 +707,64 @@ export default function Interfaces() {
               <div className="space-y-2">
                 <Label>Server Address</Label>
                 <p className="text-[11px] text-muted-foreground -mt-1">
-                  IP address sensors will connect back to
+                  IP address and port the sensor will connect back to
                 </p>
-                <Select
-                  value={buildServer}
-                  onValueChange={(val) => setBuildServer(val)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select server address" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {serverAddresses.map((addr) => (
-                      <SelectItem key={`${addr.interface}-${addr.address}`} value={`${addr.address}:8443`}>
-                        <div className="flex items-center gap-3">
-                          <span className="font-mono">{addr.address}:8443</span>
-                          <span className="text-muted-foreground text-xs">{addr.interface}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <Select
+                      value={buildServerIp}
+                      onValueChange={(val) => setBuildServerIp(val)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select IP address" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {serverAddresses.map((addr) => (
+                          <SelectItem key={`${addr.interface}-${addr.address}`} value={addr.address}>
+                            <div className="flex items-center gap-3">
+                              <span className="font-mono">{addr.address}</span>
+                              <span className="text-muted-foreground text-xs">{addr.interface}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="w-28">
+                    <Input
+                      placeholder="Port"
+                      value={buildServerPort}
+                      onChange={(e) => setBuildServerPort(e.target.value)}
+                    />
+                  </div>
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label>Target Platform</Label>
-                <Select value={buildTarget} onValueChange={handleTargetChange}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {buildTargets.map((t) => (
-                      <SelectItem key={t.id} value={t.id}>
-                        {t.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="build-buffer">Ring Buffer Size (MB)</Label>
-                <Input
-                  id="build-buffer"
-                  type="number"
-                  min={1}
-                  value={buildBufferMb}
-                  onChange={(e) => setBuildBufferMb(parseInt(e.target.value) || 10)}
-                />
+              <div className="flex gap-3">
+                <div className="flex-1 space-y-2">
+                  <Label>Target Platform</Label>
+                  <Select value={buildTarget} onValueChange={handleTargetChange}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {buildTargets.map((t) => (
+                        <SelectItem key={t.id} value={t.id}>
+                          {t.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="w-36 space-y-2">
+                  <Label htmlFor="build-buffer">Buffer (MB)</Label>
+                  <Input
+                    id="build-buffer"
+                    type="number"
+                    min={1}
+                    value={buildBufferMb}
+                    onChange={(e) => setBuildBufferMb(parseInt(e.target.value) || 10)}
+                  />
+                </div>
               </div>
             </div>
           ) : (
