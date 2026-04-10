@@ -2681,6 +2681,81 @@ async def websocket_console(websocket: WebSocket):
 
 
 
+
+@fastapi_app.websocket("/api/v1/capture/remote")
+async def ws_remote_sensor(websocket: WebSocket):
+    """Accept raw packet stream from a remote sensor over WSS.
+
+    Each binary WebSocket frame uses the remote wire protocol:
+    4 bytes packet length + 8 bytes timestamp_ns + 4 bytes iface_index + raw bytes.
+    The raw bytes are run through the capture engine's PARSER_CHAIN and enqueued
+    into the packet processing pipeline.
+    """
+    from leetha.capture.remote.server import SensorSession
+    from leetha.capture.remote.protocol import RemotePacketFrame
+    from leetha.capture.engine import PacketCapture
+    from scapy.layers.l2 import Ether
+
+    if not app_instance:
+        await websocket.close(code=1011, reason="App not initialized")
+        return
+
+    manager = app_instance._remote_sensor_manager
+    ca_dir = Path(app_instance.config.data_dir) / "ca"
+
+    # Extract sensor identity.
+    # In a full mTLS deployment the client cert CN is used.
+    # For non-TLS setups (development), fall back to a query parameter.
+    sensor_name: str | None = None
+    client_cert = websocket.scope.get("tls_client_cert")
+    if client_cert:
+        from cryptography.x509.oid import NameOID
+        sensor_name = client_cert.subject.get_attributes_for_oid(
+            NameOID.COMMON_NAME
+        )[0].value
+    else:
+        sensor_name = websocket.query_params.get("name")
+
+    if not sensor_name:
+        await websocket.close(code=1008, reason="Sensor name required")
+        return
+
+    if manager.is_revoked(sensor_name, ca_dir):
+        await websocket.close(code=1008, reason="Certificate revoked")
+        return
+
+    try:
+        session = manager.register(sensor_name, websocket.client.host)
+    except ValueError:
+        await websocket.close(code=1008, reason="Sensor already connected")
+        return
+
+    await websocket.accept()
+    logger.info("remote sensor connected: %s from %s", sensor_name, websocket.client.host)
+
+    try:
+        while True:
+            data = await websocket.receive_bytes()
+            frames = session.feed(data)
+            for frame in frames:
+                # Run through the capture engine's classifier
+                try:
+                    pkt = Ether(frame.packet)
+                    iface_label = f"remote:{sensor_name}"
+                    result = app_instance.capture_engine._classify(pkt, iface_label)
+                    if result is not None:
+                        result.interface = iface_label
+                        app_instance.packet_queue.put_nowait(result)
+                except Exception:
+                    pass  # Skip unparseable frames
+    except WebSocketDisconnect:
+        logger.info("remote sensor disconnected: %s", sensor_name)
+    except Exception:
+        logger.warning("remote sensor %s error", sensor_name, exc_info=True)
+    finally:
+        manager.unregister(sensor_name)
+
+
 # --- Legacy Routes removed — React SPA serves all pages ---
 
 

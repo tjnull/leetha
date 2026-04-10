@@ -125,6 +125,10 @@ class LeethaApp:
         self._analysis_executor = ThreadPoolExecutor(max_workers=1)
         self.probe_scheduler: ProbeScheduler | None = None
 
+        # Remote sensor management
+        from leetha.capture.remote.server import RemoteSensorManager
+        self._remote_sensor_manager = RemoteSensorManager()
+
         # Sharded pipeline (only when worker_count > 1)
         self._router: PacketRouter | None = None
         self._worker_pipelines: list[Pipeline] = []  # per-worker pipeline instances
