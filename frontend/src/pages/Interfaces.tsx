@@ -8,8 +8,11 @@ import {
   setProbeMode,
   runProbes,
   fetchProbeStatus,
+  fetchRemoteSensors,
+  disconnectRemoteSensor,
   type NetworkInterface,
   type ProbeInfo,
+  type RemoteSensor,
 } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -38,6 +41,7 @@ import {
   Network,
   Globe,
   Monitor,
+  Radio,
 } from "lucide-react";
 
 // --- Category classification ---
@@ -131,8 +135,14 @@ export default function Interfaces() {
   const { data } = useQuery({
     queryKey: ["interfaces"],
     queryFn: fetchInterfaceList,
-    refetchInterval: 15000,  // Every 15s, not 5
+    refetchInterval: 15000,
     staleTime: 10000,
+  });
+
+  const { data: sensors = [] } = useQuery({
+    queryKey: ["remote-sensors"],
+    queryFn: fetchRemoteSensors,
+    refetchInterval: 5000,
   });
 
   const interfaces = data?.detected ?? [];
@@ -169,6 +179,16 @@ export default function Interfaces() {
       queryClient.invalidateQueries({ queryKey: ["interfaces"] });
     } catch (err) {
       toast.error(`Failed: ${err}`);
+    }
+  };
+
+  const handleDisconnectSensor = async (name: string) => {
+    try {
+      await disconnectRemoteSensor(name);
+      toast.success(`Disconnected sensor ${name}`);
+      queryClient.invalidateQueries({ queryKey: ["remote-sensors"] });
+    } catch (err) {
+      toast.error(`Failed to disconnect: ${err}`);
     }
   };
 
@@ -228,6 +248,56 @@ export default function Interfaces() {
           <span>&middot;</span>
           <span className={capturingCount > 0 ? "text-success" : ""}>{capturingCount} capturing</span>
         </div>
+      </div>
+
+      {/* Remote Sensors */}
+      <div className="rounded-xl bg-card border border-border overflow-hidden">
+        <div className="flex items-center gap-3 px-5 py-3 border-b border-border">
+          <Radio size={16} className="text-violet-400" />
+          <div>
+            <h3 className="text-sm font-semibold">Remote Sensors</h3>
+            <p className="text-[11px] text-muted-foreground">Persistent packet capture agents streaming over WebSocket</p>
+          </div>
+          <span className="ml-auto text-xs text-muted-foreground">{sensors.length} connected</span>
+        </div>
+        {sensors.length === 0 ? (
+          <div className="px-5 py-6 text-center text-muted-foreground text-sm">
+            No remote sensors connected. Use <code className="text-xs bg-secondary px-1.5 py-0.5 rounded">leetha remote ca issue</code> to set up a sensor.
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {sensors.map((sensor) => (
+              <div key={sensor.name} className="flex items-center justify-between px-5 py-4 gap-4">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="h-2 w-2 rounded-full bg-success shrink-0" />
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-sm">{sensor.name}</span>
+                      <Badge variant="outline" className="text-[10px] uppercase font-semibold text-violet-400 border-violet-400/30">
+                        REMOTE
+                      </Badge>
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      {sensor.remote_ip} &middot; {Math.floor(sensor.uptime / 60)}m uptime
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4 text-xs text-muted-foreground shrink-0">
+                  <span>{sensor.packets.toLocaleString()} pkts</span>
+                  <span>{(sensor.bytes / 1024 / 1024).toFixed(1)} MB</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-xs h-7 text-destructive hover:text-destructive"
+                    onClick={() => handleDisconnectSensor(sensor.name)}
+                  >
+                    Disconnect
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {interfaces.length === 0 ? (
