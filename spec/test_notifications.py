@@ -18,20 +18,27 @@ async def test_notify_skips_below_min_severity(finding):
     """Notifications below min severity are silently skipped."""
     from leetha.notifications import NotificationDispatcher
     d = NotificationDispatcher(urls=["json://localhost"], min_severity="high")
-    d._apprise = MagicMock()
-    d._apprise.async_notify = AsyncMock(return_value=True)
+    mock_notify = AsyncMock(return_value=True)
+    class FakeApprise:
+        async_notify = mock_notify
+    d._apprise = FakeApprise()
     await d.send(finding)
-    d._apprise.async_notify.assert_not_called()
+    mock_notify.assert_not_called()
 
 
 async def test_notify_sends_above_min_severity(finding):
     """Findings at or above min severity trigger notification."""
     from leetha.notifications import NotificationDispatcher
+
+    # Create dispatcher, then replace the internal apprise with a mock
     d = NotificationDispatcher(urls=["json://localhost"], min_severity="warning")
-    d._apprise = MagicMock()
-    d._apprise.async_notify = AsyncMock(return_value=True)
+    mock_notify = AsyncMock(return_value=True)
+    # Use a simple object with async_notify to avoid MagicMock attr interference
+    class FakeApprise:
+        async_notify = mock_notify
+    d._apprise = FakeApprise()
     await d.send(finding)
-    d._apprise.async_notify.assert_called_once()
+    mock_notify.assert_called_once()
 
 
 async def test_notify_skips_when_no_urls():
@@ -51,11 +58,13 @@ async def test_notify_rate_limits(finding):
     """Same rule+MAC within cooldown window is suppressed."""
     from leetha.notifications import NotificationDispatcher
     d = NotificationDispatcher(urls=["json://localhost"], min_severity="info")
-    d._apprise = MagicMock()
-    d._apprise.async_notify = AsyncMock(return_value=True)
+    mock_notify = AsyncMock(return_value=True)
+    class FakeApprise:
+        async_notify = mock_notify
+    d._apprise = FakeApprise()
     await d.send(finding)
     await d.send(finding)  # duplicate within cooldown
-    assert d._apprise.async_notify.call_count == 1
+    assert mock_notify.call_count == 1
 
 
 async def test_format_message(finding):
