@@ -228,12 +228,30 @@ console commands:
         help="Max file size in MB (default: 500)",
     )
 
+    # Remote sensor management
+    remote_parser = sub.add_parser("remote", help="Manage remote packet capture")
+    remote_sub = remote_parser.add_subparsers(dest="remote_action")
+
+    ca_parser = remote_sub.add_parser("ca", help="Certificate authority management")
+    ca_sub = ca_parser.add_subparsers(dest="ca_action")
+
+    ca_sub.add_parser("init", help="Initialize the sensor CA")
+
+    ca_issue = ca_sub.add_parser("issue", help="Issue a client certificate")
+    ca_issue.add_argument("--name", required=True, help="Sensor name (used as cert CN)")
+    ca_issue.add_argument("--out", default=".", help="Output directory for cert/key files")
+
+    ca_revoke = ca_sub.add_parser("revoke", help="Revoke a sensor certificate")
+    ca_revoke.add_argument("--name", required=True, help="Sensor name to revoke")
+
+    ca_sub.add_parser("list", help="List issued certificates")
+
     return parser
 
 
 def _needs_capture(args: argparse.Namespace) -> bool:
     """Return True if the selected mode requires packet capture privileges."""
-    return args.command not in ("sync", "override", "patterns", "validate", "probe", "interfaces", "trust", "auth", "import")
+    return args.command not in ("sync", "override", "patterns", "validate", "probe", "interfaces", "trust", "auth", "import", "remote")
 
 
 def _has_capture_privilege() -> bool:
@@ -345,6 +363,70 @@ def main():
     elif args.command == "import":
         from leetha.cli_import import run_import
         asyncio.run(run_import(args))
+        return
+    elif args.command == "remote":
+        from pathlib import Path
+        from leetha.capture.remote.ca import (
+            init_ca, issue_cert, revoke_cert, list_certs, CANotInitialized,
+        )
+        from rich.console import Console
+        from rich.table import Table
+        from leetha.config import get_config
+
+        console = Console()
+        ca_dir = Path(get_config().data_dir) / "ca"
+
+        if args.remote_action == "ca":
+            if args.ca_action == "init":
+                try:
+                    init_ca(ca_dir)
+                    console.print(f"[green]CA initialized in {ca_dir}[/green]")
+                    console.print(f"CA cert: {ca_dir / 'ca.crt'}")
+                except FileExistsError:
+                    console.print("[red]CA already initialized[/red]")
+                    raise SystemExit(1)
+
+            elif args.ca_action == "issue":
+                try:
+                    out = Path(args.out)
+                    cert_path, key_path = issue_cert(ca_dir, args.name, out)
+                    console.print(f"[green]Issued certificate for '{args.name}'[/green]")
+                    console.print(f"  Cert: {cert_path}")
+                    console.print(f"  Key:  {key_path}")
+                    console.print(f"  CA:   {ca_dir / 'ca.crt'}")
+                except (CANotInitialized, ValueError) as e:
+                    console.print(f"[red]{e}[/red]")
+                    raise SystemExit(1)
+
+            elif args.ca_action == "revoke":
+                try:
+                    revoke_cert(ca_dir, args.name)
+                    console.print(f"[green]Revoked certificate '{args.name}'[/green]")
+                except (CANotInitialized, ValueError) as e:
+                    console.print(f"[red]{e}[/red]")
+                    raise SystemExit(1)
+
+            elif args.ca_action == "list":
+                try:
+                    certs = list_certs(ca_dir)
+                except CANotInitialized as e:
+                    console.print(f"[red]{e}[/red]")
+                    raise SystemExit(1)
+                if not certs:
+                    console.print("No certificates issued yet.")
+                else:
+                    table = Table(title="Issued Certificates")
+                    table.add_column("Name")
+                    table.add_column("Issued")
+                    table.add_column("Status")
+                    for c in certs:
+                        status = "[red]REVOKED[/red]" if c["revoked"] else "[green]ACTIVE[/green]"
+                        table.add_row(c["name"], c["issued"][:10], status)
+                    console.print(table)
+            else:
+                parser.parse_args(["remote", "ca", "--help"])
+        else:
+            parser.parse_args(["remote", "--help"])
         return
     # Apply optional flags to config
     from leetha.config import get_config
