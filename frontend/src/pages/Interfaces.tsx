@@ -774,7 +774,7 @@ export default function Interfaces() {
 
       {/* Build Sensor Dialog */}
       <Dialog open={buildDialogOpen} onOpenChange={(open) => { if (!open && !buildInProgress) setBuildDialogOpen(false); }}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-5xl w-[95vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Build Sensor Binary</DialogTitle>
             <DialogDescription>
@@ -860,7 +860,7 @@ export default function Interfaces() {
             <div className="space-y-3 py-2">
               <div
                 ref={buildLogRef}
-                className="h-96 overflow-y-auto rounded-lg bg-black/80 p-4 font-mono text-sm space-y-1 border border-border"
+                className="h-[60vh] overflow-y-auto rounded-lg bg-black p-5 font-mono text-sm leading-relaxed space-y-1 border border-border"
               >
                 {buildLog.map((entry, i) => (
                   <div
