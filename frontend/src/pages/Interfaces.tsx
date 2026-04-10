@@ -763,8 +763,8 @@ export default function Interfaces() {
       <Dialog open={buildDialogOpen} onOpenChange={(open) => { if (!open && !buildInProgress) setBuildDialogOpen(false); }}>
         <DialogContent className={
           buildLog.length > 0
-            ? "w-[98vw] max-w-[98vw] h-[90vh] max-h-[90vh] flex flex-col"
-            : "max-w-2xl"
+            ? "w-[98vw] max-w-[98vw] sm:max-w-[98vw] h-[90vh] max-h-[90vh] flex flex-col"
+            : "sm:max-w-2xl"
         }>
           <DialogHeader>
             <DialogTitle>Build Sensor Binary</DialogTitle>
