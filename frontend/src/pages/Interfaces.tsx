@@ -680,7 +680,7 @@ export default function Interfaces() {
 
       {/* Build Sensor Dialog */}
       <Dialog open={buildDialogOpen} onOpenChange={(open) => { if (!open && !buildInProgress) setBuildDialogOpen(false); }}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Build Sensor Binary</DialogTitle>
             <DialogDescription>
@@ -701,6 +701,9 @@ export default function Interfaces() {
               </div>
               <div className="space-y-2">
                 <Label>Server Address</Label>
+                <p className="text-[11px] text-muted-foreground -mt-1">
+                  IP address sensors will connect back to
+                </p>
                 <Select
                   value={buildServer}
                   onValueChange={(val) => setBuildServer(val)}
@@ -711,7 +714,10 @@ export default function Interfaces() {
                   <SelectContent>
                     {serverAddresses.map((addr) => (
                       <SelectItem key={`${addr.interface}-${addr.address}`} value={`${addr.address}:8443`}>
-                        {addr.address}:8443 ({addr.interface})
+                        <div className="flex items-center gap-3">
+                          <span className="font-mono">{addr.address}:8443</span>
+                          <span className="text-muted-foreground text-xs">{addr.interface}</span>
+                        </div>
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -747,7 +753,7 @@ export default function Interfaces() {
             <div className="space-y-3 py-2">
               <div
                 ref={buildLogRef}
-                className="h-64 overflow-y-auto rounded-lg bg-black/50 p-3 font-mono text-xs space-y-0.5"
+                className="h-96 overflow-y-auto rounded-lg bg-black/80 p-4 font-mono text-sm space-y-1 border border-border"
               >
                 {buildLog.map((entry, i) => (
                   <div
@@ -789,11 +795,33 @@ export default function Interfaces() {
             ) : (
               <>
                 {buildDownloadId && (
-                  <Button asChild>
-                    <a href={`/api/remote/build/${buildDownloadId}`} download={buildDownloadFilename}>
-                      <Download size={14} className="mr-2" />
-                      Download {buildDownloadFilename}
-                    </a>
+                  <Button
+                    onClick={async () => {
+                      try {
+                        const token = localStorage.getItem("leetha_token");
+                        const headers: Record<string, string> = {};
+                        if (token) headers["Authorization"] = `Bearer ${token}`;
+                        const resp = await fetch(`/api/remote/build/${buildDownloadId}`, { headers });
+                        if (!resp.ok) {
+                          toast.error("Download failed");
+                          return;
+                        }
+                        const blob = await resp.blob();
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = buildDownloadFilename;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                      } catch (err) {
+                        toast.error(`Download error: ${err}`);
+                      }
+                    }}
+                  >
+                    <Download size={14} className="mr-2" />
+                    Download {buildDownloadFilename}
                   </Button>
                 )}
                 <Button
