@@ -100,6 +100,22 @@ console commands:
         help="Force API authentication off (even on 0.0.0.0)",
     )
     parser.add_argument(
+        "--no-tls", action="store_true", default=False,
+        help="Disable HTTPS and serve over plain HTTP",
+    )
+    parser.add_argument(
+        "--tls-cert",
+        default=None,
+        metavar="PATH",
+        help="Path to TLS certificate file (default: auto-generated)",
+    )
+    parser.add_argument(
+        "--tls-key",
+        default=None,
+        metavar="PATH",
+        help="Path to TLS private key file (default: auto-generated)",
+    )
+    parser.add_argument(
         "--probe", action="store_true", default=False,
         help="Enable active probing alongside passive capture",
     )
