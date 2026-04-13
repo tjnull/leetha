@@ -358,7 +358,8 @@ class SensorBuilder:
                 download_dir.mkdir(parents=True, exist_ok=True)
                 dest = download_dir / f"{download_id}_{binary_name}"
                 shutil.copy2(binary_path, dest)
-                import os, stat
+                import os
+                import stat
                 dest.chmod(dest.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
                 _build_artifacts[download_id] = {

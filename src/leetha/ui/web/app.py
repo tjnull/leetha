@@ -700,7 +700,8 @@ async def export_patterns(format: str = "json"):
     """Export all custom patterns as JSON or CSV."""
     from leetha.fingerprint.lookup import load_custom_patterns
     from starlette.responses import Response
-    import csv, io
+    import csv
+    import io
 
     patterns = load_custom_patterns(app_instance.config.data_dir)
 
@@ -742,7 +743,8 @@ async def export_patterns(format: str = "json"):
 async def import_patterns(request: Request):
     """Import patterns from JSON or CSV. Returns preview if dry_run=true."""
     from leetha.fingerprint.lookup import load_custom_patterns, save_custom_patterns
-    import csv, io
+    import csv
+    import io
 
     content_type = request.headers.get("content-type", "")
     body = await request.body()
@@ -2507,7 +2509,8 @@ async def api_reopen_incident(incident_id: str):
 async def api_export_incidents(format: str = "json"):
     """Export findings as JSON or CSV."""
     from starlette.responses import Response
-    import csv, io
+    import csv
+    import io
 
     all_findings = await app_instance.store.findings.list_all(limit=50000)
 
