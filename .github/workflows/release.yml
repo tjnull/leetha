@@ -35,7 +35,7 @@ jobs:
           name: frontend-dist
           path: src/leetha/ui/web/dist/
       - run: pip install build
-      - run: python -m build
+      - run: python -m build --wheel
       - uses: actions/upload-artifact@v4
         with:
           name: wheel
