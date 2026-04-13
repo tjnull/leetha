@@ -31,10 +31,10 @@
       "certainty": 85
     },
     "_companion-link._tcp": {
-      "category": "mobile",
+      "category": null,
       "vendor": "Apple",
-      "platform": "iOS",
-      "certainty": 90
+      "platform": null,
+      "certainty": 70
     },
     "_apple-mobdev2._tcp": {
       "category": "mobile",
@@ -49,10 +49,10 @@
       "certainty": 85
     },
     "_rdlink._tcp": {
-      "category": "mobile",
+      "category": null,
       "vendor": "Apple",
-      "platform": "iOS",
-      "certainty": 80
+      "platform": null,
+      "certainty": 70
     },
     "_daap._tcp": {
       "category": "workstation",

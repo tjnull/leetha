@@ -112,14 +112,22 @@ pub const KEY_PEM: &[u8] = include_bytes!("{key_path}");
 
 def check_prerequisites(target: str) -> tuple[bool, str]:
     """Check if build tools are available. Returns (ok, message)."""
+    if not shutil.which("rustc"):
+        return False, "Rust toolchain not found. Install via: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+
     if not shutil.which("cargo"):
-        return False, "Rust toolchain not found. Install via rustup: https://rustup.rs"
+        return False, "cargo not found. Install Rust via: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
 
     if not _is_native_target(target):
         if not shutil.which("cross"):
             return False, (
                 "cross not installed (needed for cross-compilation). "
                 "Run: cargo install cross"
+            )
+        if not shutil.which("docker"):
+            return False, (
+                "Docker not found (required by cross for cross-compilation). "
+                "Install Docker: https://docs.docker.com/engine/install/"
             )
     return True, "ok"
 
@@ -350,6 +358,8 @@ class SensorBuilder:
                 download_dir.mkdir(parents=True, exist_ok=True)
                 dest = download_dir / f"{download_id}_{binary_name}"
                 shutil.copy2(binary_path, dest)
+                import os, stat
+                dest.chmod(dest.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
                 _build_artifacts[download_id] = {
                     "path": str(dest),

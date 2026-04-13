@@ -57,7 +57,8 @@ def detect_randomised_mac(addr: str | None) -> bool:
     if not addr:
         return False
 
-    upper = addr.upper()
+    # Normalize to colon-separated uppercase for consistent comparison
+    upper = addr.replace("-", ":").upper()
 
     # Exempt known hypervisor/container prefixes.
     for pfx in _HYPERVISOR_MAC_PREFIXES:

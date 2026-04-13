@@ -409,9 +409,14 @@ class Pipeline:
         mac_random = is_randomized_mac(hw_addr)
         real_mac = None
         if mac_random and protocol == "dhcpv4":
-            # Option 61 may contain the real MAC
+            # Option 61 may contain the real (non-randomized) MAC.
+            # Modern iOS sends the randomized MAC in Option 61 too,
+            # so only accept it if it's actually different AND not
+            # itself a randomized MAC.
             client_id = packet.fields.get("client_id", "")
-            if len(client_id) == 17 and client_id.count(":") == 5:
+            if (len(client_id) == 17 and client_id.count(":") == 5
+                    and client_id.lower() != hw_addr.lower()
+                    and not is_randomized_mac(client_id)):
                 real_mac = client_id
 
         # Preserve existing disposition so we don't reset "known" back to "new"
@@ -642,7 +647,7 @@ class Pipeline:
         elif host.real_hw_addr:
             identity = await self.store.identities.find_or_create(host.real_hw_addr)
         else:
-            signals = self._build_correlation_signals(hw_addr)
+            signals = self._build_correlation_signals(hw_addr, verdict=verdict)
             identity = await self._correlate_or_create(hw_addr, signals)
 
         # Update identity metadata from verdict
@@ -660,6 +665,15 @@ class Pipeline:
             identity.confidence = max(identity.confidence, verdict.certainty)
         identity.last_seen = datetime.now()
 
+        # Keep correlation fingerprint up-to-date so future randomized
+        # MACs can match against this identity's signals.
+        if is_randomized_mac(hw_addr):
+            signals = self._build_correlation_signals(hw_addr, verdict=verdict)
+            if signals:
+                merged = dict(identity.fingerprint or {})
+                merged.update(signals)
+                identity.fingerprint = merged
+
         await self.store.identities.update(identity)
 
         # Link host to identity if changed
@@ -674,9 +688,19 @@ class Pipeline:
                 logger.debug("Failed to link host %s to identity %s",
                              hw_addr, identity.id, exc_info=True)
 
-    def _build_correlation_signals(self, hw_addr: str) -> dict:
-        """Extract correlation signals from accumulated evidence."""
+    def _build_correlation_signals(self, hw_addr: str, verdict=None) -> dict:
+        """Extract correlation signals from accumulated evidence and verdict.
+
+        Signals are used to correlate randomized MACs to a persistent
+        device identity across MAC rotations.
+        """
         signals: dict[str, str] = {}
+
+        # 1. Pull from the verdict's resolved hostname (most reliable)
+        if verdict and verdict.hostname:
+            signals["hostname"] = verdict.hostname.lower()
+
+        # 2. Scan evidence for DHCP and mDNS signals
         for ev in self._evidence_buffer.get(hw_addr, []):
             if not signals.get("hostname") and getattr(ev, "hostname", None):
                 signals["hostname"] = ev.hostname.lower()
@@ -685,8 +709,14 @@ class Pipeline:
                 signals["dhcp_opt60"] = str(raw["opt60"]).lower()
             if not signals.get("dhcp_opt55") and raw.get("opt55"):
                 signals["dhcp_opt55"] = str(raw["opt55"]).lower()
-            if not signals.get("mdns_name") and raw.get("name"):
-                signals["mdns_name"] = str(raw["name"]).lower()
+            # mDNS names: check both "name" and "friendly_name"
+            if not signals.get("mdns_name"):
+                name = raw.get("friendly_name") or raw.get("name")
+                if name and "@" not in str(name):  # skip AirPlay hex@name format
+                    signals["mdns_name"] = str(name).lower()
+            # DHCP hostname from raw fields
+            if not signals.get("hostname") and raw.get("hostname"):
+                signals["hostname"] = str(raw["hostname"]).lower()
         return signals
 
     async def _correlate_or_create(self, hw_addr: str, signals: dict):

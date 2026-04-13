@@ -220,9 +220,29 @@ class VerdictEngine:
                 chosen_hostname, vendor[0], category[0], evidence,
             )
 
+        # Infer category/platform from hostname when the hostname contains
+        # an explicit Apple device type (e.g. "Becca's MacBook Air").
+        # This overrides ambiguous mDNS service evidence that can't
+        # distinguish macOS from iOS.
+        chosen_category = category[0]
+        if chosen_hostname and vendor[0] == "Apple":
+            hn_lower = chosen_hostname.lower()
+            if "macbook" in hn_lower:
+                chosen_category = "laptop"
+                chosen_platform = "macOS"
+            elif "imac" in hn_lower or "mac mini" in hn_lower or "mac pro" in hn_lower or "mac studio" in hn_lower:
+                chosen_category = "workstation"
+                chosen_platform = "macOS"
+            elif "iphone" in hn_lower:
+                chosen_category = "phone"
+                chosen_platform = "iOS"
+            elif "ipad" in hn_lower:
+                chosen_category = "tablet"
+                chosen_platform = "iPadOS"
+
         return Verdict(
             hw_addr=hw_addr,
-            category=category[0],
+            category=chosen_category,
             vendor=vendor[0],
             platform=chosen_platform,
             platform_version=platform_version[0],
@@ -254,7 +274,8 @@ class VerdictEngine:
             if value is None:
                 continue
 
-            weight = _SOURCE_WEIGHTS.get(e.source, 0.5)
+            weight = _SOURCE_WEIGHTS.get(e.source) or _SOURCE_WEIGHTS.get(
+                e.source.rsplit("_", 1)[0] if "_" in e.source else e.source, 0.5)
             score = e.certainty * weight
 
             if value not in candidates:
@@ -301,7 +322,8 @@ class VerdictEngine:
             if not value or not is_valid_hostname(value):
                 continue
 
-            weight = _SOURCE_WEIGHTS.get(e.source, 0.5)
+            weight = _SOURCE_WEIGHTS.get(e.source) or _SOURCE_WEIGHTS.get(
+                e.source.rsplit("_", 1)[0] if "_" in e.source else e.source, 0.5)
             score = e.certainty * weight
             if value not in candidates:
                 candidates[value] = 0.0
@@ -392,7 +414,8 @@ class VerdictEngine:
             if not hn or not is_valid_hostname(hn):
                 continue
 
-            weight = _SOURCE_WEIGHTS.get(e.source, 0.5)
+            weight = _SOURCE_WEIGHTS.get(e.source) or _SOURCE_WEIGHTS.get(
+                e.source.rsplit("_", 1)[0] if "_" in e.source else e.source, 0.5)
             score = e.certainty * weight
             candidates.append((hn, score))
 

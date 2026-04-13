@@ -10,8 +10,11 @@ import {
   fetchProbeStatus,
   fetchRemoteSensors,
   disconnectRemoteSensor,
+  setSensorInterfaces,
+  stopSensorCapture,
   fetchBuildTargets,
   fetchServerAddresses,
+  checkBuildPrerequisites,
   fetchBuildHistory,
   deleteBuildHistory,
   type NetworkInterface,
@@ -246,6 +249,17 @@ export default function Interfaces() {
       return;
     }
 
+    // Check build prerequisites before starting
+    try {
+      const prereq = await checkBuildPrerequisites(buildTarget);
+      if (!prereq.ok) {
+        toast.error(prereq.message);
+        return;
+      }
+    } catch {
+      // If check fails, proceed anyway — build will report errors
+    }
+
     setBuildInProgress(true);
     setBuildLog([]);
     setBuildDownloadId(null);
@@ -365,6 +379,46 @@ export default function Interfaces() {
       queryClient.invalidateQueries({ queryKey: ["remote-sensors"] });
     } catch (err) {
       toast.error(`Failed to disconnect: ${err}`);
+    }
+  };
+
+  const [sensorSelections, setSensorSelections] = useState<Record<string, Set<string>>>({});
+
+  const toggleSensorInterface = (sensorName: string, ifaceName: string) => {
+    setSensorSelections((prev) => {
+      const current = prev[sensorName] ?? new Set<string>();
+      const next = new Set(current);
+      if (next.has(ifaceName)) {
+        next.delete(ifaceName);
+      } else {
+        next.add(ifaceName);
+      }
+      return { ...prev, [sensorName]: next };
+    });
+  };
+
+  const handleStartCapture = async (sensorName: string) => {
+    const selected = sensorSelections[sensorName];
+    if (!selected || selected.size === 0) {
+      toast.error("Select at least one interface");
+      return;
+    }
+    try {
+      await setSensorInterfaces(sensorName, Array.from(selected));
+      toast.success(`Capture started on ${selected.size} interface(s)`);
+      queryClient.invalidateQueries({ queryKey: ["remote-sensors"] });
+    } catch (e: any) {
+      toast.error(e.message || "Failed to start capture");
+    }
+  };
+
+  const handleStopCapture = async (sensorName: string) => {
+    try {
+      await stopSensorCapture(sensorName);
+      toast.success("Capture stopped");
+      queryClient.invalidateQueries({ queryKey: ["remote-sensors"] });
+    } catch (e: any) {
+      toast.error(e.message || "Failed to stop capture");
     }
   };
 
@@ -644,25 +698,124 @@ export default function Interfaces() {
                     </div>
                   </div>
 
-                  {/* Discovered interfaces */}
+                  {/* Interface rows — matching Local Adapters layout */}
                   {sensor.remote_interfaces && sensor.remote_interfaces.length > 0 && (
-                    <div className="border-t border-border px-5 py-3">
-                      <p className="text-[11px] text-muted-foreground mb-2">Discovered Interfaces</p>
-                      <div className="flex flex-wrap gap-2">
-                        {sensor.remote_interfaces.map((iface) => (
-                          <Badge
+                    <div className="divide-y divide-border">
+                      {sensor.remote_interfaces.map((iface) => {
+                        const isSelected = sensorSelections[sensor.name]?.has(iface.name)
+                          ?? sensor.selected_interfaces.includes(iface.name);
+                        const isCapturing = sensor.state === "capturing" && sensor.selected_interfaces.includes(iface.name);
+                        const hasError = sensor.interface_errors?.[iface.name];
+                        const ifaceStats = sensor.interface_stats?.[iface.name];
+
+                        return (
+                          <div
                             key={iface.name}
-                            variant="outline"
-                            className="text-[11px] font-mono"
+                            className={cn(
+                              "flex items-start justify-between px-5 py-4 gap-4",
+                              isCapturing && "bg-primary/[0.03]"
+                            )}
                           >
-                            {iface.name}
-                            {iface.desc ? ` — ${iface.desc}` : ""}
-                          </Badge>
-                        ))}
-                      </div>
-                      <p className="text-[10px] text-muted-foreground mt-2">
-                        Capturing on: <span className="text-foreground">all interfaces (any)</span>
-                      </p>
+                            {/* Left: detailed info */}
+                            <div className="space-y-2 min-w-0 flex-1">
+                              {/* Name + badges */}
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-semibold text-sm">{iface.name}</span>
+                                {iface.up !== undefined && (
+                                  <Badge
+                                    variant={iface.up ? "default" : "secondary"}
+                                    className={cn(
+                                      "text-[10px] uppercase font-semibold",
+                                      iface.up ? "bg-success/20 text-success border-success/30" : "text-muted-foreground"
+                                    )}
+                                  >
+                                    {iface.up ? "UP" : "DOWN"}
+                                  </Badge>
+                                )}
+                                {isCapturing && (
+                                  <Badge className="text-[10px] uppercase font-semibold bg-primary/20 text-primary border-primary/30">
+                                    CAPTURING
+                                  </Badge>
+                                )}
+                                {hasError && (
+                                  <Badge variant="destructive" className="text-[10px] uppercase font-semibold">
+                                    ERROR
+                                  </Badge>
+                                )}
+                              </div>
+
+                              {/* Detail grid */}
+                              <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
+                                {iface.addrs && iface.addrs.length > 0 && (
+                                  <>
+                                    <span className="text-muted-foreground">IPv4:</span>
+                                    <span className="font-data">{iface.addrs.join(", ")}</span>
+                                  </>
+                                )}
+                                {iface.desc && (
+                                  <>
+                                    <span className="text-muted-foreground">Description:</span>
+                                    <span>{iface.desc}</span>
+                                  </>
+                                )}
+                                {hasError && (
+                                  <>
+                                    <span className="text-muted-foreground">Error:</span>
+                                    <span className="text-destructive">{hasError}</span>
+                                  </>
+                                )}
+                                {ifaceStats && isCapturing && (
+                                  <>
+                                    <span className="text-muted-foreground">Packets:</span>
+                                    <span className="font-data">{ifaceStats.packets.toLocaleString()}</span>
+                                    <span className="text-muted-foreground">Bytes:</span>
+                                    <span className="font-data">{(ifaceStats.bytes / 1024).toFixed(1)} KB</span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Right: switch toggle */}
+                            <div className="flex items-center gap-3 shrink-0 pt-1">
+                              <Switch
+                                checked={isSelected}
+                                disabled={sensor.state === "capturing"}
+                                onCheckedChange={() => toggleSensorInterface(sensor.name, iface.name)}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Start / Stop controls */}
+                  {sensor.remote_interfaces && sensor.remote_interfaces.length > 0 && (
+                    <div className="border-t border-border px-5 py-3 flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">
+                        {sensor.state === "capturing"
+                          ? `Capturing on ${sensor.selected_interfaces.length} interface(s)`
+                          : `${sensorSelections[sensor.name]?.size ?? 0} interface(s) selected`}
+                      </span>
+                      {sensor.state === "idle" ? (
+                        <Button
+                          size="sm"
+                          className="text-xs h-7"
+                          disabled={!sensorSelections[sensor.name]?.size}
+                          onClick={() => handleStartCapture(sensor.name)}
+                        >
+                          Start Capture
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          className="text-xs h-7"
+                          onClick={() => handleStopCapture(sensor.name)}
+                        >
+                          Stop Capture
+                        </Button>
+                      )}
                     </div>
                   )}
                 </div>

@@ -31,6 +31,7 @@ Detailed walkthrough: [Getting Started](Getting-Started.md)
 - [PCAP Import](PCAP-Import.md) -- Import captured traffic for offline analysis through the fingerprinting pipeline
 - [Web Dashboard](Web-Dashboard.md) -- React frontend pages, REST API, WebSocket events
 - [Attack Surface Analysis](Attack-Surface-Analysis.md) -- FindingRules, chain activation, tool command templates
+- [Remote Sensors](Remote-Sensors.md) -- Build, deploy, and manage remote packet capture sensors
 - [Interface Types & VPN Capture](Interface-Types-VPN-Capture.md) -- NetworkAdapter, AdapterConfig, scan_adapters
 - [Spoofing Detection](Spoofing-Detection.md) -- AddressVerifier, addr_conflict finding, trusted binding management
 - [Authentication](Authentication.md) -- Token-based API security, roles, and token management

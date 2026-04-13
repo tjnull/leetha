@@ -56,7 +56,8 @@ def determine_capture_strategy(adapter_name: str) -> str:
     The caller uses this to decide BPF filter breadth and promiscuous-mode.
     """
     lowered = adapter_name.lower()
-    for prefix, strategy in (("tap", "tap"), ("tun", "tun")):
+    # WireGuard and utun (macOS) are L3-only like TUN
+    for prefix, strategy in (("tap", "tap"), ("tun", "tun"), ("wg", "tun"), ("utun", "tun")):
         if lowered.startswith(prefix):
             return strategy
     return "physical"

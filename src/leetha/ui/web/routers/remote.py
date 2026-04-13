@@ -102,6 +102,71 @@ async def disconnect_sensor(name: str):
     return {"status": "disconnected", "name": name}
 
 
+# --- Interface Selection ---
+
+class InterfaceSelectionBody(BaseModel):
+    interfaces: list[str]
+
+
+@router.post("/sensors/{name}/interfaces")
+async def set_sensor_interfaces(name: str, body: InterfaceSelectionBody):
+    """Select capture interfaces for a remote sensor."""
+    from leetha.capture.remote.listener import send_control
+    from leetha.capture.remote.config import SensorConfigStore
+
+    manager = _get_manager()
+    if name not in manager.sensors:
+        raise HTTPException(404, f"Sensor '{name}' not found")
+
+    session = manager.sensors[name]
+    if session.websocket is None:
+        raise HTTPException(400, "Sensor not connected")
+
+    # Persist the selection
+    data_dir = _get_data_dir()
+    config_store = SensorConfigStore(data_dir / "sensor_config.json")
+    config_store.save_interfaces(name, body.interfaces)
+
+    # Send control message to sensor
+    ok = await send_control(session, {
+        "type": "capture_start",
+        "interfaces": body.interfaces,
+    })
+    if not ok:
+        raise HTTPException(502, "Failed to send command to sensor")
+
+    session.set_state("capturing", body.interfaces)
+    return {"status": "ok", "interfaces": body.interfaces}
+
+
+@router.delete("/sensors/{name}/interfaces")
+async def stop_sensor_capture(name: str):
+    """Stop capture on a remote sensor."""
+    from leetha.capture.remote.listener import send_control
+    from leetha.capture.remote.config import SensorConfigStore
+
+    manager = _get_manager()
+    if name not in manager.sensors:
+        raise HTTPException(404, f"Sensor '{name}' not found")
+
+    session = manager.sensors[name]
+    if session.websocket is None:
+        raise HTTPException(400, "Sensor not connected")
+
+    # Clear persisted selection
+    data_dir = _get_data_dir()
+    config_store = SensorConfigStore(data_dir / "sensor_config.json")
+    config_store.delete(name)
+
+    # Send stop command
+    ok = await send_control(session, {"type": "capture_stop"})
+    if not ok:
+        raise HTTPException(502, "Failed to send command to sensor")
+
+    session.set_state("idle", [])
+    return {"status": "stopped"}
+
+
 # --- Build Endpoints ---
 
 @router.get("/server-addresses")
@@ -255,6 +320,9 @@ async def download_build(download_id: str):
         path=str(path),
         filename=artifact["filename"],
         media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{artifact["filename"]}"',
+        },
     )
 
 

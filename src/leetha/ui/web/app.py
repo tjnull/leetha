@@ -167,6 +167,8 @@ def _finding_to_alert_dict(finding) -> dict:
         "message": finding.message,
         "timestamp": finding.timestamp.isoformat(),
         "acknowledged": finding.resolved,
+        "status": finding.status,
+        "disposition": finding.disposition,
     }
 
 @fastapi_app.middleware("http")
@@ -509,6 +511,34 @@ async def get_custom_patterns():
     return patterns
 
 
+def _validate_pattern(pattern_type: str, pattern: str, existing_patterns: dict) -> str | None:
+    """Validate a pattern. Returns error message or None if valid."""
+    if not pattern.strip():
+        return "Pattern cannot be empty"
+
+    if pattern_type == "mac_prefix":
+        import re
+        if not re.match(r'^([0-9a-fA-F]{2}:){0,5}[0-9a-fA-F]{2}$', pattern):
+            return "MAC prefix must be colon-separated hex pairs (e.g., aa:bb:cc)"
+
+    if pattern_type == "hostname":
+        cleaned = pattern.replace("*", "").replace("?", "")
+        if not cleaned:
+            return "Hostname pattern must contain at least one non-wildcard character"
+
+    # Duplicate detection
+    entries = existing_patterns.get(pattern_type, [])
+    if isinstance(entries, list):
+        for e in entries:
+            if e.get("pattern", "").lower() == pattern.lower():
+                return f"Duplicate: a {pattern_type} pattern for '{pattern}' already exists"
+    elif isinstance(entries, dict):
+        if pattern.lower() in {k.lower() for k in entries}:
+            return f"Duplicate: a {pattern_type} pattern for '{pattern}' already exists"
+
+    return None
+
+
 @fastapi_app.post("/api/patterns/{pattern_type}")
 async def add_custom_pattern(pattern_type: str, request: Request):
     """Add a custom pattern of the given type."""
@@ -520,6 +550,12 @@ async def add_custom_pattern(pattern_type: str, request: Request):
 
     entry = await request.json()
     patterns = load_custom_patterns(app_instance.config.data_dir)
+
+    # Validate before inserting
+    pattern_value = entry.get("pattern", "") or entry.get("key", "") or entry.get("prefix", "")
+    validation_error = _validate_pattern(pattern_type, pattern_value, patterns)
+    if validation_error:
+        return JSONResponse(status_code=400, content={"error": validation_error})
 
     if pattern_type == "dhcp_opt55":
         # opt55 is a dict keyed by option list
@@ -569,6 +605,358 @@ async def delete_custom_pattern(pattern_type: str, index: int):
     app_instance.fingerprint_engine.lookup.load_custom_patterns(app_instance.config.data_dir)
 
     return {"status": "ok", "type": pattern_type}
+
+
+@fastapi_app.put("/api/patterns/{pattern_type}/{index}")
+async def update_custom_pattern(pattern_type: str, index: int, request: Request):
+    """Update a custom pattern by type and index (preserves hits)."""
+    from leetha.fingerprint.lookup import load_custom_patterns, save_custom_patterns
+
+    entry = await request.json()
+    patterns = load_custom_patterns(app_instance.config.data_dir)
+
+    if pattern_type not in patterns:
+        return JSONResponse(status_code=404, content={"error": f"No patterns of type '{pattern_type}'"})
+
+    entries = patterns[pattern_type]
+    if isinstance(entries, list):
+        if index < 0 or index >= len(entries):
+            return JSONResponse(status_code=404, content={"error": "Index out of range"})
+        old = entries[index]
+        entry["hits"] = old.get("hits", 0)
+        entry["created_at"] = old.get("created_at")
+        entries[index] = entry
+    elif isinstance(entries, dict):
+        keys = list(entries.keys())
+        if index < 0 or index >= len(keys):
+            return JSONResponse(status_code=404, content={"error": "Index out of range"})
+        old_key = keys[index]
+        old = entries[old_key]
+        entry["hits"] = old.get("hits", 0)
+        entry["created_at"] = old.get("created_at")
+        new_key = entry.pop("pattern", old_key)
+        del entries[old_key]
+        entries[new_key] = entry
+
+    save_custom_patterns(app_instance.config.data_dir, patterns)
+    app_instance.fingerprint_engine.lookup.load_custom_patterns(app_instance.config.data_dir)
+
+    return {"status": "ok", "type": pattern_type}
+
+
+@fastapi_app.post("/api/patterns/{pattern_type}/reorder")
+async def reorder_custom_patterns(pattern_type: str, request: Request):
+    """Reorder patterns within a type. Body: {"order": [2, 0, 1]}"""
+    from leetha.fingerprint.lookup import load_custom_patterns, save_custom_patterns
+
+    body = await request.json()
+    order = body.get("order", [])
+    patterns = load_custom_patterns(app_instance.config.data_dir)
+
+    if pattern_type not in patterns:
+        return JSONResponse(status_code=404, content={"error": f"No patterns of type '{pattern_type}'"})
+
+    entries = patterns[pattern_type]
+    if not isinstance(entries, list):
+        return JSONResponse(status_code=400, content={"error": "Cannot reorder dict-type patterns"})
+
+    if sorted(order) != list(range(len(entries))):
+        return JSONResponse(status_code=400, content={"error": "Invalid order — must include every index exactly once"})
+
+    patterns[pattern_type] = [entries[i] for i in order]
+    save_custom_patterns(app_instance.config.data_dir, patterns)
+    app_instance.fingerprint_engine.lookup.load_custom_patterns(app_instance.config.data_dir)
+
+    return {"status": "ok"}
+
+
+@fastapi_app.post("/api/patterns/{pattern_type}/{index}/reset-hits")
+async def reset_pattern_hits(pattern_type: str, index: int):
+    """Reset the hit counter for a specific pattern."""
+    from leetha.fingerprint.lookup import load_custom_patterns, save_custom_patterns
+
+    patterns = load_custom_patterns(app_instance.config.data_dir)
+
+    if pattern_type not in patterns:
+        return JSONResponse(status_code=404, content={"error": f"No patterns of type '{pattern_type}'"})
+
+    entries = patterns[pattern_type]
+    if isinstance(entries, list):
+        if index < 0 or index >= len(entries):
+            return JSONResponse(status_code=404, content={"error": "Index out of range"})
+        entries[index]["hits"] = 0
+    elif isinstance(entries, dict):
+        keys = list(entries.keys())
+        if index < 0 or index >= len(keys):
+            return JSONResponse(status_code=404, content={"error": "Index out of range"})
+        entries[keys[index]]["hits"] = 0
+
+    save_custom_patterns(app_instance.config.data_dir, patterns)
+    return {"status": "ok"}
+
+
+@fastapi_app.get("/api/patterns/export")
+async def export_patterns(format: str = "json"):
+    """Export all custom patterns as JSON or CSV."""
+    from leetha.fingerprint.lookup import load_custom_patterns
+    from starlette.responses import Response
+    import csv, io
+
+    patterns = load_custom_patterns(app_instance.config.data_dir)
+
+    if format == "csv":
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["type", "pattern", "device_type", "manufacturer", "confidence", "hits", "created_at"])
+        for ptype, entries in patterns.items():
+            if isinstance(entries, list):
+                for entry in entries:
+                    writer.writerow([
+                        ptype, entry.get("pattern", ""),
+                        entry.get("device_type", ""), entry.get("manufacturer", ""),
+                        entry.get("confidence", 80), entry.get("hits", 0),
+                        entry.get("created_at", ""),
+                    ])
+            elif isinstance(entries, dict):
+                for key, entry in entries.items():
+                    writer.writerow([
+                        ptype, key,
+                        entry.get("device_type", ""), entry.get("manufacturer", ""),
+                        entry.get("confidence", 80), entry.get("hits", 0),
+                        entry.get("created_at", ""),
+                    ])
+        return Response(
+            content=output.getvalue(),
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="leetha-patterns.csv"'},
+        )
+    else:
+        return Response(
+            content=json.dumps(patterns, indent=2),
+            media_type="application/json",
+            headers={"Content-Disposition": 'attachment; filename="leetha-patterns.json"'},
+        )
+
+
+@fastapi_app.post("/api/patterns/import")
+async def import_patterns(request: Request):
+    """Import patterns from JSON or CSV. Returns preview if dry_run=true."""
+    from leetha.fingerprint.lookup import load_custom_patterns, save_custom_patterns
+    import csv, io
+
+    content_type = request.headers.get("content-type", "")
+    body = await request.body()
+    text = body.decode("utf-8")
+
+    dry_run = request.query_params.get("dry_run", "false").lower() == "true"
+
+    imported = {}
+    try:
+        if "csv" in content_type or text.startswith("type,"):
+            reader = csv.DictReader(io.StringIO(text))
+            for row in reader:
+                ptype = row.get("type", "").strip()
+                if not ptype:
+                    continue
+                pattern = row.get("pattern", "").strip()
+                entry = {
+                    "pattern": pattern,
+                    "device_type": row.get("device_type", "").strip(),
+                    "manufacturer": row.get("manufacturer", "").strip(),
+                    "confidence": int(row.get("confidence", 80)),
+                }
+                if ptype in ("mac_prefix", "dhcp_opt55"):
+                    imported.setdefault(ptype, {})[pattern] = entry
+                else:
+                    imported.setdefault(ptype, []).append(entry)
+        else:
+            imported = json.loads(text)
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"error": f"Failed to parse import data: {e}"})
+
+    count = 0
+    for entries in imported.values():
+        count += len(entries) if isinstance(entries, (list, dict)) else 0
+
+    if dry_run:
+        return {"status": "preview", "count": count, "patterns": imported}
+
+    existing = load_custom_patterns(app_instance.config.data_dir)
+    for ptype, entries in imported.items():
+        if isinstance(entries, list):
+            existing.setdefault(ptype, []).extend(entries)
+        elif isinstance(entries, dict):
+            existing.setdefault(ptype, {}).update(entries)
+
+    save_custom_patterns(app_instance.config.data_dir, existing)
+    app_instance.fingerprint_engine.lookup.load_custom_patterns(app_instance.config.data_dir)
+
+    return {"status": "ok", "imported": count}
+
+
+@fastapi_app.post("/api/patterns/test")
+async def test_pattern(request: Request):
+    """Test a pattern against the current device inventory."""
+    entry = await request.json()
+    pattern_type = entry.get("type", "hostname")
+    pattern_value = entry.get("pattern", "")
+    new_device_type = entry.get("device_type", "")
+    new_manufacturer = entry.get("manufacturer", "")
+
+    if not pattern_value:
+        return JSONResponse(status_code=400, content={"error": "Pattern is required"})
+
+    matches = []
+
+    if not app_instance or not app_instance.store:
+        return {"matches": matches, "count": 0}
+
+    hosts = await app_instance.store.hosts.find_all(limit=5000)
+
+    import fnmatch
+
+    for host in hosts:
+        matched = False
+        match_field = ""
+
+        if pattern_type == "hostname":
+            verdict = await app_instance.store.verdicts.find_by_addr(host.hw_addr)
+            hostname = ""
+            if verdict:
+                hostname = getattr(verdict, "hostname", "") or ""
+            if hostname and fnmatch.fnmatch(hostname.lower(), pattern_value.lower()):
+                matched = True
+                match_field = hostname
+
+        elif pattern_type == "mac_prefix":
+            if host.hw_addr.lower().startswith(pattern_value.lower()):
+                matched = True
+                match_field = host.hw_addr
+
+        elif pattern_type == "dhcp_opt60":
+            sightings = await app_instance.store.sightings.query(hw_addr=host.hw_addr, source="dhcpv4")
+            for s in sightings:
+                vendor_class = s.fields.get("vendor_class", "")
+                if vendor_class and fnmatch.fnmatch(vendor_class.lower(), pattern_value.lower()):
+                    matched = True
+                    match_field = vendor_class
+                    break
+
+        if matched:
+            verdict = await app_instance.store.verdicts.find_by_addr(host.hw_addr)
+            current_type = verdict.category if verdict else "Unknown"
+            current_vendor = verdict.vendor if verdict else "Unknown"
+            matches.append({
+                "hw_addr": host.hw_addr,
+                "ip_addr": host.ip_addr,
+                "matched_on": match_field,
+                "current_category": current_type,
+                "current_vendor": current_vendor,
+                "new_category": new_device_type,
+                "new_vendor": new_manufacturer,
+            })
+
+    return {"matches": matches, "count": len(matches)}
+
+
+@fastapi_app.post("/api/patterns/test/live")
+async def test_pattern_live(request: Request):
+    """Live dry-run: apply a pattern temporarily for 30s, stream matches via SSE."""
+    from fastapi.responses import StreamingResponse
+    import fnmatch
+
+    entry = await request.json()
+    pattern_type = entry.get("type", "hostname")
+    pattern_value = entry.get("pattern", "")
+    new_device_type = entry.get("device_type", "")
+    duration = min(entry.get("duration", 30), 60)
+
+    if not pattern_value:
+        return JSONResponse(status_code=400, content={"error": "Pattern is required"})
+
+    async def event_stream():
+        import asyncio
+        import time
+
+        end_time = time.time() + duration
+        seen = set()
+
+        if not app_instance:
+            return
+        q = app_instance.subscribe()
+
+        try:
+            while time.time() < end_time:
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    continue
+
+                if event.get("type") != "device_update":
+                    continue
+
+                mac = event.get("mac", "")
+                packet = event.get("packet", {})
+
+                matched = False
+                match_field = ""
+
+                if pattern_type == "hostname":
+                    fields = packet.get("fields", {})
+                    hostname = fields.get("hostname", "") or fields.get("device_name", "")
+                    if hostname and fnmatch.fnmatch(hostname.lower(), pattern_value.lower()):
+                        matched = True
+                        match_field = hostname
+
+                elif pattern_type == "mac_prefix":
+                    if mac.lower().startswith(pattern_value.lower()):
+                        matched = True
+                        match_field = mac
+
+                elif pattern_type == "dhcp_opt60":
+                    fields = packet.get("fields", {})
+                    vendor_class = fields.get("vendor_class", "")
+                    if vendor_class and fnmatch.fnmatch(vendor_class.lower(), pattern_value.lower()):
+                        matched = True
+                        match_field = vendor_class
+
+                if matched and mac not in seen:
+                    seen.add(mac)
+                    data = json.dumps({
+                        "hw_addr": mac,
+                        "ip_addr": packet.get("src_ip", ""),
+                        "matched_on": match_field,
+                        "new_category": new_device_type,
+                        "protocol": packet.get("protocol", ""),
+                    })
+                    yield f"data: {data}\n\n"
+
+            yield f"data: {json.dumps({'type': 'done', 'total': len(seen)})}\n\n"
+        finally:
+            if q in app_instance.event_subscribers:
+                app_instance.event_subscribers.remove(q)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@fastapi_app.post("/api/patterns/validate")
+async def validate_pattern_endpoint(request: Request):
+    """Validate a pattern without saving it."""
+    from leetha.fingerprint.lookup import load_custom_patterns
+
+    entry = await request.json()
+    pattern_type = entry.get("type", "hostname")
+    pattern = entry.get("pattern", "")
+    patterns = load_custom_patterns(app_instance.config.data_dir)
+
+    error = _validate_pattern(pattern_type, pattern, patterns)
+    if error:
+        return {"valid": False, "error": error}
+    return {"valid": True}
 
 
 @fastapi_app.post("/api/validate")
@@ -1309,12 +1697,15 @@ fastapi_app.include_router(_alerts_router)
 
 
 @fastapi_app.get("/api/incidents")
-async def api_incidents():
+async def api_incidents(include_resolved: bool = False):
     """Group alerts into incidents by (device_mac, subtype) within time windows."""
     import re
     from collections import defaultdict
 
-    findings = await app_instance.store.findings.list_active(limit=10000)
+    if include_resolved:
+        findings = await app_instance.store.findings.list_all(limit=10000, include_resolved=True)
+    else:
+        findings = await app_instance.store.findings.list_active(limit=10000)
     alerts = [_finding_to_alert_dict(f) for f in findings]
     # Attach the original Finding objects for access to .rule etc.
     for ad, f in zip(alerts, findings):
@@ -1331,9 +1722,20 @@ async def api_incidents():
             "stale_source": "source_stale",
             "randomized_addr": "mac_randomized",
             "dhcp_anomaly": "dhcp_anomaly",
-            "identity_shift": "mac_spoofing",
             "behavioral_drift": "fingerprint_drift",
+            "sensor_connect": "sensor_connect",
+            "sensor_disconnect": "sensor_disconnect",
         }
+
+        # identity_shift needs message-based disambiguation
+        if rule == "identity_shift":
+            msg_l = msg.lower()
+            if "offline" in msg_l or "not been seen" in msg_l:
+                return "infra_offline"
+            if "gateway" in msg_l:
+                return "gateway_impersonation"
+            return "mac_spoofing"
+
         mapped = rule_map.get(rule, rule)
         # For spoofing-related rules, try to parse more specific subtypes from message
         if mapped in ("spoofing", "other"):
@@ -1374,8 +1776,9 @@ async def api_incidents():
         return result
 
     # Classify severity
-    THREAT_SUBTYPES = {"gateway_impersonation", "flip_flop", "mac_spoofing", "infra_offline"}
-    INFO_SUBTYPES = {"new_device", "mac_randomized", "source_stale"}
+    THREAT_SUBTYPES = {"gateway_impersonation", "flip_flop", "mac_spoofing"}
+    WARNING_SUBTYPES = {"infra_offline", "sensor_disconnect"}
+    INFO_SUBTYPES = {"new_device", "mac_randomized", "source_stale", "sensor_connect"}
     INFO_SUBTYPES_IF_RANDOMIZED = {"fingerprint_drift", "oui_mismatch"}
 
     incidents = []
@@ -1391,6 +1794,9 @@ async def api_incidents():
         if subtype in THREAT_SUBTYPES:
             severity = "threat"
             threat_count += 1
+        elif subtype in WARNING_SUBTYPES:
+            severity = "suspicious"
+            suspicious_count += 1
         elif subtype in INFO_SUBTYPES:
             severity = "informational"
             info_count += 1
@@ -1430,6 +1836,8 @@ async def api_incidents():
             "is_randomized_mac": randomized,
             "correlated_mac": correlated,
             "alert_ids": [a.get("id") for a in alert_list],
+            "status": alert_list[0].get("status", "new"),
+            "disposition": alert_list[0].get("disposition"),
         })
 
     # Sort: threats first, then suspicious, then info. Within same severity, most alerts first.
@@ -1604,6 +2012,24 @@ async def api_incident_detail(incident_id: str):
             "method": "Periodic check (every 30 seconds) compares each infrastructure device's last_seen timestamp against a 5-minute threshold. Only fires for routers, switches, APs, firewalls, and gateways — not client devices.",
             "cooldown_seconds": 0,
         },
+        "identity_shift": {
+            "rule": "identity_shift",
+            "trigger": "Device fingerprint class changed — category, vendor, or platform shifted from stored identity",
+            "method": "Compares current fingerprint verdict (category, vendor, platform) against the most recent stored verdict. Fires when the device category changes (e.g., router → switch), vendor changes, or platform changes on a non-randomized MAC.",
+            "cooldown_seconds": 300,
+        },
+        "sensor_connect": {
+            "rule": "sensor_connect",
+            "trigger": "Remote sensor established a connection to the server",
+            "method": "Emitted when a remote capture sensor completes TLS handshake and registers with the sensor listener.",
+            "cooldown_seconds": 0,
+        },
+        "sensor_disconnect": {
+            "rule": "sensor_disconnect",
+            "trigger": "Remote sensor disconnected or stopped sending heartbeats",
+            "method": "Emitted when a sensor WebSocket connection closes or when no heartbeat is received within 90 seconds.",
+            "cooldown_seconds": 0,
+        },
     }
     detection = DETECTION_METHODS.get(subtype, {
         "rule": subtype,
@@ -1650,6 +2076,28 @@ async def api_incident_detail(incident_id: str):
     }
     recommendation = recommendations.get((subtype, randomized), "Review the evidence below and determine if this activity is expected for this device and network.")
 
+    # Collect the actual alert messages that triggered this incident
+    alert_messages = []
+    all_findings_for_device = await app_instance.store.findings.list_all(limit=10000)
+    for f in all_findings_for_device:
+        if f.hw_addr == mac and f.rule.value == subtype:
+            alert_messages.append({
+                "message": f.message,
+                "timestamp": f.timestamp.isoformat(),
+                "severity": f.severity.value,
+                "status": f.status,
+            })
+    # Also try matching the raw rule value (identity_shift → mac_spoofing mapping)
+    if not alert_messages:
+        for f in all_findings_for_device:
+            if f.hw_addr == mac:
+                alert_messages.append({
+                    "message": f.message,
+                    "timestamp": f.timestamp.isoformat(),
+                    "severity": f.severity.value,
+                    "status": f.status,
+                })
+
     return {
         "incident_id": incident_id,
         "subtype": subtype,
@@ -1660,6 +2108,7 @@ async def api_incident_detail(incident_id: str):
         "recent_observations": obs_list,
         "trusted_bindings": device_bindings,
         "suppression_rules": device_rules,
+        "alert_messages": alert_messages[:20],
         "detection_context": {
             **detection,
             "mac_randomized": randomized,
@@ -1667,6 +2116,445 @@ async def api_incident_detail(incident_id: str):
             "recommendation": recommendation,
         },
     }
+
+
+@fastapi_app.get("/api/incidents/stats")
+async def api_incident_stats():
+    """Return severity counts with 24h trend data and category breakdown."""
+    from datetime import datetime, timedelta, timezone
+    from collections import Counter
+
+    now = datetime.now()
+    cutoff_24h = now - timedelta(hours=24)
+
+    active = await app_instance.store.findings.list_active(limit=10000)
+    all_findings = await app_instance.store.findings.list_all(limit=10000)
+
+    severity_counts = Counter()
+    for f in active:
+        severity_counts[f.severity.value] += 1
+
+    past_counts = Counter()
+    for f in all_findings:
+        if f.timestamp < cutoff_24h and not f.resolved:
+            past_counts[f.severity.value] += 1
+
+    def trend(current, previous):
+        if previous == 0:
+            return {"change": current, "percentage": 100 if current > 0 else 0, "direction": "up" if current > 0 else "flat"}
+        diff = current - previous
+        pct = round((diff / previous) * 100)
+        direction = "up" if diff > 0 else "down" if diff < 0 else "flat"
+        return {"change": abs(diff), "percentage": abs(pct), "direction": direction}
+
+    category_counts = Counter()
+    for f in active:
+        category_counts[f.rule.value] += 1
+
+    return {
+        "severity": {
+            "threat": severity_counts.get("critical", 0) + severity_counts.get("high", 0),
+            "suspicious": severity_counts.get("warning", 0),
+            "informational": severity_counts.get("info", 0) + severity_counts.get("low", 0),
+            "total": len(active),
+        },
+        "trends": {
+            "threat": trend(
+                severity_counts.get("critical", 0) + severity_counts.get("high", 0),
+                past_counts.get("critical", 0) + past_counts.get("high", 0),
+            ),
+            "suspicious": trend(severity_counts.get("warning", 0), past_counts.get("warning", 0)),
+            "informational": trend(
+                severity_counts.get("info", 0) + severity_counts.get("low", 0),
+                past_counts.get("info", 0) + past_counts.get("low", 0),
+            ),
+            "total": trend(len(active), sum(past_counts.values())),
+        },
+        "categories": [
+            {"name": rule, "count": count}
+            for rule, count in category_counts.most_common()
+        ],
+    }
+
+
+@fastapi_app.get("/api/incidents/timeline")
+async def api_incident_timeline():
+    """Return finding counts grouped by day and severity for the last 7 days."""
+    from datetime import datetime, timedelta, timezone
+    from collections import defaultdict
+
+    now = datetime.now()
+    cutoff = now - timedelta(days=7)
+
+    all_findings = await app_instance.store.findings.list_all(limit=50000)
+
+    daily: dict[str, dict[str, int]] = defaultdict(lambda: {"threat": 0, "suspicious": 0, "informational": 0})
+
+    severity_map = {
+        "critical": "threat", "high": "threat",
+        "warning": "suspicious",
+        "info": "informational", "low": "informational",
+    }
+
+    for f in all_findings:
+        if f.timestamp >= cutoff:
+            day = f.timestamp.strftime("%Y-%m-%d")
+            sev = severity_map.get(f.severity.value, "informational")
+            daily[day][sev] += 1
+
+    timeline = []
+    for i in range(7):
+        day = (now - timedelta(days=6-i)).strftime("%Y-%m-%d")
+        counts = daily.get(day, {"threat": 0, "suspicious": 0, "informational": 0})
+        timeline.append({"date": day, **counts})
+
+    return {"timeline": timeline}
+
+
+@fastapi_app.get("/api/incidents/top-devices")
+async def api_incident_top_devices():
+    """Return devices ranked by finding count."""
+    from collections import Counter
+
+    active = await app_instance.store.findings.list_active(limit=10000)
+
+    device_counts = Counter()
+    for f in active:
+        device_counts[f.hw_addr] += 1
+
+    max_count = max(device_counts.values()) if device_counts else 1
+
+    devices = []
+    for mac, count in device_counts.most_common(10):
+        verdict = await app_instance.store.verdicts.find_by_addr(mac)
+        host = await app_instance.store.hosts.find_by_addr(mac)
+        devices.append({
+            "hw_addr": mac,
+            "ip_addr": host.ip_addr if host else None,
+            "vendor": verdict.vendor if verdict else None,
+            "category": verdict.category if verdict else None,
+            "finding_count": count,
+            "bar_width": round((count / max_count) * 100),
+        })
+
+    return {"devices": devices}
+
+
+@fastapi_app.post("/api/incidents/bulk")
+async def api_incident_bulk(request: Request):
+    """Bulk resolve or suppress incidents."""
+    body = await request.json()
+    action = body.get("action")
+    ids = body.get("ids", [])
+
+    if action == "resolve":
+        resolved = 0
+        for incident_id in ids:
+            last_underscore = incident_id.rfind("_")
+            if last_underscore == -1:
+                continue
+            mac_hex = incident_id[last_underscore + 1:]
+            mac = ":".join(mac_hex[i:i+2] for i in range(0, len(mac_hex), 2))
+
+            active = await app_instance.store.findings.list_active(limit=10000)
+            finding_ids = [f.id for f in active if f.hw_addr == mac]
+            if finding_ids:
+                resolved += await app_instance.store.findings.resolve_many(finding_ids)
+
+        return {"status": "ok", "resolved": resolved}
+
+    elif action == "suppress":
+        for incident_id in ids:
+            last_underscore = incident_id.rfind("_")
+            if last_underscore == -1:
+                continue
+            subtype = incident_id[:last_underscore]
+            mac_hex = incident_id[last_underscore + 1:]
+            mac = ":".join(mac_hex[i:i+2] for i in range(0, len(mac_hex), 2))
+
+            from leetha.analysis.spoofing import SuppressionStore
+            store = SuppressionStore(app_instance.config.data_dir)
+            store.add(mac=mac, subtype=subtype)
+
+        return {"status": "ok", "suppressed": len(ids)}
+
+    return JSONResponse(status_code=400, content={"error": "Invalid action. Use 'resolve' or 'suppress'"})
+
+
+@fastapi_app.get("/api/incidents/grouped")
+async def api_incidents_grouped():
+    """Return deduplicated finding groups with device counts, sparkline data."""
+    from collections import defaultdict
+    from datetime import datetime, timedelta
+
+    # Unsnooze is handled by the periodic background task — don't write here
+    all_findings = await app_instance.store.findings.list_all(limit=50000)
+    now = datetime.now()
+
+    # Group by rule type
+    rule_groups: dict[str, list] = defaultdict(list)
+    for f in all_findings:
+        rule_groups[f.rule.value].append(f)
+
+    # Build sparkline data (hourly counts for last 24h)
+    def build_sparkline(findings: list) -> list[int]:
+        cutoff = now - timedelta(hours=24)
+        hours = [0] * 24
+        for f in findings:
+            if f.timestamp >= cutoff:
+                hour_idx = min(23, int((now - f.timestamp).total_seconds() / 3600))
+                hours[23 - hour_idx] += 1
+        return hours
+
+    SUBTYPE_MAP = {
+        "new_host": "new_device", "platform_drift": "fingerprint_drift",
+        "addr_conflict": "ip_conflict", "low_certainty": "unclassified",
+        "stale_source": "source_stale", "randomized_addr": "mac_randomized",
+        "dhcp_anomaly": "dhcp_anomaly", "behavioral_drift": "fingerprint_drift",
+        "sensor_connect": "sensor_connect", "sensor_disconnect": "sensor_disconnect",
+    }
+    THREAT_RULES = {"identity_shift"}
+    WARNING_RULES = {"addr_conflict", "dhcp_anomaly", "sensor_disconnect"}
+    INFO_RULES = {"new_host", "randomized_addr", "stale_source", "low_certainty", "sensor_connect"}
+
+    groups = []
+    for rule, findings in rule_groups.items():
+        active = [f for f in findings if f.status not in ("resolved", "false_positive")]
+        if not active:
+            continue
+
+        devices = {}
+        for f in active:
+            if f.hw_addr not in devices:
+                verdict = await app_instance.store.verdicts.find_by_addr(f.hw_addr)
+                host = await app_instance.store.hosts.find_by_addr(f.hw_addr)
+                devices[f.hw_addr] = {
+                    "hw_addr": f.hw_addr,
+                    "ip_addr": host.ip_addr if host else None,
+                    "vendor": verdict.vendor if verdict else None,
+                    "alert_count": 0,
+                    "first_seen": f.timestamp.isoformat(),
+                    "last_seen": f.timestamp.isoformat(),
+                    "finding_ids": [],
+                    "status": f.status,
+                    "has_notes": bool(f.notes),
+                }
+            d = devices[f.hw_addr]
+            d["alert_count"] += 1
+            d["finding_ids"].append(f.id)
+            if f.timestamp.isoformat() < d["first_seen"]:
+                d["first_seen"] = f.timestamp.isoformat()
+            if f.timestamp.isoformat() > d["last_seen"]:
+                d["last_seen"] = f.timestamp.isoformat()
+
+        if rule in THREAT_RULES:
+            severity = "threat"
+        elif rule in WARNING_RULES:
+            severity = "suspicious"
+        elif rule in INFO_RULES:
+            severity = "informational"
+        else:
+            severity = "suspicious"
+
+        subtype = SUBTYPE_MAP.get(rule, rule)
+        first_seen = min(d["first_seen"] for d in devices.values())
+        last_seen = max(d["last_seen"] for d in devices.values())
+
+        groups.append({
+            "rule": rule,
+            "subtype": subtype,
+            "severity": severity,
+            "device_count": len(devices),
+            "alert_count": sum(d["alert_count"] for d in devices.values()),
+            "first_seen": first_seen,
+            "last_seen": last_seen,
+            "sparkline": build_sparkline(active),
+            "devices": list(devices.values()),
+            "device_macs": list(devices.keys()),
+        })
+
+    sev_order = {"threat": 0, "suspicious": 1, "informational": 2}
+    groups.sort(key=lambda g: (sev_order.get(g["severity"], 9), -g["alert_count"]))
+
+    # Add related findings count
+    all_macs_by_rule = {g["rule"]: set(g["device_macs"]) for g in groups}
+    for g in groups:
+        related = sum(1 for r, m in all_macs_by_rule.items() if r != g["rule"] and m & set(g["device_macs"]))
+        g["related_groups"] = related
+
+    return {"groups": groups}
+
+
+@fastapi_app.post("/api/incidents/{incident_id}/snooze")
+async def api_snooze_incident(incident_id: str, request: Request):
+    """Snooze finding(s) for a duration."""
+    from datetime import datetime, timedelta
+
+    body = await request.json()
+    hours = body.get("hours", 1)
+    until = datetime.now() + timedelta(hours=hours)
+
+    last_underscore = incident_id.rfind("_")
+    if last_underscore == -1:
+        return JSONResponse(status_code=400, content={"error": "Invalid incident ID"})
+
+    mac_hex = incident_id[last_underscore + 1:]
+    mac = ":".join(mac_hex[i:i+2] for i in range(0, len(mac_hex), 2)) if len(mac_hex) == 12 else mac_hex
+    rule = incident_id[:last_underscore]
+
+    active = await app_instance.store.findings.list_active(limit=10000)
+    count = 0
+    for f in active:
+        if f.hw_addr == mac and f.rule.value == rule:
+            await app_instance.store.findings.snooze(f.id, until)
+            count += 1
+
+    return {"status": "ok", "snoozed": count, "snoozed_until": until.isoformat()}
+
+
+@fastapi_app.post("/api/incidents/snooze-rule")
+async def api_snooze_rule(request: Request):
+    """Snooze all findings of a rule type."""
+    from datetime import datetime, timedelta
+
+    body = await request.json()
+    rule = body.get("rule")
+    hours = body.get("hours", 1)
+    until = datetime.now() + timedelta(hours=hours)
+
+    active = await app_instance.store.findings.list_active(limit=10000)
+    count = 0
+    for f in active:
+        if f.rule.value == rule:
+            await app_instance.store.findings.snooze(f.id, until)
+            count += 1
+
+    return {"status": "ok", "snoozed": count, "snoozed_until": until.isoformat()}
+
+
+@fastapi_app.post("/api/incidents/{incident_id}/notes")
+async def api_incident_notes(incident_id: str, request: Request):
+    """Save analyst notes for a finding."""
+    body = await request.json()
+    notes = body.get("notes", "")
+
+    last_underscore = incident_id.rfind("_")
+    if last_underscore == -1:
+        return JSONResponse(status_code=400, content={"error": "Invalid incident ID"})
+
+    mac_hex = incident_id[last_underscore + 1:]
+    mac = ":".join(mac_hex[i:i+2] for i in range(0, len(mac_hex), 2)) if len(mac_hex) == 12 else mac_hex
+    rule = incident_id[:last_underscore]
+
+    all_findings = await app_instance.store.findings.list_all(limit=50000)
+    count = 0
+    for f in all_findings:
+        if f.hw_addr == mac and f.rule.value == rule:
+            await app_instance.store.findings.update_notes(f.id, notes)
+            count += 1
+
+    return {"status": "ok", "updated": count}
+
+
+@fastapi_app.post("/api/incidents/{incident_id}/resolve")
+async def api_resolve_incident(incident_id: str, request: Request):
+    """Resolve a finding with a disposition."""
+    body = await request.json()
+    disposition = body.get("disposition", "true_positive")
+
+    last_underscore = incident_id.rfind("_")
+    if last_underscore == -1:
+        return JSONResponse(status_code=400, content={"error": "Invalid incident ID"})
+
+    mac_hex = incident_id[last_underscore + 1:]
+    mac = ":".join(mac_hex[i:i+2] for i in range(0, len(mac_hex), 2)) if len(mac_hex) == 12 else mac_hex
+    rule = incident_id[:last_underscore]
+
+    status = "false_positive" if disposition == "false_positive" else "resolved"
+
+    active = await app_instance.store.findings.list_active(limit=10000)
+    count = 0
+    for f in active:
+        if f.hw_addr == mac and f.rule.value == rule:
+            await app_instance.store.findings.update_status(f.id, status, disposition)
+            count += 1
+
+    return {"status": "ok", "resolved": count, "disposition": disposition}
+
+
+@fastapi_app.post("/api/incidents/{incident_id}/reopen")
+async def api_reopen_incident(incident_id: str):
+    """Reopen a resolved finding, setting it back to 'new'."""
+    last_underscore = incident_id.rfind("_")
+    if last_underscore == -1:
+        return JSONResponse(status_code=400, content={"error": "Invalid incident ID"})
+
+    mac_hex = incident_id[last_underscore + 1:]
+    mac = ":".join(mac_hex[i:i+2] for i in range(0, len(mac_hex), 2)) if len(mac_hex) == 12 else mac_hex
+    rule = incident_id[:last_underscore]
+
+    all_findings = await app_instance.store.findings.list_all(limit=10000, include_resolved=True)
+    count = 0
+    for f in all_findings:
+        if f.hw_addr == mac and f.rule.value == rule and f.resolved:
+            await app_instance.store.findings.update_status(f.id, "new", None)
+            count += 1
+
+    return {"status": "ok", "reopened": count}
+
+
+@fastapi_app.get("/api/incidents/export")
+async def api_export_incidents(format: str = "json"):
+    """Export findings as JSON or CSV."""
+    from starlette.responses import Response
+    import csv, io
+
+    all_findings = await app_instance.store.findings.list_all(limit=50000)
+
+    if format == "csv":
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["id", "rule", "severity", "status", "disposition", "hw_addr",
+                          "message", "timestamp", "notes"])
+        for f in all_findings:
+            writer.writerow([
+                f.id, f.rule.value, f.severity.value, f.status,
+                f.disposition or "", f.hw_addr, f.message,
+                f.timestamp.isoformat(), f.notes or "",
+            ])
+        return Response(
+            content=output.getvalue(), media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="leetha-findings.csv"'},
+        )
+    else:
+        data = [{
+            "id": f.id, "rule": f.rule.value, "severity": f.severity.value,
+            "status": f.status, "disposition": f.disposition,
+            "hw_addr": f.hw_addr, "message": f.message,
+            "timestamp": f.timestamp.isoformat(), "notes": f.notes,
+        } for f in all_findings]
+        return Response(
+            content=json.dumps(data, indent=2), media_type="application/json",
+            headers={"Content-Disposition": 'attachment; filename="leetha-findings.json"'},
+        )
+
+
+@fastapi_app.post("/api/incidents/auto-resolve")
+async def api_auto_resolve_rule(request: Request):
+    """Create an auto-resolve rule."""
+    body = await request.json()
+    rule = body.get("rule")
+    mac = body.get("mac")
+    disposition = body.get("disposition", "benign")
+
+    if not rule:
+        return JSONResponse(status_code=400, content={"error": "Rule is required"})
+
+    from leetha.analysis.spoofing import SuppressionStore
+    store = SuppressionStore(app_instance.config.data_dir)
+    store.add(mac=mac, subtype=rule, reason=f"auto-resolve:{disposition}")
+
+    return {"status": "ok", "rule": rule, "mac": mac}
 
 
 @fastapi_app.get("/api/version")
@@ -2768,7 +3656,7 @@ async def ws_remote_sensor(websocket: WebSocket):
                 try:
                     pkt = Ether(frame.packet)
                     iface_label = f"remote:{sensor_name}"
-                    result = app_instance.capture_engine._classify(pkt, iface_label)
+                    result = app_instance.capture_engine._classify(pkt)
                     if result is not None:
                         result.interface = iface_label
                         app_instance.packet_queue.put_nowait(result)
@@ -2905,7 +3793,7 @@ if _dist_dir.exists():
 
     _SPA_PATHS = {
         "/", "/login", "/inventory", "/alerts", "/threats", "/detections", "/exposure",
-        "/stream", "/feeds", "/rules", "/adapters", "/settings",
+        "/stream", "/feeds", "/rules", "/adapters", "/settings", "/docs",
         # Legacy routes redirect to new paths via React Router
         "/devices", "/threat-detection", "/attack-surface",
         "/console", "/sync", "/patterns", "/interfaces",

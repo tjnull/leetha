@@ -133,11 +133,11 @@ class NameResolutionProcessor(Processor):
         # Apple-exclusive services — only Apple devices advertise these
         "_apple-mobdev2._tcp": {"vendor": "Apple", "category": "phone", "platform": "iOS", "certainty": 0.97},
         "_apple-mobdev._tcp": {"vendor": "Apple", "category": "phone", "platform": "iOS", "certainty": 0.97},
-        "_companion-link._tcp": {"vendor": "Apple", "platform": "iOS", "certainty": 0.95},
+        "_companion-link._tcp": {"vendor": "Apple", "certainty": 0.90},
         "_homekit._tcp": {"vendor": "Apple", "certainty": 0.90},
         "_airplay._tcp": {"vendor": "Apple", "certainty": 0.85},
         "_raop._tcp": {"vendor": "Apple", "certainty": 0.85},
-        "_rdlink._tcp": {"vendor": "Apple", "certainty": 0.90},
+        "_rdlink._tcp": {"vendor": "Apple", "certainty": 0.85},
         "_touch-able._tcp": {"vendor": "Apple", "category": "phone", "platform": "iOS", "certainty": 0.90},
         "_apple-pairable._tcp": {"vendor": "Apple", "certainty": 0.90},
         # Google-exclusive services

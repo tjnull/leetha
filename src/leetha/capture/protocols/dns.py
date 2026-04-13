@@ -61,9 +61,13 @@ def parse_dns(packet) -> CapturedPacket | None:
 
     src_ip = packet[IP].src if packet.haslayer(IP) else "0.0.0.0"
 
+    src_mac = packet.src.lower() if hasattr(packet, "src") and packet.src else ""
+    if not src_mac:
+        return None
+
     return CapturedPacket(
         protocol="dns",
-        hw_addr=packet.src.lower(),
+        hw_addr=src_mac,
         ip_addr=src_ip,
         target_ip=packet[IP].dst if packet.haslayer(IP) else None,
         fields={

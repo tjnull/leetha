@@ -564,7 +564,7 @@ def main():
                     try:
                         pkts = rdpcap(io.BytesIO(chunk))
                         for pkt in pkts:
-                            result = app.capture_engine._classify(pkt, label)
+                            result = app.capture_engine._classify(pkt)
                             if result is not None:
                                 result.interface = label
                                 app.packet_queue.put_nowait(result)

@@ -353,6 +353,7 @@ See [docs/wiki/](docs/wiki/Home.md) for detailed guides:
 - [Fingerprint Sources](docs/wiki/Fingerprint-Sources.md)
 - [CLI Reference](docs/wiki/CLI-Reference.md)
 - [Web Dashboard](docs/wiki/Web-Dashboard.md)
+- [Remote Sensors](docs/wiki/Remote-Sensors.md)
 - [Attack Surface Analysis](docs/wiki/Attack-Surface-Analysis.md)
 - [Spoofing Detection](docs/wiki/Spoofing-Detection.md)
 
@@ -371,7 +372,7 @@ Leetha is a passive network analysis tool intended for **authorized use only** o
 
 Leetha's fingerprinting accuracy depends on data generously maintained by these projects:
 
-- **[Huginn-Muninn](https://github.com/fingerbank/Huginn-Muninn)** by **[Ringmaster](https://github.com/Ringmaster)** -- MAC vendor database, DHCP fingerprints, device hierarchy, and DHCPv6 patterns. The backbone of leetha's device identification.
+- **[Huginn-Muninn](https://github.com/Ringmast4r/Huginn-Muninn)** by **[Ringmast4r](https://github.com/Ringmast4r)** -- MAC vendor database, DHCP fingerprints, device hierarchy, and DHCPv6 patterns. The backbone of leetha's device identification.
 - **[IEEE OUI Registry](https://standards-oui.ieee.org/)** -- Official MAC address manufacturer assignments.
 - **[p0f](https://lcamtuf.coredump.cx/p0f3/)** -- TCP/IP stack fingerprinting signatures by Michal Zalewski. The foundation for passive OS detection.
 - **[JA3](https://github.com/salesforce/ja3)** -- TLS client fingerprinting method by Salesforce.

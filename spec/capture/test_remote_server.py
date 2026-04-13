@@ -74,3 +74,53 @@ async def test_list_sensors(manager):
     names = [s["name"] for s in manager.list_sensors()]
     assert "sensor-a" in names
     assert "sensor-b" in names
+
+
+def test_session_starts_idle():
+    s = SensorSession(name="test", remote_ip="1.2.3.4")
+    stats = s.stats()
+    assert stats["state"] == "idle"
+    assert stats["selected_interfaces"] == []
+    assert stats["interface_stats"] == {}
+    assert stats["interface_errors"] == {}
+
+
+def test_session_set_capturing():
+    s = SensorSession(name="test", remote_ip="1.2.3.4")
+    s.set_state("capturing", ["eth0", "wlan0"])
+    stats = s.stats()
+    assert stats["state"] == "capturing"
+    assert stats["selected_interfaces"] == ["eth0", "wlan0"]
+
+
+def test_session_heartbeat_updates():
+    s = SensorSession(name="test", remote_ip="1.2.3.4")
+    s.update_heartbeat({"eth0": {"packets": 100, "bytes": 50000}})
+    stats = s.stats()
+    assert stats["interface_stats"]["eth0"]["packets"] == 100
+    assert stats["last_heartbeat"] is not None
+
+
+def test_session_capture_error():
+    s = SensorSession(name="test", remote_ip="1.2.3.4")
+    s.set_interface_error("wlan0", "permission denied")
+    stats = s.stats()
+    assert stats["interface_errors"]["wlan0"] == "permission denied"
+
+
+def test_session_clear_errors_on_new_capture():
+    s = SensorSession(name="test", remote_ip="1.2.3.4")
+    s.set_interface_error("wlan0", "permission denied")
+    s.set_state("capturing", ["eth0"])
+    assert s.stats()["interface_errors"] == {}
+
+
+def test_manager_heartbeat_stale():
+    import time
+    m = RemoteSensorManager()
+    s = m.register("test", "1.2.3.4")
+    s.set_state("capturing", ["eth0"])
+    s.last_heartbeat = time.time() - 120
+    stale = m.get_stale_sensors(timeout=90)
+    assert len(stale) == 1
+    assert stale[0].name == "test"

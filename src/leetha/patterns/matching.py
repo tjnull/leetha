@@ -14,6 +14,15 @@ from typing import Dict, Optional
 
 from leetha.patterns.loader import load, load_compiled
 
+
+def _domain_matches(query: str, domain: str) -> bool:
+    """Check if *query* matches *domain* as a suffix with proper boundary.
+
+    Returns True if query equals domain or ends with '.domain'.
+    Avoids substring false positives like 'pineapple.com' matching 'apple.com'.
+    """
+    return query == domain or query.endswith("." + domain)
+
 # =====================================================================
 # Banner matching
 # =====================================================================
@@ -420,7 +429,7 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
         "setup.icloud.com", "swscan.apple.com",
     ]
     for domain in apple_core_domains:
-        if domain in domain_lower or domain_lower.endswith("." + domain):
+        if _domain_matches(domain_lower, domain):
             return {
                 "manufacturer": "Apple",
                 "device_type": None,
@@ -441,7 +450,7 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
         "albert.apple.com", "gs.apple.com",
     ]
     for domain in apple_activation:
-        if domain in domain_lower:
+        if _domain_matches(domain_lower, domain):
             return {
                 "manufacturer": "Apple", "device_type": None,
                 "os_family": "iOS/macOS", "confidence": 0.92,
@@ -458,7 +467,7 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
 
     windows_connectivity = ["msftncsi.com", "msftconnecttest.com", "windows.com"]
     for domain in windows_connectivity:
-        if domain in domain_lower or domain_lower.endswith("." + domain):
+        if _domain_matches(domain_lower, domain):
             return {
                 "manufacturer": "Microsoft", "device_type": None,
                 "os_family": "Windows", "confidence": 0.85,
@@ -470,7 +479,7 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
         "microsoft.com", "microsoftonline.com",
     ]
     for domain in ms_generic_domains:
-        if domain in domain_lower or domain_lower.endswith("." + domain):
+        if _domain_matches(domain_lower, domain):
             return {
                 "manufacturer": None, "device_type": None,
                 "os_family": None, "confidence": 0.30,
@@ -483,7 +492,7 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
         "android.googleapis.com", "time.android.com",
     ]
     for domain in android_only_domains:
-        if domain in domain_lower:
+        if _domain_matches(domain_lower, domain):
             return {
                 "manufacturer": None, "device_type": None,
                 "os_family": "Android", "confidence": 0.88,
@@ -496,7 +505,7 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
         "device-provisioning.googleapis.com",
     ]
     for domain in google_device_domains:
-        if domain in domain_lower:
+        if _domain_matches(domain_lower, domain):
             return {
                 "manufacturer": "Google", "device_type": "smart_speaker",
                 "os_family": None, "confidence": 0.85,
@@ -532,7 +541,7 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
             "ai_service": "Google Gemini", "ai_category": "ai_saas",
         }
 
-    if "gstatic.com" in domain_lower or "googleapis.com" in domain_lower:
+    if _domain_matches(domain_lower, "gstatic.com") or _domain_matches(domain_lower, "googleapis.com"):
         return {
             "manufacturer": None, "device_type": None,
             "os_family": None, "confidence": 0.20,
@@ -545,7 +554,7 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
         "clients4.google.com", "clients.google.com",
     ]
     for domain in generic_google_domains:
-        if domain in domain_lower:
+        if _domain_matches(domain_lower, domain):
             return {
                 "manufacturer": None, "device_type": None,
                 "os_family": None, "confidence": 0.25,
@@ -636,7 +645,7 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
     }
 
     for domain, (manufacturer, device_type, confidence) in iot_vendor_domains.items():
-        if domain in domain_lower or domain_lower.endswith("." + domain):
+        if _domain_matches(domain_lower, domain):
             return {
                 "manufacturer": manufacturer, "device_type": device_type,
                 "os_family": None, "confidence": confidence,
@@ -649,14 +658,14 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
         "containers.internal", "gateway.docker.internal",
     ]
     for domain in docker_domains:
-        if domain in domain_lower or domain_lower.endswith("." + domain):
+        if _domain_matches(domain_lower, domain):
             return {
                 "manufacturer": "Docker", "device_type": "container",
                 "os_family": "Linux", "confidence": 0.95,
                 "note": f"Docker container DNS: {domain}"
             }
 
-    if "docker.io" in domain_lower or "docker.com" in domain_lower:
+    if _domain_matches(domain_lower, "docker.io") or _domain_matches(domain_lower, "docker.com"):
         return {
             "manufacturer": "Docker", "device_type": "container_host",
             "os_family": "Linux", "confidence": 0.85,
@@ -668,7 +677,7 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
         ".default.svc", ".kube-system.svc",
     ]
     for pattern in k8s_patterns:
-        if domain_lower.endswith(pattern) or pattern in domain_lower:
+        if _domain_matches(domain_lower, pattern):
             return {
                 "manufacturer": "Kubernetes", "device_type": "container",
                 "os_family": "Linux", "confidence": 0.95,
@@ -680,14 +689,14 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
         "registry.k8s.io", "storage.googleapis.com/kubernetes-release",
     ]
     for domain in k8s_api_domains:
-        if domain in domain_lower:
+        if _domain_matches(domain_lower, domain):
             return {
                 "manufacturer": "Kubernetes", "device_type": "kubernetes_node",
                 "os_family": "Linux", "confidence": 0.85,
                 "note": f"Kubernetes API/registry: {domain}"
             }
 
-    if "proxmox.com" in domain_lower or domain_lower.endswith(".pve"):
+    if _domain_matches(domain_lower, "proxmox.com") or domain_lower.endswith(".pve"):
         return {
             "manufacturer": "Proxmox", "device_type": "hypervisor",
             "os_family": "Linux/Debian", "confidence": 0.90,
@@ -699,7 +708,7 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
         "vmwareidentity.com", "vmwarehorizon.com",
     ]
     for domain in vmware_domains:
-        if domain in domain_lower:
+        if _domain_matches(domain_lower, domain):
             return {
                 "manufacturer": "VMware", "device_type": "hypervisor",
                 "os_family": "ESXi", "confidence": 0.85,
@@ -711,7 +720,7 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
         "cloud.com", "netsvc.net",
     ]
     for domain in citrix_domains:
-        if domain in domain_lower:
+        if _domain_matches(domain_lower, domain):
             return {
                 "manufacturer": "Citrix", "device_type": "hypervisor",
                 "os_family": "XenServer", "confidence": 0.85,
@@ -720,7 +729,7 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
 
     hyperv_domains = ["hyperv.local", "azurestack.local"]
     for domain in hyperv_domains:
-        if domain in domain_lower:
+        if _domain_matches(domain_lower, domain):
             return {
                 "manufacturer": "Microsoft", "device_type": "hyper_v",
                 "os_family": "Windows Server", "confidence": 0.90,
@@ -736,7 +745,7 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
 
     ovirt_domains = ["ovirt.org", "rhev.local"]
     for domain in ovirt_domains:
-        if domain in domain_lower:
+        if _domain_matches(domain_lower, domain):
             return {
                 "manufacturer": "Red Hat", "device_type": "kvm_host",
                 "os_family": "Linux/RHEL", "confidence": 0.85,
@@ -759,7 +768,7 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
         "ecr.aws": ("Amazon", "container_host"),
     }
     for domain, (manufacturer, device_type) in container_registries.items():
-        if domain in domain_lower:
+        if _domain_matches(domain_lower, domain):
             return {
                 "manufacturer": manufacturer, "device_type": device_type,
                 "os_family": "Linux", "confidence": 0.80,
@@ -802,7 +811,7 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
         "fastly.net": (None, 0.30),
     }
     for domain, (manufacturer, confidence) in cdn_domains.items():
-        if domain in domain_lower:
+        if _domain_matches(domain_lower, domain):
             return {
                 "manufacturer": manufacturer, "device_type": None,
                 "os_family": None, "confidence": confidence,
@@ -819,7 +828,7 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
         "hetzner.cloud": ("Hetzner", "server", "Linux", 0.85, "Hetzner Cloud"),
     }
     for domain, (manufacturer, device_type, os_family, confidence, note) in cloud_provider_domains.items():
-        if domain in domain_lower or domain_lower.endswith("." + domain):
+        if _domain_matches(domain_lower, domain):
             return {
                 "manufacturer": manufacturer, "device_type": device_type,
                 "os_family": os_family, "confidence": confidence,
@@ -832,7 +841,7 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
         "detectportal.firefox.com",
     ]
     for domain in captive_portal_domains:
-        if domain in domain_lower:
+        if _domain_matches(domain_lower, domain):
             if "apple" in domain:
                 os_family, manufacturer = "iOS/macOS", "Apple"
             elif "android" in domain:
@@ -859,7 +868,7 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
         "dlinkrouter.local", "myrouter.local",
     ]
     for domain in router_local_domains:
-        if domain in domain_lower:
+        if _domain_matches(domain_lower, domain):
             return {
                 "manufacturer": None, "device_type": "router",
                 "os_family": None, "confidence": 0.80,
@@ -876,7 +885,7 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
         "lexmark.com": ("Lexmark", "printer", 0.85),
     }
     for domain, (manufacturer, device_type, confidence) in printer_domains.items():
-        if domain in domain_lower or domain_lower.endswith("." + domain):
+        if _domain_matches(domain_lower, domain):
             return {
                 "manufacturer": manufacturer, "device_type": device_type,
                 "os_family": None, "confidence": confidence,
@@ -892,7 +901,7 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
         "onstar.com": ("GM OnStar", "automotive", 0.90),
     }
     for domain, (manufacturer, device_type, confidence) in auto_domains.items():
-        if domain in domain_lower or domain_lower.endswith("." + domain):
+        if _domain_matches(domain_lower, domain):
             return {
                 "manufacturer": manufacturer, "device_type": device_type,
                 "os_family": None, "confidence": confidence,
@@ -923,7 +932,7 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
         "api.cerebras.ai": "Cerebras",
     }
     for domain, service_name in ai_api_domains.items():
-        if domain in domain_lower:
+        if _domain_matches(domain_lower, domain):
             return {
                 "manufacturer": None, "device_type": None,
                 "os_family": None, "confidence": 0.85,
@@ -963,7 +972,7 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
         "copilot.github.com": "GitHub Copilot",
     }
     for domain, service_name in ai_saas_domains.items():
-        if domain in domain_lower:
+        if _domain_matches(domain_lower, domain):
             return {
                 "manufacturer": None, "device_type": None,
                 "os_family": None, "confidence": 0.75,

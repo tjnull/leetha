@@ -1852,7 +1852,59 @@ def load_custom_patterns(data_dir: Path) -> dict:
 
 def save_custom_patterns(data_dir: Path, patterns: dict) -> None:
     """Persist user-defined patterns to ``data_dir/custom_patterns.json``."""
+    import datetime
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+    # Ensure every entry has hits and created_at
+    for key, entries in patterns.items():
+        if isinstance(entries, list):
+            for entry in entries:
+                entry.setdefault("hits", 0)
+                entry.setdefault("created_at", now)
+        elif isinstance(entries, dict):
+            for _k, entry in entries.items():
+                if isinstance(entry, dict):
+                    entry.setdefault("hits", 0)
+                    entry.setdefault("created_at", now)
+
     data_dir.mkdir(parents=True, exist_ok=True)
     target = data_dir / "custom_patterns.json"
     with open(target, "w", encoding="utf-8") as fh:
         json.dump(patterns, fh, indent=2)
+
+
+# ── Debounced hit counter for custom patterns ──
+
+import threading as _threading
+
+_hit_buffer: dict[tuple[str, str], int] = {}
+_hit_lock = _threading.Lock()
+
+
+def record_pattern_hit(pattern_type: str, pattern: str) -> None:
+    """Record a hit in memory (flushed periodically by the app)."""
+    with _hit_lock:
+        key = (pattern_type, pattern)
+        _hit_buffer[key] = _hit_buffer.get(key, 0) + 1
+
+
+def flush_pattern_hits(data_dir: Path) -> None:
+    """Flush accumulated hits to disk."""
+    global _hit_buffer
+    with _hit_lock:
+        if not _hit_buffer:
+            return
+        buffer = _hit_buffer.copy()
+        _hit_buffer.clear()
+
+    patterns = load_custom_patterns(data_dir)
+    for (ptype, pattern), count in buffer.items():
+        entries = patterns.get(ptype, [])
+        if isinstance(entries, list):
+            for entry in entries:
+                if entry.get("pattern") == pattern:
+                    entry["hits"] = entry.get("hits", 0) + count
+        elif isinstance(entries, dict):
+            if pattern in entries:
+                entries[pattern]["hits"] = entries[pattern].get("hits", 0) + count
+    save_custom_patterns(data_dir, patterns)

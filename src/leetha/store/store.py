@@ -35,7 +35,7 @@ class Store:
 
     async def initialize(self):
         """Open connection and create all tables."""
-        self._conn = await aiosqlite.connect(self.db_path)
+        self._conn = await aiosqlite.connect(self.db_path, isolation_level=None)
         self._conn.row_factory = aiosqlite.Row
         # Match the legacy Database's performance pragmas
         await self._conn.execute("PRAGMA journal_mode=WAL")

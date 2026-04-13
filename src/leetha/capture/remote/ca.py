@@ -1,6 +1,7 @@
 """Certificate authority for remote sensor mTLS authentication."""
 from __future__ import annotations
 
+import ipaddress
 import json
 import datetime
 from pathlib import Path
@@ -129,12 +130,68 @@ def issue_cert(
 
 def revoke_cert(ca_dir: Path, name: str) -> None:
     registry = _load_registry(ca_dir)
+    found = False
     for entry in registry:
-        if entry["name"] == name:
+        if entry["name"] == name and not entry["revoked"]:
             entry["revoked"] = True
-            _save_registry(ca_dir, registry)
-            return
-    raise ValueError(f"Certificate '{name}' not found")
+            found = True
+    if not found:
+        raise ValueError(f"Certificate '{name}' not found")
+    _save_registry(ca_dir, registry)
+
+
+def ensure_server_cert(ca_dir: Path) -> tuple[Path, Path]:
+    """Return (cert_path, key_path) for the listener's TLS server cert.
+
+    Generates a new one signed by the CA if it doesn't exist yet.
+    """
+    cert_path = ca_dir / "server.crt"
+    key_path = ca_dir / "server.key"
+    if cert_path.exists() and key_path.exists():
+        return cert_path, key_path
+
+    ca_cert, ca_key = load_ca(ca_dir)
+    key = _generate_key()
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "leetha-server")])
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    # Include all local IPs in SAN so sensors can connect to any address
+    san_entries: list[x509.GeneralName] = [
+        x509.DNSName("localhost"),
+        x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
+    ]
+    try:
+        import psutil
+        for addrs in psutil.net_if_addrs().values():
+            for addr in addrs:
+                if addr.family.name == "AF_INET" and addr.address != "127.0.0.1":
+                    san_entries.append(
+                        x509.IPAddress(ipaddress.IPv4Address(addr.address))
+                    )
+    except Exception:
+        pass
+
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(ca_cert.subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now)
+        .not_valid_after(now + datetime.timedelta(days=3650))
+        .add_extension(
+            x509.ExtendedKeyUsage([x509.oid.ExtendedKeyUsageOID.SERVER_AUTH]),
+            critical=False,
+        )
+        .add_extension(
+            x509.SubjectAlternativeName(san_entries),
+            critical=False,
+        )
+        .sign(ca_key, hashes.SHA256())
+    )
+    _write_key(key, key_path)
+    _write_cert(cert, cert_path)
+    return cert_path, key_path
 
 
 def list_certs(ca_dir: Path) -> list[dict]:

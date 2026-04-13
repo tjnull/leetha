@@ -227,6 +227,8 @@ class FindingRule(StrEnum):
     DHCP_ANOMALY = "dhcp_anomaly"
     IDENTITY_SHIFT = "identity_shift"
     BEHAVIORAL_DRIFT = "behavioral_drift"
+    SENSOR_CONNECT = "sensor_connect"
+    SENSOR_DISCONNECT = "sensor_disconnect"
 
 
 @dataclass
@@ -259,6 +261,10 @@ class Finding:
     id: int | None = None
     timestamp: datetime = field(default_factory=datetime.now)
     resolved: bool = False
+    status: str = "new"  # new, reviewing, resolved, false_positive, snoozed
+    disposition: str | None = None  # true_positive, false_positive, benign
+    snoozed_until: datetime | None = None
+    notes: str | None = None
 
 
 @dataclass

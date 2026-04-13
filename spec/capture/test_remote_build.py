@@ -98,8 +98,8 @@ def test_check_prerequisites_cross_missing_for_cross_target(mock_which):
     import platform
 
     def which_side_effect(name):
-        if name == "cargo":
-            return "/usr/bin/cargo"
+        if name in ("cargo", "rustc"):
+            return f"/usr/bin/{name}"
         return None
     mock_which.side_effect = which_side_effect
 

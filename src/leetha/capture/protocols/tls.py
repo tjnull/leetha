@@ -20,7 +20,10 @@ def parse_tls_client_hello(packet) -> CapturedPacket | None:
     tcp = packet[TCP]
     ip = packet[IP]
 
-    if tcp.dport != 443:
+    # Accept TLS Client Hello on any common TLS port, not just 443.
+    # This captures JA3/JA4 fingerprints from IMAPS, POP3S, LDAPS, etc.
+    _TLS_PORTS = {443, 465, 636, 853, 993, 995, 5061, 8443, 8883, 9443}
+    if tcp.dport not in _TLS_PORTS:
         return None
 
     payload = bytes(tcp.payload)

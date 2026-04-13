@@ -304,10 +304,22 @@ export interface PatternEntry {
   device_type: string;
   manufacturer: string;
   confidence: number;
+  hits?: number;
+  created_at?: string;
 }
 
 export interface PatternsResponse {
   [type: string]: PatternEntry[];
+}
+
+export interface PatternTestMatch {
+  hw_addr: string;
+  ip_addr: string;
+  matched_on: string;
+  current_category: string;
+  current_vendor: string;
+  new_category: string;
+  new_vendor: string;
 }
 
 // --- Pattern endpoints ---
@@ -323,8 +335,54 @@ export async function addPattern(type: string, pattern: PatternEntry) {
   });
 }
 
+export async function updatePattern(type: string, index: number, pattern: PatternEntry) {
+  return apiFetch(`/api/patterns/${encodeURIComponent(type)}/${index}`, {
+    method: "PUT",
+    body: JSON.stringify(pattern),
+  });
+}
+
 export async function deletePattern(type: string, index: number) {
   return apiFetch(`/api/patterns/${encodeURIComponent(type)}/${index}`, { method: "DELETE" });
+}
+
+export async function reorderPatterns(type: string, order: number[]) {
+  return apiFetch(`/api/patterns/${encodeURIComponent(type)}/reorder`, {
+    method: "POST",
+    body: JSON.stringify({ order }),
+  });
+}
+
+export async function resetPatternHits(type: string, index: number) {
+  return apiFetch(`/api/patterns/${encodeURIComponent(type)}/${index}/reset-hits`, {
+    method: "POST",
+  });
+}
+
+export async function testPattern(entry: { type: string; pattern: string; device_type: string; manufacturer: string }): Promise<{ matches: PatternTestMatch[]; count: number }> {
+  return apiFetch("/api/patterns/test", {
+    method: "POST",
+    body: JSON.stringify(entry),
+  });
+}
+
+export async function validatePattern(entry: { type: string; pattern: string }): Promise<{ valid: boolean; error?: string }> {
+  return apiFetch("/api/patterns/validate", {
+    method: "POST",
+    body: JSON.stringify(entry),
+  });
+}
+
+export async function importPatterns(data: string, contentType: string, dryRun: boolean = false) {
+  return apiFetch(`/api/patterns/import?dry_run=${dryRun}`, {
+    method: "POST",
+    headers: { "Content-Type": contentType },
+    body: data,
+  });
+}
+
+export function exportPatternsUrl(format: "json" | "csv"): string {
+  return `/api/patterns/export?format=${format}`;
 }
 
 /** @deprecated Use fetchInterfaceList instead */
@@ -399,6 +457,8 @@ export interface Incident {
   is_randomized_mac: boolean;
   correlated_mac: string | null;
   alert_ids: number[];
+  status?: string;
+  disposition?: string | null;
 }
 
 export interface IncidentCounts {
@@ -431,12 +491,138 @@ export interface IncidentDetail {
 
 // --- Incident endpoints ---
 
-export async function fetchIncidents(): Promise<{ incidents: Incident[]; counts: IncidentCounts }> {
-  return apiFetch("/api/incidents");
+export async function fetchIncidents(includeResolved = false): Promise<{ incidents: Incident[]; counts: IncidentCounts }> {
+  const params = includeResolved ? "?include_resolved=true" : "";
+  return apiFetch(`/api/incidents${params}`);
+}
+
+export async function reopenIncident(id: string) {
+  return apiFetch(`/api/incidents/${encodeURIComponent(id)}/reopen`, { method: "POST" });
 }
 
 export async function fetchIncidentDetail(id: string): Promise<IncidentDetail> {
   return apiFetch(`/api/incidents/${encodeURIComponent(id)}/detail`);
+}
+
+// --- Detections Dashboard Types ---
+
+export interface IncidentStats {
+  severity: {
+    threat: number;
+    suspicious: number;
+    informational: number;
+    total: number;
+  };
+  trends: {
+    threat: { change: number; percentage: number; direction: "up" | "down" | "flat" };
+    suspicious: { change: number; percentage: number; direction: "up" | "down" | "flat" };
+    informational: { change: number; percentage: number; direction: "up" | "down" | "flat" };
+    total: { change: number; percentage: number; direction: "up" | "down" | "flat" };
+  };
+  categories: Array<{ name: string; count: number }>;
+}
+
+export interface TimelinePoint {
+  date: string;
+  threat: number;
+  suspicious: number;
+  informational: number;
+}
+
+export interface TopDevice {
+  hw_addr: string;
+  ip_addr: string | null;
+  vendor: string | null;
+  category: string | null;
+  finding_count: number;
+  bar_width: number;
+}
+
+// --- Detections Dashboard Endpoints ---
+
+export async function fetchIncidentStats(): Promise<IncidentStats> {
+  return apiFetch("/api/incidents/stats");
+}
+
+export async function fetchIncidentTimeline(): Promise<{ timeline: TimelinePoint[] }> {
+  return apiFetch("/api/incidents/timeline");
+}
+
+export async function fetchIncidentTopDevices(): Promise<{ devices: TopDevice[] }> {
+  return apiFetch("/api/incidents/top-devices");
+}
+
+export async function bulkIncidentAction(action: "resolve" | "suppress", ids: string[]) {
+  return apiFetch("/api/incidents/bulk", {
+    method: "POST",
+    body: JSON.stringify({ action, ids }),
+  });
+}
+
+// --- Findings Grouped Types ---
+
+export interface FindingGroup {
+  rule: string;
+  subtype: string;
+  severity: "threat" | "suspicious" | "informational";
+  device_count: number;
+  alert_count: number;
+  first_seen: string;
+  last_seen: string;
+  sparkline: number[];
+  devices: FindingGroupDevice[];
+  device_macs: string[];
+  related_groups: number;
+}
+
+export interface FindingGroupDevice {
+  hw_addr: string;
+  ip_addr: string | null;
+  vendor: string | null;
+  alert_count: number;
+  first_seen: string;
+  last_seen: string;
+  finding_ids: number[];
+  status: string;
+  has_notes: boolean;
+}
+
+// --- Findings Grouped Endpoints ---
+
+export async function fetchGroupedFindings(): Promise<{ groups: FindingGroup[] }> {
+  return apiFetch("/api/incidents/grouped");
+}
+
+export async function snoozeIncident(id: string, hours: number) {
+  return apiFetch(`/api/incidents/${encodeURIComponent(id)}/snooze`, {
+    method: "POST",
+    body: JSON.stringify({ hours }),
+  });
+}
+
+export async function snoozeRule(rule: string, hours: number) {
+  return apiFetch("/api/incidents/snooze-rule", {
+    method: "POST",
+    body: JSON.stringify({ rule, hours }),
+  });
+}
+
+export async function saveIncidentNotes(id: string, notes: string) {
+  return apiFetch(`/api/incidents/${encodeURIComponent(id)}/notes`, {
+    method: "POST",
+    body: JSON.stringify({ notes }),
+  });
+}
+
+export async function resolveIncident(id: string, disposition: string) {
+  return apiFetch(`/api/incidents/${encodeURIComponent(id)}/resolve`, {
+    method: "POST",
+    body: JSON.stringify({ disposition }),
+  });
+}
+
+export function exportFindingsUrl(format: "json" | "csv"): string {
+  return `/api/incidents/export?format=${format}`;
 }
 
 // --- Threat Detection types ---
@@ -832,6 +1018,8 @@ export async function testNotification(): Promise<{ status: string; message?: st
 export interface RemoteSensorInterface {
   name: string;
   desc?: string;
+  addrs?: string[];
+  up?: boolean;
 }
 
 export interface RemoteSensor {
@@ -843,6 +1031,10 @@ export interface RemoteSensor {
   bytes: number;
   remote_interfaces: RemoteSensorInterface[];
   selected_interfaces: string[];
+  state: "idle" | "capturing";
+  interface_stats: Record<string, { packets: number; bytes: number }>;
+  interface_errors: Record<string, string>;
+  last_heartbeat: number | null;
 }
 
 export async function fetchRemoteSensors(): Promise<RemoteSensor[]> {
@@ -851,6 +1043,23 @@ export async function fetchRemoteSensors(): Promise<RemoteSensor[]> {
 
 export async function disconnectRemoteSensor(name: string): Promise<void> {
   await apiFetch(`/api/remote/sensors/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function setSensorInterfaces(
+  name: string,
+  interfaces: string[]
+): Promise<void> {
+  await apiFetch(`/api/remote/sensors/${encodeURIComponent(name)}/interfaces`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ interfaces }),
+  });
+}
+
+export async function stopSensorCapture(name: string): Promise<void> {
+  await apiFetch(`/api/remote/sensors/${encodeURIComponent(name)}/interfaces`, {
     method: "DELETE",
   });
 }

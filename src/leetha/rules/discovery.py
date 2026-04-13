@@ -18,12 +18,20 @@ class NewHostRule(RuleBase):
         # The pipeline transitions disposition to "known" after rules run,
         # so this will only fire once per host.
         if host.disposition == "new":
+            parts = [f"New host discovered: {host.hw_addr}"]
+            if verdict.vendor:
+                parts.append(verdict.vendor)
+            if verdict.category:
+                parts.append(verdict.category)
+            if host.ip_addr:
+                parts.append(host.ip_addr)
+            if host.mac_randomized:
+                parts.append("randomized MAC")
             return Finding(
                 hw_addr=host.hw_addr,
                 rule=FindingRule.NEW_HOST,
                 severity=AlertSeverity.INFO,
-                message=f"New host discovered: {host.hw_addr}"
-                        + (f" ({verdict.vendor})" if verdict.vendor else ""),
+                message=" — ".join(parts),
             )
         return None
 
@@ -34,8 +42,16 @@ class LowCertaintyRule(RuleBase):
     async def evaluate(self, host: Host, verdict: Verdict, store) -> Finding | None:
         if verdict.certainty < 50 and host.disposition == "known":
             hw_addr = host.hw_addr
+            # In-memory cooldown: don't fire more than once per hour
             last = _LOW_CERT_LAST_FIRED.get(hw_addr)
             if last and (datetime.now() - last) < _LOW_CERT_COOLDOWN:
+                return None
+            # DB dedup: skip if an unresolved finding already exists
+            cursor = await store.connection.execute(
+                "SELECT COUNT(*) FROM findings WHERE hw_addr = ? AND rule = ? AND resolved = 0",
+                (hw_addr, "low_certainty"),
+            )
+            if (await cursor.fetchone())[0] > 0:
                 return None
             _LOW_CERT_LAST_FIRED[hw_addr] = datetime.now()
             return Finding(
