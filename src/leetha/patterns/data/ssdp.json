@@ -127,23 +127,11 @@
       "confidence": 40
     },
     {
-      "pattern": "Samsung.*UPnP",
-      "device_type": "smart_tv",
-      "manufacturer": "Samsung",
-      "confidence": 85
-    },
-    {
       "pattern": "LGE.*WebOS",
       "device_type": "smart_tv",
       "manufacturer": "LG",
       "os_family": "webOS",
       "confidence": 88
-    },
-    {
-      "pattern": "LG.*UPnP",
-      "device_type": "smart_tv",
-      "manufacturer": "LG",
-      "confidence": 80
     },
     {
       "pattern": "Vizio",
@@ -158,7 +146,7 @@
       "confidence": 80
     },
     {
-      "pattern": "TCL",
+      "pattern": "\\bTCL\\b",
       "device_type": "smart_tv",
       "manufacturer": "TCL",
       "confidence": 75
@@ -170,29 +158,9 @@
       "confidence": 80
     },
     {
-      "pattern": "Xbox",
-      "device_type": "game_console",
-      "manufacturer": "Microsoft",
-      "os_family": "Xbox",
-      "confidence": 88
-    },
-    {
-      "pattern": "PlayStation",
-      "device_type": "game_console",
-      "manufacturer": "Sony",
-      "os_family": "PlayStation",
-      "confidence": 88
-    },
-    {
       "pattern": "Nintendo",
       "device_type": "game_console",
       "manufacturer": "Nintendo",
-      "confidence": 85
-    },
-    {
-      "pattern": "Plex",
-      "device_type": "media_server",
-      "manufacturer": "Plex",
       "confidence": 85
     },
     {
@@ -206,11 +174,6 @@
       "device_type": "media_server",
       "manufacturer": "Jellyfin",
       "confidence": 85
-    },
-    {
-      "pattern": "MiniDLNA",
-      "device_type": "media_server",
-      "confidence": 75
     },
     {
       "pattern": "Belkin.*WeMo",
@@ -235,20 +198,6 @@
       "device_type": "router",
       "manufacturer": "ASUS",
       "confidence": 85
-    },
-    {
-      "pattern": "Synology",
-      "device_type": "nas",
-      "manufacturer": "Synology",
-      "os_family": "DSM",
-      "confidence": 90
-    },
-    {
-      "pattern": "QNAP",
-      "device_type": "nas",
-      "manufacturer": "QNAP",
-      "os_family": "QTS",
-      "confidence": 90
     },
     {
       "pattern": "Denon",

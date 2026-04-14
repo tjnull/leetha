@@ -30,8 +30,8 @@ def parse_stp(packet) -> dict | None:
         result["bridge_mac"] = str(stp.bridgemac)
         result["root_priority"] = int(stp.rootid)
         result["bridge_priority"] = int(stp.bridgeid)
-        result["port_priority"] = int(stp.portid >> 8) if stp.portid else 0
-        result["port_id"] = int(stp.portid & 0xFF) if stp.portid else 0
+        result["port_priority"] = int(stp.portid >> 12) if stp.portid else 0
+        result["port_id"] = int(stp.portid & 0xFFF) if stp.portid else 0
         result["root_path_cost"] = int(stp.pathcost)
         result["is_root"] = stp.rootmac == stp.bridgemac
     except Exception:

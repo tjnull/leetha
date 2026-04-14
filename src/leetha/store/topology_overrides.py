@@ -1,7 +1,7 @@
 """Topology override repository -- manual parent connection overrides."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class TopologyOverrideRepository:
@@ -25,7 +25,7 @@ class TopologyOverrideRepository:
             ON CONFLICT(child_mac) DO UPDATE SET
                 parent_mac = excluded.parent_mac,
                 created_at = excluded.created_at
-        """, (child_mac, parent_mac, datetime.now().isoformat()))
+        """, (child_mac, parent_mac, datetime.now(timezone.utc).isoformat()))
         await self._conn.commit()
 
     async def delete(self, child_mac: str) -> bool:

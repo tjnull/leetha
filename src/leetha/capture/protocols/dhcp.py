@@ -50,6 +50,8 @@ def parse_dhcpv4(packet) -> CapturedPacket | None:
                 elif isinstance(value, bytes) and len(value) == 6:
                     client_id = value.hex(":")
 
+    if len(bootp.chaddr) < 6:
+        return None
     client_mac = bootp.chaddr[:6].hex(":")
 
     # Determine the client's actual IP address.
@@ -123,7 +125,10 @@ def parse_dhcp_server(packet) -> CapturedPacket | None:
     if server_ip == "0.0.0.0":
         return None
 
-    client_mac = bootp.chaddr[:6].hex(":")
+    if len(bootp.chaddr) < 6:
+        client_mac = ""
+    else:
+        client_mac = bootp.chaddr[:6].hex(":")
     yiaddr = getattr(bootp, "yiaddr", "0.0.0.0") or "0.0.0.0"
 
     return CapturedPacket(
@@ -193,9 +198,14 @@ def parse_dhcpv6(packet) -> CapturedPacket | None:
 
     src_ip = packet[IPv6].src if packet.haslayer(IPv6) else "::"
 
+    from scapy.layers.l2 import Ether
+    hw_addr = packet[Ether].src if Ether in packet else None
+    if hw_addr is None:
+        return None
+
     return CapturedPacket(
         protocol="dhcpv6",
-        hw_addr=packet.src,
+        hw_addr=hw_addr,
         ip_addr=src_ip,
         fields={
             "oro": oro,

@@ -32,7 +32,10 @@ Invoking `leetha` without arguments drops into an interactive console with guide
 | Flag | Purpose |
 |------|---------|
 | `--host ADDR` | Dashboard listen address (default `0.0.0.0`) |
-| `--port NUM` | Dashboard listen port (default `8080`) |
+| `--port NUM` | Dashboard listen port (default `443`) |
+| `--no-tls` | Disable TLS and serve over plain HTTP |
+| `--tls-cert PATH` | Path to a custom TLS certificate file |
+| `--tls-key PATH` | Path to a custom TLS private key file |
 
 ### Example Invocations
 

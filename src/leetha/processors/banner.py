@@ -7,26 +7,43 @@ from leetha.capture.packets import CapturedPacket
 from leetha.evidence.models import Evidence
 
 
-_SERVICE_CATEGORIES: dict[str, str] = {
-    "ssh": "server", "ftp": "server", "smtp": "server",
-    "imap": "server", "pop3": "server",
-    "mysql": "server", "postgresql": "server", "mssql": "server",
-    "mongodb": "server", "redis": "server", "irc": "server",
-    "ipp": "printer", "jetdirect": "printer", "lpd": "printer",
-    "mqtt": "server", "amqp": "server",
-    "sip": "server",
-    "rtsp": "ip_camera",
-    "unifiprotect": "ip_camera",
-    "ldap": "server",
-    "cassandra": "server", "elasticsearch": "server",
-    "docker_api": "server", "kubernetes_api": "server",
-    "socks": "server",
-    "bgp": "router",
-    "pptp": "server",
+_SERVICE_CATEGORIES: dict[str, tuple[str, float]] = {
+    # Generic services: low certainty since many non-servers run these
+    "ssh": ("server", 0.30),
+    "ftp": ("server", 0.40),
+    "smtp": ("server", 0.50),
+    "imap": ("server", 0.50),
+    "pop3": ("server", 0.50),
+    # Databases/message brokers: genuinely indicate servers
+    "mysql": ("server", 0.85),
+    "postgresql": ("server", 0.85),
+    "mssql": ("server", 0.85),
+    "mongodb": ("server", 0.85),
+    "redis": ("server", 0.85),
+    "irc": ("server", 0.70),
+    # Printers
+    "ipp": ("printer", 0.85),
+    "jetdirect": ("printer", 0.85),
+    "lpd": ("printer", 0.85),
+    # IoT/messaging
+    "mqtt": ("server", 0.60),
+    "amqp": ("server", 0.75),
+    "sip": ("server", 0.60),
+    "rtsp": ("ip_camera", 0.85),
+    "unifiprotect": ("ip_camera", 0.85),
+    "ldap": ("server", 0.75),
+    "cassandra": ("server", 0.85),
+    "elasticsearch": ("server", 0.85),
+    "docker_api": ("server", 0.85),
+    "kubernetes_api": ("server", 0.85),
+    "socks": ("server", 0.70),
+    "bgp": ("router", 0.85),
+    "pptp": ("server", 0.70),
 }
 
 _SERVICE_PLATFORMS: dict[str, str] = {
-    "rdp": "Windows",
+    # "rdp" intentionally omitted: xrdp on Linux is a known false positive.
+    # Let banner content determine the OS instead.
     "mssql": "Windows",
 }
 
@@ -56,6 +73,13 @@ _SSH_OS_HINTS: dict[str, str] = {
     "ubuntu": "Linux",
     "debian": "Linux",
     "freebsd": "FreeBSD",
+    "el7": "Linux",
+    "el8": "Linux",
+    "el9": "Linux",
+    "fc": "Linux",
+    "amzn": "Linux",
+    "alpine": "Linux",
+    "arch": "Linux",
 }
 
 
@@ -72,7 +96,9 @@ class BannerProcessor(Processor):
         version = packet.get("version")
         server_port = packet.get("server_port")
 
-        category = _SERVICE_CATEGORIES.get(service)
+        cat_entry = _SERVICE_CATEGORIES.get(service)
+        category = cat_entry[0] if cat_entry else None
+        cat_certainty = cat_entry[1] if cat_entry else 0.85
         platform = _SERVICE_PLATFORMS.get(service)
         vendor = self._resolve_vendor(software)
         platform_version = version
@@ -88,7 +114,7 @@ class BannerProcessor(Processor):
         evidence = [Evidence(
             source="passive_banner",
             method="pattern",
-            certainty=0.85,
+            certainty=cat_certainty,
             category=category,
             vendor=vendor,
             platform=platform,
@@ -147,7 +173,10 @@ class BannerProcessor(Processor):
             ))
 
         # Siemens PLC: "S7-300" or "SIMATIC S7-1200" or "6ES7"
-        siemens_match = re.search(r'(?:SIMATIC\s+)?S7-(\d{3,4})', banner, re.IGNORECASE)
+        # Require "Siemens" or "SIMATIC" context to avoid false positives on bare "S7-xxx"
+        banner_upper = banner.upper()
+        has_siemens_context = "SIEMENS" in banner_upper or "SIMATIC" in banner_upper
+        siemens_match = re.search(r'(?:SIMATIC\s+)?S7-(\d{3,4})', banner, re.IGNORECASE) if has_siemens_context else None
         if not siemens_match:
             siemens_match = re.search(r'6ES7\s*\d{3}', banner)
         if siemens_match:
@@ -167,8 +196,9 @@ class BannerProcessor(Processor):
             ))
 
         # ABB controllers/relays: "AC500" or "ABB AC800M" or "REF615" or "ACS880"
+        # Require "ABB" in banner before falling back to model-only regex
         abb_match = re.search(r'ABB\s+(AC\d{3}[A-Z]?|ACS\d{3}|RE[FTL]\d{3}|800xA|Relion)', banner, re.IGNORECASE)
-        if not abb_match:
+        if not abb_match and "ABB" in banner.upper():
             abb_match = re.search(r'(AC500|AC800[A-Z]?|ACS\d{3}|RE[FTL]\d{3})', banner, re.IGNORECASE)
         if abb_match:
             model = abb_match.group(0)
@@ -181,7 +211,10 @@ class BannerProcessor(Processor):
         # Rockwell/Allen-Bradley: "ControlLogix" or "CompactLogix" or "1756-" or "1769-"
         rockwell_match = re.search(r'(?:Allen-Bradley\s+)?(?:ControlLogix|CompactLogix|MicroLogix|GuardLogix|PanelView|PowerFlex|Stratix)\s*\d*', banner, re.IGNORECASE)
         if not rockwell_match:
-            rockwell_match = re.search(r'(?:1756|1769|1762|2711|20-)[A-Z0-9-]+', banner)
+            # Require "Allen-Bradley" or "Rockwell" context for catalog number patterns
+            has_rockwell_context = "ALLEN-BRADLEY" in banner_upper or "ROCKWELL" in banner_upper
+            if has_rockwell_context:
+                rockwell_match = re.search(r'(?:1756|1769|1762|2711|20-)[A-Z0-9-]+', banner)
         if rockwell_match:
             model = rockwell_match.group(0)
             cat = "plc"
@@ -277,7 +310,7 @@ class BannerProcessor(Processor):
 
         # Firmware version extraction: "FW:" or "Firmware:" or "Version:" followed by digits
         fw_match = re.search(r'(?:FW|Firmware|Version|Rev)[:\s]+([0-9]+(?:\.[0-9]+)+)', banner, re.IGNORECASE)
-        if fw_match and results:
+        if fw_match and results and not results[0].platform_version:
             results[0].platform_version = fw_match.group(1)
 
         return results

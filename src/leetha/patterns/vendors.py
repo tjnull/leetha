@@ -13406,10 +13406,11 @@ def load_oui_data(cache_dir=None) -> Dict[str, Dict]:
                 entries = ieee_data.get("entries", {})
                 for prefix, info in entries.items():
                     if isinstance(info, dict) and info.get("vendor"):
+                        raw_dtype = info.get("device_type", "unknown")
                         oui_dict[prefix] = {
                             "manufacturer": info.get("vendor") or info.get("vendor_short"),
-                            "device_type": info.get("device_type", "unknown"),
-                            "category": "Unknown",
+                            "device_type": raw_dtype.lower() if raw_dtype else "unknown",
+                            "category": "unknown",
                             "model": None,
                         }
                 logger.info(f"Loaded {len(oui_dict)} IEEE OUI entries from cache")

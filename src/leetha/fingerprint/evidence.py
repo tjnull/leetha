@@ -16,79 +16,11 @@ _log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Signal trust tiers -- ordered by how reliable each source is for
-# attributing device identity.  Trust values feed directly into the
-# ballot weighting during consensus resolution.
+# Signal trust tiers -- single source of truth in evidence/weights.py.
+# Re-exported here so existing consumers keep working.
 # ---------------------------------------------------------------------------
 
-_TRUST_TIER_1 = {
-    # Curated databases with broad coverage and high precision
-    "mdns_exclusive": 0.96,  # vendor-exclusive mDNS services (definitive)
-    "dhcp_server": 0.92,     # DHCP OFFER/ACK — definitive server role
-    "huginn_device": 0.92,
-    "active_probe": 0.90,
-    "oui": 0.85,
-    "dns_server": 0.85,      # DNS response — strong server role signal
-    "huginn_dhcp": 0.82,
-    "huginn_mac": 0.82,
-}
-
-_TRUST_TIER_2 = {
-    # Validated protocol-specific analysers
-    "icmpv6": 0.80,
-    "tcp": 0.80,
-    "banner": 0.80,
-    "banner_cache": 0.80,
-    "http_useragent": 0.80,
-    "dhcpv6": 0.80,
-    "mdns": 0.78,
-    "ssdp": 0.78,
-    "ws_discovery": 0.85,
-    "huginn_dhcp_vendor": 0.78,
-    "ja4": 0.78,
-    "tls_ja4": 0.78,
-    "dns": 0.77,
-    "dhcp_vendor": 0.75,
-    "ja3": 0.75,
-    "tls_ja3": 0.75,
-}
-
-_TRUST_TIER_3 = {
-    # Complementary / lower-fidelity signals
-    "mdns_txt": 0.75,
-    "huginn_dhcpv6": 0.72,
-    "huginn_dhcpv6_enterprise": 0.72,
-    "mdns_service": 0.72,
-    "netbios": 0.72,
-    "hostname": 0.72,
-    "dhcp": 0.68,
-    "mdns_name": 0.65,
-}
-
-_TRUST_AI = {
-    "ai_dns": 0.85,
-    "ai_http_path": 0.80,
-    "ai_port_hint": 0.55,
-}
-
-_TRUST_TIER_4 = {
-    "tls_sni": 0.45,
-    "ttl": 0.55,
-    "ntp": 0.55,
-    "dns_ntp_hint": 0.55,
-    "tcp_syn_sig": 0.40,
-    "ip_observed_port": 0.35,
-    "tcp_syn_ttl": 0.30,
-    "ip_observed_ttl": 0.25,
-}
-
-# Merged lookup -- public so other modules can inspect source weights
-SOURCE_WEIGHTS: dict[str, float] = {
-    **_TRUST_TIER_1, **_TRUST_TIER_2, **_TRUST_TIER_3,
-    **_TRUST_AI, **_TRUST_TIER_4,
-}
-
-_FALLBACK_TRUST = 0.50
+from leetha.evidence.weights import SOURCE_WEIGHTS, FALLBACK_TRUST as _FALLBACK_TRUST
 
 
 # ---------------------------------------------------------------------------
@@ -839,7 +771,8 @@ def aggregate_evidence(matches: list[FingerprintMatch]) -> dict:
     verified_os: str | None = None
     verified_os_src: str | None = None
 
-    for sig in matches:
+    sorted_matches = sorted(matches, key=lambda m: m.effective_weight(), reverse=True)
+    for sig in sorted_matches:
         if sig.source == "oui" or not sig.os_family:
             continue
         if not _is_fullstack_os(sig.os_family):

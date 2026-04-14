@@ -144,8 +144,23 @@ def parse_mdns(packet) -> CapturedPacket | None:
             except (IndexError, AttributeError):
                 continue
 
+    # If no service type found, try to extract hostname from record names
+    hostname_from_local = None
     if service_type is None:
-        return None
+        if dns.an:
+            an_count = dns.ancount if dns.ancount is not None else len(dns.an) if hasattr(dns.an, '__len__') else 0
+            for i in range(an_count):
+                try:
+                    rr = dns.an[i]
+                    rrname = rr.rrname.decode() if isinstance(rr.rrname, bytes) else str(rr.rrname)
+                    rrname = rrname.rstrip(".")
+                    if rrname.endswith(".local"):
+                        hostname_from_local = rrname[:-6]
+                        break
+                except (IndexError, AttributeError):
+                    continue
+        if hostname_from_local is None:
+            return None
 
     src_ip = packet[IP].src if packet.haslayer(IP) else "0.0.0.0"
 
@@ -164,6 +179,9 @@ def parse_mdns(packet) -> CapturedPacket | None:
         "service_type": service_type,
         "name": clean_name,
     }
+
+    if hostname_from_local and not fields.get("name"):
+        fields["name"] = hostname_from_local
 
     if srv_target:
         fields['srv_target'] = srv_target
@@ -209,7 +227,8 @@ def parse_ssdp(packet) -> CapturedPacket | None:
     if not payload:
         return None
     headers: dict[str, str] = {}
-    for line in payload.split("\r\n"):
+    lines = payload.split("\r\n")
+    for line in lines[1:]:  # Skip HTTP method/status line
         if ":" in line:
             key, _, value = line.partition(":")
             headers[key.strip().upper()] = value.strip()
@@ -219,10 +238,10 @@ def parse_ssdp(packet) -> CapturedPacket | None:
     elif payload.startswith("HTTP/"):
         ssdp_type = "response"
     elif payload.startswith("M-SEARCH"):
-        return None
+        ssdp_type = "m-search"
     if ssdp_type is None:
         return None
-    server = headers.get("SERVER")
+    server = headers.get("SERVER") or headers.get("USER-AGENT")
     st = headers.get("ST") or headers.get("NT")
     usn = headers.get("USN")
     location = headers.get("LOCATION")

@@ -13,11 +13,16 @@ _LLDP_CAP_MAP = {
     "router": "router",
     "bridge": "switch",
     "wlan_ap": "access_point",
-    "station": "workstation",
+    "station": "endpoint",
     "telephone": "voip_phone",
     "docsis": "cable_modem",
     "repeater": "switch",
 }
+
+# Priority for LLDP capabilities: lower number = higher priority.
+# When multiple capabilities are present, pick the highest priority one.
+_CAP_PRIORITY = {"router": 1, "switch": 2, "access_point": 3, "voip_phone": 4,
+                 "cable_modem": 5, "endpoint": 6}
 
 _CDP_CAP_MAP = {
     "router": "router",
@@ -50,11 +55,16 @@ class InfrastructureProcessor(Processor):
         capabilities = packet.get("capabilities") or []
         management_ip = packet.get("management_ip")
 
+        # Collect all matching capabilities and pick the highest priority one
         device_type = None
+        best_priority = 999
         for cap in capabilities:
             if cap in _LLDP_CAP_MAP:
-                device_type = _LLDP_CAP_MAP[cap]
-                break
+                mapped = _LLDP_CAP_MAP[cap]
+                priority = _CAP_PRIORITY.get(mapped, 99)
+                if priority < best_priority:
+                    best_priority = priority
+                    device_type = mapped
 
         platform = None
         vendor = None
@@ -106,8 +116,11 @@ class InfrastructureProcessor(Processor):
         # Use system_name as hostname evidence
         hostname = system_name if system_name else None
 
+        # Reduce certainty for ambiguous "endpoint" (was "station")
+        certainty = 0.60 if device_type == "endpoint" else 0.90
+
         return [Evidence(
-            source="lldp", method="exact", certainty=0.90,
+            source="lldp", method="exact", certainty=certainty,
             category=device_type,
             vendor=vendor,
             platform=platform,
@@ -183,19 +196,26 @@ class InfrastructureProcessor(Processor):
         )]
 
     def _analyze_stp(self, packet: CapturedPacket) -> list[Evidence]:
+        """STP classification.
+
+        Docker bridges and VMware virtual switches also emit STP BPDUs,
+        so keep certainty low. Only non-default bridge priorities suggest
+        intentional switch configuration.
+        """
         bridge_priority = packet.get("bridge_priority", 32768)
         bridge_mac = packet.get("bridge_mac", "")
         is_root = packet.get("is_root", False)
 
         if bridge_priority < 8192:
-            confidence = 0.60
+            confidence = 0.45
         elif bridge_priority < 32768:
-            confidence = 0.50
+            confidence = 0.35
         else:
-            confidence = 0.40
+            # Default bridge priority (32768) — likely Docker/VMware host
+            confidence = 0.20
 
         if is_root:
-            confidence = min(confidence + 0.10, 0.70)
+            confidence = min(confidence + 0.05, 0.45)
 
         return [Evidence(
             source="stp", method="heuristic", certainty=confidence,
@@ -222,10 +242,30 @@ class InfrastructureProcessor(Processor):
 
         if sys_descr:
             descr_lower = sys_descr.lower()
-            if "cisco ios" in descr_lower or "cisco nx-os" in descr_lower:
+            if "cisco ios" in descr_lower or "cisco nx-os" in descr_lower or "cisco adaptive" in descr_lower or "asa" in descr_lower or "pix" in descr_lower:
                 vendor = "Cisco"
-                platform = "NX-OS" if "nx-os" in descr_lower else "IOS"
-                device_type = "switch"
+                # Distinguish Cisco device types from sys_descr (similar to CDP analyzer)
+                if "asa" in descr_lower or "adaptive security" in descr_lower or "pix" in descr_lower:
+                    platform = "ASA"
+                    device_type = "firewall"
+                elif "nx-os" in descr_lower:
+                    platform = "NX-OS"
+                    device_type = "switch"
+                elif "ios-xe" in descr_lower:
+                    platform = "IOS-XE"
+                    device_type = "router" if "router" in descr_lower else "network_device"
+                elif "wireless" in descr_lower or "air-" in descr_lower or "wlc" in descr_lower:
+                    platform = "IOS"
+                    device_type = "wireless_controller"
+                elif "ios" in descr_lower and "router" in descr_lower:
+                    platform = "IOS"
+                    device_type = "router"
+                elif "ios" in descr_lower:
+                    platform = "IOS"
+                    device_type = "network_device"
+                else:
+                    platform = "IOS"
+                    device_type = "network_device"
             elif "junos" in descr_lower:
                 vendor = "Juniper"
                 platform = "Junos"

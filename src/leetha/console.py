@@ -131,7 +131,7 @@ _COMMAND_SUBS: dict[str, list[tuple[str, str]]] = {
         ("--rate", "Max packets per second"),
     ],
     "web": [
-        ("--port", "HTTP port (default 8080)"),
+        ("--port", "HTTPS port (default 443)"),
         ("--host", "Bind address (default 0.0.0.0)"),
     ],
     "devices": [("--all", "Show all MAC rows instead of identities")],
@@ -341,21 +341,30 @@ class LeethaConsole:
 
                 await self._dispatch(stripped)
         finally:
-            # Restore default SIGINT so lingering executor threads
-            # don't raise KeyboardInterrupt during shutdown.
-            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            # Ignore ALL further SIGINT immediately — must be the very
+            # first thing in the finally block so no KeyboardInterrupt
+            # can fire during cleanup or in atexit handlers.
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
             readline.set_completer(old_completer)
             readline.set_completer_delims(old_delims)
             readline.set_completion_display_matches_hook(None)
             self.console.print("\n  [dim]Goodbye.[/dim]\n")
-            if self.app is not None:
-                await self.app.stop()
-                self.app = None
-            if self.db is not None:
-                await self.db.close()
-            if self._store is not None:
-                await self._store.close()
-                self._store = None
+            try:
+                if self.app is not None:
+                    await self.app.stop()
+                    self.app = None
+                if self.db is not None:
+                    await self.db.close()
+                if self._store is not None:
+                    await self._store.close()
+                    self._store = None
+            except Exception:
+                pass
+            # Force-exit: the input() thread in the default executor
+            # blocks on stdin and cannot be interrupted.  os._exit
+            # bypasses atexit/threading shutdown handlers that would
+            # hang trying to join the blocked thread.
+            os._exit(0)
 
     # Dispatch
 
@@ -961,7 +970,7 @@ class LeethaConsole:
         self._info("Back in console")
 
     async def _cmd_web(self, args: list[str]) -> None:
-        port = 8080
+        port = 443
         host = "0.0.0.0"
 
         if "--port" in args:
@@ -984,14 +993,40 @@ class LeethaConsole:
                 self._error("[bold]--host[/bold] requires a value")
                 return
 
+        use_tls = "--no-tls" not in args
+
         if not await self._ensure_capture():
             return
 
-        self._info(f"Web dashboard at [bold cyan]http://{host}:{port}[/bold cyan] — [bold]Ctrl+C[/bold] to return")
+        scheme = "https" if use_tls else "http"
+        self._info(f"Web dashboard at [bold cyan]{scheme}://{host}:{port}[/bold cyan] — [bold]Ctrl+C[/bold] to return")
+
+        # Temporarily replace SIGINT: instead of raising KeyboardInterrupt
+        # (which leaves uvicorn in a messy state), set the server's exit flag
+        # so it shuts down cleanly within its own serve loop.
+        _web_server_ref = None
+
+        def _web_sigint(sig, frame):
+            nonlocal _web_server_ref
+            if _web_server_ref is not None:
+                _web_server_ref.should_exit = True
+                _web_server_ref.force_exit = True
+
+        old_handler = signal.getsignal(signal.SIGINT)
         try:
-            await run_web_async(host=host, port=port, app=self.app)
+            from leetha.ui.web.app import _get_last_server
+            signal.signal(signal.SIGINT, _web_sigint)
+            # run_web_async stores the server ref; we grab it after launch
+            task = asyncio.ensure_future(
+                run_web_async(host=host, port=port, app=self.app, tls=use_tls))
+            # Give server a moment to start so we can grab the ref
+            await asyncio.sleep(0.5)
+            _web_server_ref = _get_last_server()
+            await task
         except (KeyboardInterrupt, asyncio.CancelledError):
             pass
+        finally:
+            signal.signal(signal.SIGINT, old_handler)
         self.console.print()
         self._info("Back in console")
 

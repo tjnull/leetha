@@ -83,6 +83,7 @@ async def api_devices(
     raw: bool = False,
 ):
     """Paginated, filtered, sorted device list."""
+    per_page = min(max(per_page, 1), 500)
     _validate_mac, _sanitize_hostname, _build_device_dict = _get_helpers()
     app_instance = _get_app()
 

@@ -217,7 +217,7 @@ class LeethaApp:
         # Periodic flush of custom pattern hit counters
         async def _flush_hits_loop():
             from leetha.fingerprint.lookup import flush_pattern_hits
-            while True:
+            while self._running:
                 await asyncio.sleep(60)
                 flush_pattern_hits(self.config.data_dir)
 
@@ -225,8 +225,8 @@ class LeethaApp:
 
         # Periodic unsnooze of expired snoozed findings
         async def _unsnooze_loop():
-            while True:
-                await asyncio.sleep(120)
+            while self._running:
+                await asyncio.sleep(30)
                 try:
                     count = await self.store.findings.unsnooze_expired()
                     if count > 0:
@@ -474,7 +474,7 @@ class LeethaApp:
         try:
             while self._running:
                 try:
-                    pkt = self.packet_queue.get(timeout=1.0)
+                    pkt = self.packet_queue.get(timeout=0.25)
                 except _queue_mod.Empty:
                     continue
                 except Exception:
@@ -636,38 +636,48 @@ class LeethaApp:
         return mac.upper() in self._local_macs
 
     async def stop(self):
-        """Stop capture and close DB. Designed for fast shutdown."""
+        """Stop capture and close DB. Designed for immediate shutdown."""
         self._running = False
+
+        # 1. Stop capture threads first (signals halt flags)
         self.capture_engine.stop()
-        # Stop remote sensor listener
-        from leetha.capture.remote.listener import stop_sensor_listener
-        await stop_sensor_listener()
+
+        # 2. Cancel all async tasks immediately
+        for task in self._tasks:
+            task.cancel()
+
+        # 3. Stop remote sensor listener
+        try:
+            from leetha.capture.remote.listener import stop_sensor_listener
+            await asyncio.wait_for(stop_sensor_listener(), timeout=1.0)
+        except (asyncio.TimeoutError, Exception):
+            pass
+
+        # 4. Shutdown executors without waiting
         self._analysis_executor.shutdown(wait=False, cancel_futures=True)
         if self.probe_scheduler:
             try:
                 self.probe_scheduler.shutdown()
             except Exception:
                 pass
-        # Cancel all background tasks with timeout
-        for task in self._tasks:
-            task.cancel()
+
+        # 5. Wait briefly for tasks to acknowledge cancellation
         if self._tasks:
             try:
                 await asyncio.wait_for(
                     asyncio.gather(*self._tasks, return_exceptions=True),
-                    timeout=2.0,
+                    timeout=0.5,
                 )
             except asyncio.TimeoutError:
                 pass
         self._tasks.clear()
-        try:
-            await self.store.close()
-        except Exception:
-            pass
-        try:
-            await self.db.close()
-        except Exception:
-            pass
+
+        # 6. Close DB connections
+        for closeable in (self.store, self.db):
+            try:
+                await asyncio.wait_for(closeable.close(), timeout=0.5)
+            except (asyncio.TimeoutError, Exception):
+                pass
 
     def subscribe(self) -> asyncio.Queue:
         """Subscribe to real-time device/alert events. Returns a bounded event queue."""
@@ -735,7 +745,7 @@ class LeethaApp:
         try:
             server = await asyncio.start_unix_server(_handle_client, path=socket_path)
             # Make socket world-readable so non-root clients can connect
-            os.chmod(socket_path, 0o666)
+            os.chmod(socket_path, 0o660)
             logger.info("Unix socket listening on %s", socket_path)
             self._unix_socket_server = server
             self._unix_socket_path = socket_path
@@ -805,12 +815,14 @@ class LeethaApp:
                 # Update Prometheus metrics
                 try:
                     from leetha.metrics import update_metrics
-                    from datetime import datetime, timedelta
+                    from datetime import datetime, timedelta, timezone
                     device_count = await self.store.hosts.count()
                     alert_count = await self.store.findings.count_active()
-                    threshold = datetime.now() - timedelta(minutes=5)
+                    threshold = datetime.now(timezone.utc) - timedelta(minutes=5)
                     all_hosts = await self.store.hosts.find_all()
-                    online = sum(1 for h in all_hosts if h.last_active and h.last_active >= threshold)
+                    def _aware(dt):
+                        return dt.replace(tzinfo=timezone.utc) if dt and dt.tzinfo is None else dt
+                    online = sum(1 for h in all_hosts if h.last_active and _aware(h.last_active) >= threshold)
                     capture_count = len(self.capture_engine.interfaces)
                     await update_metrics(device_count, online, alert_count, capture_count, 0)
                 except Exception:
@@ -880,11 +892,11 @@ class LeethaApp:
 
     async def _check_infra_offline(self):
         """Check for infrastructure devices gone offline using new Store."""
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
         from leetha.store.models import Finding, FindingRule, AlertSeverity
         from leetha.topology import _normalize_device_type, _INFRA_TYPES
 
-        threshold = datetime.now() - timedelta(minutes=5)
+        threshold = datetime.now(timezone.utc) - timedelta(minutes=5)
         verdicts = await self.store.verdicts.find_all(limit=1000)
 
         for v in verdicts:
@@ -901,6 +913,8 @@ class LeethaApp:
                 continue
 
             last_seen = host.last_active
+            if last_seen is not None and last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=timezone.utc)
             if last_seen is None or last_seen >= threshold:
                 continue
 
@@ -922,7 +936,9 @@ class LeethaApp:
             except Exception:
                 pass
 
-            minutes_ago = int((datetime.now() - last_seen).total_seconds() / 60)
+            if last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=timezone.utc)
+            minutes_ago = int((datetime.now(timezone.utc) - last_seen).total_seconds() / 60)
             is_gateway = normalized in ("router", "gateway", "firewall")
             severity = AlertSeverity.CRITICAL if is_gateway else AlertSeverity.WARNING
             label = v.hostname or v.vendor or v.hw_addr

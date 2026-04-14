@@ -38,7 +38,7 @@ RUN pip install --no-cache-dir /tmp/*.whl && rm -f /tmp/*.whl
 
 # Grant packet capture capabilities to the Python interpreter so
 # capture works even without docker run --cap-add (e.g., Dockhand).
-RUN setcap 'cap_net_raw,cap_net_admin+eip' /usr/local/bin/python3.11
+RUN setcap 'cap_net_raw,cap_net_admin,cap_net_bind_service+eip' /usr/local/bin/python3.11
 
 # Non-root user for safety
 RUN useradd --system --create-home --shell /usr/sbin/nologin appuser \
@@ -51,7 +51,7 @@ ENV HOME=/home/appuser
 VOLUME /home/appuser/.leetha
 ENV LEETHA_DATA_DIR=/home/appuser/.leetha
 
-EXPOSE 8080
+EXPOSE 443
 
 COPY --chown=appuser:appuser docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 ENTRYPOINT ["docker-entrypoint.sh"]

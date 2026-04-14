@@ -13,7 +13,7 @@ Beyond identification, Leetha applies `FindingRule` evaluations (registered via 
 ```bash
 pipx install leetha                # pull the package
 leetha sync                        # fetch reference databases (~880 MB, optional)
-leetha start web                   # open the React dashboard at http://localhost:8080
+leetha start web                   # open the React dashboard at https://localhost
 ```
 
 Detailed walkthrough: [Getting Started](Getting-Started.md)
@@ -41,7 +41,7 @@ Detailed walkthrough: [Getting Started](Getting-Started.md)
 
 ## What Leetha Provides
 
-**Protocol coverage** -- 11 dissectors handle TCP SYN, DHCPv4/v6, mDNS, DNS, SSDP, LLMNR, NetBIOS NS, TLS ClientHello, ARP, and ICMPv6 packets.
+**Protocol coverage** -- 11 dissectors handle TCP SYN, DHCPv4/v6, mDNS, DNS (with IPv6 support), SSDP (including M-SEARCH requests), LLMNR, NetBIOS NS, TLS ClientHello (including detection on non-standard ports), ARP, and ICMPv6 (including Router Solicitation) packets.
 
 **Processor architecture** -- Every analysis step is a processor registered with `@register_processor` in the `ProcessorRegistry`. Processors emit `Evidence` objects that the `VerdictEngine` fuses into a final `Verdict` per host.
 

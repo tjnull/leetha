@@ -1,17 +1,17 @@
 [
   {
-    "pattern": "^MSFT\\s+\\d+\\.\\d+",
-    "device_type": "workstation",
-    "manufacturer": "Microsoft",
-    "os_family": "Windows",
-    "confidence": 90
-  },
-  {
     "pattern": "^MSFT\\s+5\\.0",
     "device_type": "workstation",
     "manufacturer": "Microsoft",
     "os_family": "Windows 2000/XP",
     "confidence": 85
+  },
+  {
+    "pattern": "^MSFT\\s+\\d+\\.\\d+",
+    "device_type": "workstation",
+    "manufacturer": "Microsoft",
+    "os_family": "Windows",
+    "confidence": 90
   },
   {
     "pattern": "^android-dhcp-\\d+",
@@ -308,18 +308,18 @@
     "confidence": 90
   },
   {
-    "pattern": "^VMware",
-    "device_type": "virtual_machine",
-    "manufacturer": "VMware",
-    "os_family": null,
-    "confidence": 90
-  },
-  {
     "pattern": "^VMware.*ESXi",
     "device_type": "esxi",
     "manufacturer": "VMware",
     "os_family": "ESXi",
     "confidence": 95
+  },
+  {
+    "pattern": "^VMware",
+    "device_type": "virtual_machine",
+    "manufacturer": "VMware",
+    "os_family": null,
+    "confidence": 90
   },
   {
     "pattern": "^Proxmox",

@@ -1,14 +1,16 @@
 """Host repository -- CRUD operations for network hosts."""
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime
 from leetha.store.models import Host
 
 
 class HostRepository:
-    def __init__(self, conn):
+    def __init__(self, conn, write_lock: asyncio.Lock | None = None):
         self._conn = conn
+        self._mu = write_lock or asyncio.Lock()
 
     async def create_tables(self):
         await self._conn.execute("""
@@ -23,6 +25,8 @@ class HostRepository:
                 disposition TEXT DEFAULT 'new'
             )
         """)
+        await self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_hosts_ip ON hosts(ip_addr)")
         # Migration: add identity_id column for existing databases
         try:
             await self._conn.execute(
@@ -33,25 +37,28 @@ class HostRepository:
         await self._conn.commit()
 
     async def upsert(self, host: Host) -> None:
-        await self._conn.execute("""
-            INSERT INTO hosts (hw_addr, ip_addr, ip_v6, discovered_at, last_active,
-                               mac_randomized, real_hw_addr, disposition)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(hw_addr) DO UPDATE SET
-                ip_addr = COALESCE(excluded.ip_addr, hosts.ip_addr),
-                ip_v6 = COALESCE(excluded.ip_v6, hosts.ip_v6),
-                last_active = CASE
-                    WHEN (julianday(excluded.last_active) - julianday(hosts.last_active)) * 86400 >= 30
-                    THEN excluded.last_active
-                    ELSE hosts.last_active END,
-                mac_randomized = MAX(hosts.mac_randomized, excluded.mac_randomized),
-                real_hw_addr = COALESCE(excluded.real_hw_addr, hosts.real_hw_addr),
-                disposition = CASE WHEN hosts.disposition = 'self' THEN 'self'
-                              ELSE excluded.disposition END
-        """, (host.hw_addr, host.ip_addr, host.ip_v6,
-              host.discovered_at.isoformat(), host.last_active.isoformat(),
-              int(host.mac_randomized), host.real_hw_addr, host.disposition))
-        await self._conn.commit()
+        async with self._mu:
+            await self._conn.execute("""
+                INSERT INTO hosts (hw_addr, ip_addr, ip_v6, discovered_at, last_active,
+                                   mac_randomized, real_hw_addr, disposition)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(hw_addr) DO UPDATE SET
+                    ip_addr = COALESCE(excluded.ip_addr, hosts.ip_addr),
+                    ip_v6 = COALESCE(excluded.ip_v6, hosts.ip_v6),
+                    last_active = CASE
+                        WHEN (julianday(excluded.last_active) - julianday(hosts.last_active)) * 86400 >= 30
+                        THEN excluded.last_active
+                        ELSE hosts.last_active END,
+                    mac_randomized = MAX(hosts.mac_randomized, excluded.mac_randomized),
+                    real_hw_addr = COALESCE(excluded.real_hw_addr, hosts.real_hw_addr),
+                    disposition = CASE
+                        WHEN hosts.disposition = 'self' THEN 'self'
+                        WHEN hosts.disposition = 'known' THEN 'known'
+                        ELSE excluded.disposition END
+            """, (host.hw_addr, host.ip_addr, host.ip_v6,
+                  host.discovered_at.isoformat(), host.last_active.isoformat(),
+                  int(host.mac_randomized), host.real_hw_addr, host.disposition))
+            await self._conn.commit()
 
     async def find_by_addr(self, hw_addr: str) -> Host | None:
         cursor = await self._conn.execute(

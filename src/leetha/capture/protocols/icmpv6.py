@@ -11,7 +11,7 @@ def parse_icmpv6(packet) -> CapturedPacket | None:
     """
     try:
         from scapy.all import IPv6
-        from scapy.layers.inet6 import ICMPv6ND_RA, ICMPv6ND_NS, ICMPv6ND_NA
+        from scapy.layers.inet6 import ICMPv6ND_RA, ICMPv6ND_NS, ICMPv6ND_NA, ICMPv6ND_RS
     except ImportError:
         return None
 
@@ -44,6 +44,9 @@ def parse_icmpv6(packet) -> CapturedPacket | None:
             "solicited": getattr(na, 'S', None),
             "override": getattr(na, 'O', None),
         }
+    elif packet.haslayer(ICMPv6ND_RS):
+        icmp_type = "router_solicitation"
+        data = {}
 
     if not icmp_type:
         return None

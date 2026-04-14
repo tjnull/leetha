@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from leetha.store.models import Identity
 
 
@@ -31,7 +31,7 @@ class IdentityRepository:
         await self._conn.commit()
 
     async def find_or_create(self, primary_mac: str) -> Identity:
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         # INSERT OR IGNORE avoids TOCTOU race: if two workers try to create
         # the same identity simultaneously, the second INSERT is a no-op
         # instead of a UNIQUE constraint violation.

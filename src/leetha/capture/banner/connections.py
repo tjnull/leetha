@@ -63,8 +63,12 @@ class ConnectionTable:
         """Record a SYN for a new connection, evicting the oldest if full."""
         key: ConnKey = (src_ip, src_port, dst_ip, dst_port)
 
+        # Don't overwrite existing entries
+        if key in self._entries:
+            return self._entries[key]
+
         # Evict oldest entry when at capacity.
-        if len(self._entries) >= self._max_entries and key not in self._entries:
+        if len(self._entries) >= self._max_entries:
             self._entries.popitem(last=False)
 
         entry = ConnEntry(server_port=dst_port)

@@ -5,6 +5,7 @@ and management addresses from LLDP frames.
 """
 
 from __future__ import annotations
+import ipaddress
 import logging
 
 logger = logging.getLogger(__name__)
@@ -95,6 +96,8 @@ def parse_lldp(packet) -> dict | None:
             if isinstance(addr, bytes):
                 if len(addr) == 4:
                     result["management_ip"] = ".".join(str(b) for b in addr)
+                elif len(addr) == 16:
+                    result["management_ip"] = str(ipaddress.IPv6Address(addr))
                 else:
                     result["management_ip"] = addr.hex()
             else:

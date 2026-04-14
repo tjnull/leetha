@@ -238,7 +238,7 @@ def inspect_dhcp_fields(
 
     # Classify packet direction
     pkt_msg_type = raw_options.get("message-type")
-    from_client = pkt_msg_type in (1, 3, 4, 7, 8) if pkt_msg_type else True
+    from_client = pkt_msg_type in (1, 3, 4, 7, 8) if pkt_msg_type else False
 
     # --- Pass 1: relay-agent option in a client packet ---
     for opt_name, opt_val in raw_options.items():

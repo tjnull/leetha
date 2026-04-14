@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from leetha.store.database import Database
@@ -132,15 +132,18 @@ validate_manufacturer_consistency = check_manufacturer_agreement
 async def check_stale_devices(db: Database, stale_days: int = 30) -> dict:
     """Identify devices that have not been observed within *stale_days*."""
     all_devices = await db.list_devices()
-    threshold = datetime.now() - timedelta(days=stale_days)
+    threshold = datetime.now(timezone.utc) - timedelta(days=stale_days)
 
     dormant: list[dict] = []
     for dev in all_devices:
-        if dev.last_seen < threshold:
+        ls = dev.last_seen
+        if ls.tzinfo is None:
+            ls = ls.replace(tzinfo=timezone.utc)
+        if ls < threshold:
             dormant.append({
                 "mac": dev.mac,
                 "last_seen": dev.last_seen.isoformat(),
-                "days_ago": (datetime.now() - dev.last_seen).days,
+                "days_ago": (datetime.now(timezone.utc) - ls).days,
             })
 
     return {"count": len(dormant), "details": dormant}

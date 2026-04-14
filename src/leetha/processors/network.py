@@ -192,7 +192,10 @@ class NetworkDiscoveryProcessor(Processor):
             raw={"eap_type": eap_type_name, "identity": identity},
         )]
         if identity:
-            evidence[0].hostname = identity
+            # Validate EAP identity before using as hostname
+            from leetha.evidence.hostname import is_valid_hostname
+            if is_valid_hostname(identity):
+                evidence[0].hostname = identity
         return evidence
 
     def _analyze_icmpv6(self, packet: CapturedPacket) -> list[Evidence]:

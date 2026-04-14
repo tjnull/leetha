@@ -1888,9 +1888,13 @@ def build_topology_graph(
         is_online = False
         if last_seen:
             try:
-                from datetime import datetime, timedelta
+                from datetime import datetime, timedelta, timezone
                 ls = datetime.fromisoformat(last_seen) if isinstance(last_seen, str) else last_seen
-                is_online = (datetime.now() - ls) < timedelta(minutes=30)
+                now = datetime.now(timezone.utc)
+                # Handle both naive and aware datetimes from DB
+                if ls.tzinfo is None:
+                    ls = ls.replace(tzinfo=timezone.utc)
+                is_online = (now - ls) < timedelta(minutes=30)
             except Exception:
                 pass
 

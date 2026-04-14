@@ -568,7 +568,7 @@
     "certainty": 88
   },
   {
-    "match": "Galaxy",
+    "match": "Galaxy\\s*(S|A|Z|Note|Tab|Fold|Flip|M|F)\\d",
     "category": "phone",
     "vendor": "Samsung",
     "platform": "Android",

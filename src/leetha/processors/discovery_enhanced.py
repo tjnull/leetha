@@ -104,12 +104,13 @@ class EnhancedDiscoveryProcessor(Processor):
         stratum = packet.get("stratum", 0)
 
         if mode == "server" or mode == "broadcast":
-            # NTP servers are infrastructure devices
+            # NTP server mode does not reliably indicate device type;
+            # many Linux boxes, NAS devices, and DCs serve NTP.
             evidence.append(Evidence(
                 source="ntp",
                 method="heuristic",
-                certainty=0.55,
-                category="network_device",
+                certainty=0.30,
+                category=None,
                 raw={
                     "ntp_role": mode,
                     "stratum": stratum,

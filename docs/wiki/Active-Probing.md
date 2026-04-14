@@ -92,20 +92,20 @@ probe run tap0 all                     # execute every compatible probe
 
 ```bash
 # Switch an adapter to probe mode
-curl -X PUT http://localhost:8080/api/interfaces/tap0/probe-mode \
+curl -k -X PUT https://localhost/api/interfaces/tap0/probe-mode \
   -H 'Content-Type: application/json' \
   -d '{"mode": "probe-enabled"}'
 
 # Query which probes are supported on an adapter
-curl http://localhost:8080/api/interfaces/tap0/probe-status
+curl -k https://localhost/api/interfaces/tap0/probe-status
 
 # Trigger specific probes
-curl -X POST http://localhost:8080/api/interfaces/tap0/probe \
+curl -k -X POST https://localhost/api/interfaces/tap0/probe \
   -H 'Content-Type: application/json' \
   -d '{"probes": ["arp_sweep", "ssdp_search"]}'
 
 # Trigger every compatible probe
-curl -X POST http://localhost:8080/api/interfaces/tap0/probe \
+curl -k -X POST https://localhost/api/interfaces/tap0/probe \
   -H 'Content-Type: application/json' \
   -d '{"probes": ["all"]}'
 ```

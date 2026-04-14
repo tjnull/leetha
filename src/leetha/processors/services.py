@@ -38,11 +38,12 @@ class ServiceFingerprintProcessor(Processor):
         # TTL-based OS heuristic
         if ttl is not None:
             os_hint = self._ttl_os_hint(ttl)
-            evidence.append(Evidence(
-                source="tcp_syn_ttl", method="heuristic", certainty=0.50,
-                platform=os_hint,
-                raw={"ttl": ttl, "os_hint": os_hint},
-            ))
+            if os_hint:
+                evidence.append(Evidence(
+                    source="tcp_syn_ttl", method="heuristic", certainty=0.50,
+                    platform=os_hint,
+                    raw={"ttl": ttl, "os_hint": os_hint},
+                ))
 
         # TCP signature (window + MSS + options) -- stored as raw evidence
         # but NOT used for platform inference.  Embedded devices, routers,
@@ -171,7 +172,24 @@ class ServiceFingerprintProcessor(Processor):
             vendor = "Apple"
         elif "android" in ua_lower:
             platform = "Android"
-            vendor = "Google"
+            # Extract actual vendor from common Android UA patterns
+            if "pixel" in ua_lower or "nexus" in ua_lower:
+                vendor = "Google"
+            elif "sm-" in ua_lower or "samsung" in ua_lower:
+                vendor = "Samsung"
+            elif "xiaomi" in ua_lower or "redmi" in ua_lower or "poco" in ua_lower:
+                vendor = "Xiaomi"
+            elif "oneplus" in ua_lower:
+                vendor = "OnePlus"
+            elif "motorola" in ua_lower or "moto " in ua_lower or "moto/" in ua_lower:
+                vendor = "Motorola"
+            elif "huawei" in ua_lower or "honor" in ua_lower:
+                vendor = "Huawei"
+            elif "oppo" in ua_lower:
+                vendor = "OPPO"
+            elif "vivo" in ua_lower:
+                vendor = "Vivo"
+            # Otherwise vendor stays None for generic Android
         elif "linux" in ua_lower:
             platform = "Linux"
         elif "cros" in ua_lower:

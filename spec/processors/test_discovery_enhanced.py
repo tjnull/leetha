@@ -51,7 +51,8 @@ def test_ntp_server():
     evidence = proc.analyze(pkt)
     assert len(evidence) == 1
     assert evidence[0].source == "ntp"
-    assert evidence[0].category == "network_device"
+    # NTP server mode no longer assigns category -- too many false positives
+    assert evidence[0].category is None
 
 
 def test_ntp_client():

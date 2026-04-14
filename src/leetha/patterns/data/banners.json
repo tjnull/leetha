@@ -89,7 +89,7 @@
       "certainty": 70
     },
     {
-      "match": "SOAP",
+      "match": "\\bSOAP\\b",
       "product": "SOAP",
       "vendor": null,
       "platform": null,
@@ -137,7 +137,7 @@
       "certainty": 70
     },
     {
-      "match": "CBOR",
+      "match": "\\bCBOR\\b",
       "product": "CBOR",
       "vendor": null,
       "platform": null,
@@ -145,7 +145,7 @@
       "certainty": 70
     },
     {
-      "match": "tRPC",
+      "match": "\\btRPC\\b",
       "product": "tRPC",
       "vendor": null,
       "platform": null,
@@ -389,7 +389,7 @@
       "certainty": 80
     },
     {
-      "match": "ATS",
+      "match": "\\bATS\\b",
       "product": "Apache Traffic Server",
       "vendor": "Apache",
       "platform": null,
@@ -413,7 +413,7 @@
       "certainty": 85
     },
     {
-      "match": "Dragonfly",
+      "match": "\\bDragonfly\\b",
       "product": "Dragonfly",
       "vendor": null,
       "platform": null,

@@ -493,7 +493,7 @@ class ARPActivityRule:
             if mac not in affected:
                 dev = ctx.device_map.get(mac)
                 affected[mac] = _device_info(dev) if dev else {"mac": mac}
-        if len(affected) < 2:
+        if len(affected) < 25:
             return []
         return [Finding(
             rule_id=self.rule_id,
@@ -1137,11 +1137,11 @@ class NDPSpoofingRiskRule:
 
 class MACDiversityRule:
     rule_id = "L2-005"
-    name = "High MAC Diversity — No Port Security Detected"
+    name = "High MAC Diversity — Consider Verifying Port Security"
     category = Category.LAYER2
     severity = Severity.MEDIUM
 
-    MAC_THRESHOLD = 50
+    MAC_THRESHOLD = 100
 
     def evaluate(self, ctx: AnalysisContext) -> list[Finding]:
         unique_macs = len(ctx.devices)
@@ -1151,10 +1151,11 @@ class MACDiversityRule:
             rule_id=self.rule_id, name=self.name, category=self.category,
             severity=self.severity,
             description=(
-                f"{unique_macs} unique MAC addresses observed on this segment with no "
-                "802.1X authentication detected. The switch likely has no port security, "
-                "making it vulnerable to CAM table overflow (MAC flooding) which forces "
-                "the switch to broadcast all traffic like a hub."
+                f"{unique_macs} unique MAC addresses observed on this segment. "
+                "High MAC diversity detected — consider verifying port security controls. "
+                "Without 802.1X or port security the segment may be vulnerable to CAM "
+                "table overflow (MAC flooding) which forces the switch to broadcast all "
+                "traffic like a hub."
             ),
             affected_devices=[],
             evidence=[f"{unique_macs} unique MACs observed (threshold: {self.MAC_THRESHOLD})"],
@@ -1535,7 +1536,7 @@ class VLANLeakageRule:
             if not ip_str or ip_str == "0.0.0.0":
                 continue
             try:
-                net = str(ipaddress.ip_network(f"{ip_str}/24", strict=False))
+                net = str(ipaddress.ip_network(f"{ip_str}/20", strict=False))
             except ValueError:
                 continue
             mac_subnets.setdefault(obs.device_mac, set()).add(net)

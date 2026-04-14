@@ -65,13 +65,13 @@ When a raw frame arrives, `PacketCapture` passes it through the `PARSER_CHAIN` -
 | `parse_tcp_syn` | TCP with SYN flag set | TTL, window size, MSS, TCP option order (p0f signature) |
 | `parse_dhcpv4` | UDP ports 67/68 | Option 55 list, Option 60 vendor class, hostname, raw option bytes |
 | `parse_dhcpv6` | UDP ports 546/547 | ORO option set, DUID, enterprise ID, vendor class, client FQDN |
-| `parse_mdns` | UDP port 5353 | Service type (e.g. `_spotify-connect._tcp`), instance name, TXT key-value pairs |
-| `parse_dns` | UDP port 53 | Query name, query type, answer records (A/AAAA/PTR) |
-| `parse_ssdp` | UDP port 1900 | Server header, ST/NT field, USN, Location URL |
+| `parse_mdns` | UDP port 5353 | Service type (e.g. `_spotify-connect._tcp`), instance name, TXT key-value pairs, hostnames from non-service records |
+| `parse_dns` | UDP port 53 | Query name, query type, answer records (A/AAAA/PTR); full IPv6 support |
+| `parse_ssdp` | UDP port 1900 | Server header, ST/NT field, USN, Location URL (both NOTIFY and M-SEARCH requests) |
 | `parse_llmnr_netbios` | UDP ports 5355/137 | Queried name, query type |
-| `parse_tls_hello` | TCP port 443 and beyond | JA3 digest, JA4 fingerprint, SNI, protocol version, cipher list, extension list |
+| `parse_tls_hello` | TCP with TLS Client Hello (any port) | JA3 digest, JA4 fingerprint, SNI, protocol version, cipher list, extension list |
 | `parse_arp` | All ARP frames | Sender/target MAC and IP, ARP operation (request/reply) |
-| `parse_icmpv6` | All ICMPv6 | RA flags (M/O), hop limit, prefix info, NS/NA addresses |
+| `parse_icmpv6` | All ICMPv6 | RA flags (M/O), hop limit, prefix info, NS/NA addresses, Router Solicitation |
 | `parse_ip_observed` | Catch-all for remaining IP | Source/destination IP+MAC, TTL, protocol number, ports |
 
 Every `CapturedPacket` carries the adapter name and observed CIDR for downstream context.
@@ -99,7 +99,7 @@ When a `CapturedPacket` arrives, the `ProcessorRegistry` dispatches it to every 
 
 **DHCP Vendor Class Analyzer** -- Extracts the Option 60 string (e.g. `dhcpcd-9.4.1:Linux-6.1.0`, `MSFT 5.0`, `udhcp 1.33.2`) and maps it to a vendor and OS family.
 
-**mDNS Service Classifier** -- Maps announced service types to device categories: `_airplay._tcp` implies an Apple device, `_googlecast._tcp` a Google Nest/Chromecast, `_ipp._tcp` a network printer. Certain mDNS services are treated as **exclusive** to a single vendor and produce 97% certainty evidence that overrides any OUI-based guess. Apple-exclusive services include `_apple-mobdev2._tcp` and `_companion-link._tcp`. Similarly, `_googlecast._tcp` is exclusive to Google and `_samsung-osp._tcp` is exclusive to Samsung. When an exclusive service is observed, the resulting evidence weight is high enough to dominate the VerdictEngine fusion, ensuring the correct vendor attribution even when the OUI is ambiguous or the MAC is randomized.
+**mDNS Service Classifier** -- Maps announced service types to device categories: `_airplay._tcp` implies an Apple device, `_googlecast._tcp` a Google Nest/Chromecast, `_ipp._tcp` a network printer. Also extracts hostnames from non-service mDNS records (A, AAAA, PTR) for device naming. Certain mDNS services are treated as **exclusive** to a single vendor and produce 97% certainty evidence that overrides any OUI-based guess. Apple-exclusive services include `_apple-mobdev2._tcp` and `_companion-link._tcp`. Similarly, `_googlecast._tcp` is exclusive to Google and `_samsung-osp._tcp` is exclusive to Samsung. When an exclusive service is observed, the resulting evidence weight is high enough to dominate the VerdictEngine fusion, ensuring the correct vendor attribution even when the OUI is ambiguous or the MAC is randomized.
 
 **TCP Stack Fingerprinter** -- Constructs a p0f-style signature from the SYN packet's TTL, window size, MSS, and TCP option order. Matched against 192 p0f signatures using the `type:class:name:flavor` label scheme (for instance, `s:unix:Linux:3.11 and newer`).
 
@@ -109,9 +109,9 @@ When a `CapturedPacket` arrives, the `ProcessorRegistry` dispatches it to every 
 
 **NetBIOS / LLMNR Extractor** -- Pulls hostnames and workgroup names from legacy Windows name resolution broadcasts.
 
-**SSDP Decoder** -- Parses UPnP NOTIFY and M-SEARCH responses to extract device manufacturer, model, and firmware from the Server header and device description URI.
+**SSDP Decoder** -- Parses UPnP NOTIFY announcements and M-SEARCH requests/responses to extract device manufacturer, model, and firmware from the Server header and device description URI.
 
-**ICMPv6 RA Analyzer** -- Reads Router Advertisement flags, hop limits, and prefix information to identify router operating systems.
+**ICMPv6 RA/RS Analyzer** -- Reads Router Advertisement flags, hop limits, and prefix information to identify router operating systems. Also handles Router Solicitation messages for IPv6 host detection.
 
 **ServiceProbe Processor** -- When probing is enabled, 300+ `ServiceProbe` plugins connect to discovered endpoints via `ServiceConnection` and call `identify(conn)` to produce a `ServiceIdentity` with service name, version string, and protocol-level metadata (e.g. SMB signing status, SSH key exchange algorithms).
 

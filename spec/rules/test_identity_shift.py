@@ -2,7 +2,7 @@
 import sys
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from leetha.store.models import Host, Finding, FindingRule as FR, AlertSeverity
 from leetha.evidence.models import Evidence, Verdict
 
@@ -41,8 +41,8 @@ def _verdict(hw="aa:bb:cc:dd:ee:ff", category=None, vendor=None,
 
 def _host(hw="aa:bb:cc:dd:ee:ff", age_seconds=120):
     return Host(hw_addr=hw,
-                discovered_at=datetime.now() - timedelta(seconds=age_seconds),
-                last_active=datetime.now())
+                discovered_at=datetime.now(timezone.utc) - timedelta(seconds=age_seconds),
+                last_active=datetime.now(timezone.utc))
 
 
 class TestIdentityShift:

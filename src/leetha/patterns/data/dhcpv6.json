@@ -1,5 +1,48 @@
 {
-  "oro": [],
+  "oro": {
+    "23,24,39,56": {
+      "device_type": "workstation",
+      "os_family": "Windows",
+      "manufacturer": "Microsoft",
+      "confidence": 85
+    },
+    "23,24,31,39,56": {
+      "device_type": "server",
+      "os_family": "Windows Server",
+      "manufacturer": "Microsoft",
+      "confidence": 85
+    },
+    "23,24,39": {
+      "device_type": "workstation",
+      "os_family": "macOS",
+      "manufacturer": "Apple",
+      "confidence": 85
+    },
+    "23,24": {
+      "device_type": "workstation",
+      "os_family": "Linux",
+      "manufacturer": null,
+      "confidence": 70
+    },
+    "17,23,24": {
+      "device_type": "router",
+      "os_family": "IOS",
+      "manufacturer": "Cisco",
+      "confidence": 80
+    },
+    "17,23,24,56": {
+      "device_type": "router",
+      "os_family": "JunOS",
+      "manufacturer": "Juniper",
+      "confidence": 80
+    },
+    "23,24,56": {
+      "device_type": "firewall",
+      "os_family": "FortiOS",
+      "manufacturer": "Fortinet",
+      "confidence": 75
+    }
+  },
   "enterprise_ids": {
     "2": {
       "manufacturer": "IBM",
@@ -107,130 +150,151 @@
   },
   "vendor_class": [
     {
-      "match": "^MSFT\\s+\\d",
-      "category": "workstation",
-      "vendor": "Microsoft",
-      "certainty": "Windows"
+      "pattern": "^MSFT\\s+\\d",
+      "device_type": "workstation",
+      "manufacturer": "Microsoft",
+      "os_family": "Windows",
+      "confidence": 90
     },
     {
-      "match": "^dhcpcd",
-      "category": "workstation",
-      "vendor": null,
-      "certainty": "Linux"
+      "pattern": "^dhcpcd",
+      "device_type": "workstation",
+      "manufacturer": null,
+      "os_family": "Linux",
+      "confidence": 75
     },
     {
-      "match": "^udhcp",
-      "category": "iot",
-      "vendor": null,
-      "certainty": "Linux (Embedded)"
+      "pattern": "^udhcp",
+      "device_type": "iot",
+      "manufacturer": null,
+      "os_family": "Linux (Embedded)",
+      "confidence": 70
     },
     {
-      "match": "^Cisco\\s",
-      "category": "network",
-      "vendor": "Cisco",
-      "certainty": "IOS"
+      "pattern": "^Cisco\\s",
+      "device_type": "network",
+      "manufacturer": "Cisco",
+      "os_family": "IOS",
+      "confidence": 90
     },
     {
-      "match": "^Juniper",
-      "category": "router",
-      "vendor": "Juniper",
-      "certainty": "JunOS"
+      "pattern": "^Juniper",
+      "device_type": "router",
+      "manufacturer": "Juniper",
+      "os_family": "JunOS",
+      "confidence": 90
     },
     {
-      "match": "^Fortinet",
-      "category": "firewall",
-      "vendor": "Fortinet",
-      "certainty": "FortiOS"
+      "pattern": "^Fortinet",
+      "device_type": "firewall",
+      "manufacturer": "Fortinet",
+      "os_family": "FortiOS",
+      "confidence": 90
     },
     {
-      "match": "^MikroTik",
-      "category": "router",
-      "vendor": "MikroTik",
-      "certainty": "RouterOS"
+      "pattern": "^MikroTik",
+      "device_type": "router",
+      "manufacturer": "MikroTik",
+      "os_family": "RouterOS",
+      "confidence": 90
     },
     {
-      "match": "^Aruba",
-      "category": "access_point",
-      "vendor": "Aruba",
-      "certainty": "ArubaOS"
+      "pattern": "^Aruba",
+      "device_type": "access_point",
+      "manufacturer": "Aruba",
+      "os_family": "ArubaOS",
+      "confidence": 90
     },
     {
-      "match": "^(ubnt|UniFi)",
-      "category": "access_point",
-      "vendor": "Ubiquiti",
-      "certainty": null
+      "pattern": "^(ubnt|UniFi)",
+      "device_type": "access_point",
+      "manufacturer": "Ubiquiti",
+      "os_family": null,
+      "confidence": 85
     },
     {
-      "match": "^AAPLBSDPC/",
-      "category": "workstation",
-      "vendor": "Apple",
-      "certainty": "macOS"
+      "pattern": "^AAPLBSDPC/",
+      "device_type": "workstation",
+      "manufacturer": "Apple",
+      "os_family": "macOS",
+      "confidence": 90
     },
     {
-      "match": "^android-dhcp",
-      "category": "mobile",
-      "vendor": null,
-      "certainty": "Android"
+      "pattern": "^android-dhcp",
+      "device_type": "mobile",
+      "manufacturer": null,
+      "os_family": "Android",
+      "confidence": 85
     },
     {
-      "match": "^VMware",
-      "category": "virtual_machine",
-      "vendor": "VMware",
-      "certainty": null
+      "pattern": "^VMware",
+      "device_type": "virtual_machine",
+      "manufacturer": "VMware",
+      "os_family": null,
+      "confidence": 85
     },
     {
-      "match": "^HP\\s+(LaserJet|OfficeJet|DeskJet)",
-      "category": "printer",
-      "vendor": "HP",
-      "certainty": null
+      "pattern": "^HP\\s+(LaserJet|OfficeJet|DeskJet)",
+      "device_type": "printer",
+      "manufacturer": "HP",
+      "os_family": null,
+      "confidence": 95
     },
     {
-      "match": "^EPSON",
-      "category": "printer",
-      "vendor": "Epson",
-      "certainty": null
+      "pattern": "^EPSON",
+      "device_type": "printer",
+      "manufacturer": "Epson",
+      "os_family": null,
+      "confidence": 95
     },
     {
-      "match": "^Canon",
-      "category": "printer",
-      "vendor": "Canon",
-      "certainty": null
+      "pattern": "^Canon",
+      "device_type": "printer",
+      "manufacturer": "Canon",
+      "os_family": null,
+      "confidence": 90
     },
     {
-      "match": "^Brother",
-      "category": "printer",
-      "vendor": "Brother",
-      "certainty": null
+      "pattern": "^Brother",
+      "device_type": "printer",
+      "manufacturer": "Brother",
+      "os_family": null,
+      "confidence": 90
     },
     {
-      "match": "^XEROX",
-      "category": "printer",
-      "vendor": "Xerox",
-      "certainty": null
+      "pattern": "^XEROX",
+      "device_type": "printer",
+      "manufacturer": "Xerox",
+      "os_family": null,
+      "confidence": 90
     },
     {
-      "match": "^Polycom",
-      "category": "voip_phone",
-      "vendor": "Polycom",
-      "certainty": null
+      "pattern": "^Polycom",
+      "device_type": "voip_phone",
+      "manufacturer": "Polycom",
+      "os_family": null,
+      "confidence": 90
     },
     {
-      "match": "^Yealink",
-      "category": "voip_phone",
-      "vendor": "Yealink",
-      "certainty": null
+      "pattern": "^Yealink",
+      "device_type": "voip_phone",
+      "manufacturer": "Yealink",
+      "os_family": null,
+      "confidence": 90
     },
     {
-      "match": "^Synology",
-      "category": "nas",
-      "vendor": "Synology",
-      "certainty": "DSM"
+      "pattern": "^Synology",
+      "device_type": "nas",
+      "manufacturer": "Synology",
+      "os_family": "DSM",
+      "confidence": 90
     },
     {
-      "match": "^QNAP",
-      "category": "nas",
-      "vendor": "QNAP",
-      "certainty": "QTS"
+      "pattern": "^QNAP",
+      "device_type": "nas",
+      "manufacturer": "QNAP",
+      "os_family": "QTS",
+      "confidence": 90
     }
   ],
   "duid_hints": {

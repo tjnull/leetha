@@ -40,7 +40,7 @@ async def export_alerts(format: str = "csv"):
     findings = await app_instance.store.findings.list_active(limit=10000)
     alerts = [_finding_to_alert_dict(f) for f in findings]
 
-    alert_fields = ["id", "device_mac", "alert_type", "severity", "message", "timestamp", "acknowledged"]
+    alert_fields = ["id", "device_mac", "alert_type", "severity", "message", "timestamp", "acknowledged", "status", "disposition"]
 
     if format == "csv":
         output = io.StringIO()

@@ -49,12 +49,27 @@ def parse_quic(packet) -> CapturedPacket | None:
     )
 
 
+def _is_plausible_hostname(name: str) -> bool:
+    """Validate that a string looks like a real hostname."""
+    parts = name.split(".")
+    if len(parts) < 2:
+        return False
+    if len(parts[-1]) < 2 or len(parts[-1]) > 10:
+        return False
+    if len(name) < 4:
+        return False
+    return all(part.replace("-", "").isalnum() for part in parts if part)
+
+
 def _extract_sni_from_quic(payload: bytes) -> str | None:
     """Search for SNI extension in QUIC Initial payload."""
+    # Limit scan to first 500 bytes to avoid false positives from ciphertext
+    scan_limit = min(len(payload), 500)
+
     # Look for the SNI extension pattern: 0x00 0x00 (extension type)
     # followed by length, then 0x00 (host_name type), then name length + name
     idx = 0
-    while idx < len(payload) - 10:
+    while idx < scan_limit - 10:
         # Search for potential SNI marker
         if payload[idx:idx + 2] == b'\x00\x00':
             try:
@@ -75,7 +90,7 @@ def _extract_sni_from_quic(payload: bytes) -> str | None:
                     hostname = name.decode('ascii')
                     if '.' in hostname and all(
                         c.isalnum() or c in '.-' for c in hostname
-                    ):
+                    ) and _is_plausible_hostname(hostname):
                         return hostname
                 except (UnicodeDecodeError, ValueError):
                     pass

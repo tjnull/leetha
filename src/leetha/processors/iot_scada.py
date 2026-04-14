@@ -126,7 +126,12 @@ class IotScadaProcessor(Processor):
         )]
 
     def _analyze_dnp3(self, packet: CapturedPacket) -> list[Evidence]:
-        """DNP3 — SCADA RTU/outstation identification."""
+        """DNP3 — SCADA RTU/outstation identification.
+
+        is_server means "TCP listener" (the outstation/RTU in DNP3 terms).
+        The DNP3 master (SCADA server) is the TCP client that initiates connections.
+        So: is_server=True → RTU/outstation, is_server=False → SCADA master.
+        """
         func_name = packet.get("func_name", "")
         is_server = packet.get("is_server", False)
         category = "rtu" if is_server else "scada_server"
@@ -151,14 +156,25 @@ class IotScadaProcessor(Processor):
         return evidence
 
     def _analyze_opcua(self, packet: CapturedPacket) -> list[Evidence]:
-        """OPC UA — industrial server/client."""
+        """OPC UA — industrial server/client.
+
+        Non-server OPC UA nodes could be HMIs, historians, engineering
+        workstations, or MES systems. Use generic "opcua_client" at reduced
+        certainty rather than assuming HMI.
+        """
         msg_type = packet.get("msg_type", "")
         type_name = packet.get("type_name", "")
         is_server = packet.get("is_server", False)
         endpoint_url = packet.get("endpoint_url")
+        if is_server:
+            category = "scada_server"
+            certainty = 0.75
+        else:
+            category = "opcua_client"
+            certainty = 0.50
         evidence = [Evidence(
-            source="opcua", method="exact", certainty=0.75,
-            category="scada_server" if is_server else "hmi",
+            source="opcua", method="exact", certainty=certainty,
+            category=category,
             raw={"msg_type": msg_type, "type_name": type_name,
                  "endpoint_url": endpoint_url},
         )]

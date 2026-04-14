@@ -1290,6 +1290,8 @@ class SignatureMatcher:
                     raw_data={"query_name": query_name, "service": res.get("service"), "suffix": netbios_suffix},
                 )
         res = match_llmnr_query(query_name)
+        if not res or not res.get("os_family"):
+            return None
         conf = res["confidence"]
         return FingerprintMatch(
             source="netbios", match_type="heuristic",
@@ -1540,7 +1542,7 @@ class SignatureMatcher:
                 os_family="Fire OS",
                 raw_data={"user_agent": ua_string[:200]},
             )
-        if "Tizen/" in ua_string or "SmartTV" in ua_string or "SMART-TV" in ua_string:
+        if "Tizen/" in ua_string:
             return FingerprintMatch(
                 source="http_useragent",
                 match_type="pattern",
@@ -1548,6 +1550,17 @@ class SignatureMatcher:
                 device_type="smart_tv",
                 manufacturer="Samsung",
                 os_family="Tizen",
+                raw_data={"user_agent": ua_string[:200]},
+            )
+        if "SmartTV" in ua_string or "SMART-TV" in ua_string:
+            # Generic smart TV UA -- could be any manufacturer/platform
+            return FingerprintMatch(
+                source="http_useragent",
+                match_type="pattern",
+                confidence=0.70,
+                device_type="smart_tv",
+                manufacturer=None,
+                os_family=None,
                 raw_data={"user_agent": ua_string[:200]},
             )
         if "LG NetCast" in ua_string or "Web0S" in ua_string or "webOS" in ua_string:
@@ -1674,7 +1687,7 @@ class SignatureMatcher:
         (r"\.icloud\.com$", "Apple", None, "iOS/macOS"),
         # Google
         (r"\.google\.com$", "Google", None, None),
-        (r"clients\d+\.google\.com", "Google", None, "Android"),
+        (r"\bclients\d+\.google\.com$", "Google", None, "Android"),
         (r"connectivitycheck\.gstatic\.com", "Google", None, "Android"),
         # Amazon
         (r"\.amazon\.com$", "Amazon", None, None),

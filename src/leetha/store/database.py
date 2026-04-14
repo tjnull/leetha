@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import aiosqlite
@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS sync_sources (
 _TABLE_IDENTITIES = """\
 CREATE TABLE IF NOT EXISTS device_identities (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
-    primary_mac             TEXT,
+    primary_mac             TEXT UNIQUE,
     manufacturer            TEXT,
     device_type             TEXT,
     os_family               TEXT,
@@ -196,7 +196,7 @@ _ALL_TABLES = (
 def _coerce_datetime(raw: str | None) -> datetime:
     """Turn an ISO-8601 string into a datetime, defaulting to *now*."""
     if raw is None:
-        return datetime.now()
+        return datetime.now(timezone.utc)
     return datetime.fromisoformat(raw)
 
 
@@ -673,8 +673,44 @@ ON CONFLICT(mac) DO UPDATE SET
                 await self._conn.commit()
                 return identity.id
 
+            # Check if an identity already exists for this MAC
+            async with self._conn.execute(
+                "SELECT id FROM device_identities WHERE primary_mac = ?",
+                (identity.primary_mac,),
+            ) as cur:
+                existing = await cur.fetchone()
+
             ts_first = identity.first_seen.isoformat()
             ts_last = identity.last_seen.isoformat()
+
+            if existing:
+                # Update the existing identity row
+                await self._conn.execute(
+                    "UPDATE device_identities SET"
+                    " manufacturer = ?,"
+                    " device_type = ?,"
+                    " os_family = ?,"
+                    " os_version = ?,"
+                    " hostname = ?,"
+                    " confidence = ?,"
+                    " last_seen = ?,"
+                    " correlation_fingerprint = ?"
+                    " WHERE id = ?",
+                    (
+                        identity.manufacturer,
+                        identity.device_type,
+                        identity.os_family,
+                        identity.os_version,
+                        self._sanitize_hostname(identity.hostname),
+                        identity.confidence,
+                        ts_last,
+                        json.dumps(identity.correlation_fingerprint),
+                        existing["id"],
+                    ),
+                )
+                await self._conn.commit()
+                return existing["id"]
+
             async with self._conn.execute(
                 "INSERT INTO device_identities"
                 " (primary_mac, manufacturer, device_type, os_family,"
@@ -1157,7 +1193,7 @@ ON CONFLICT(mac) DO UPDATE SET
         """Record or update a trusted MAC-to-IP binding."""
         assert self._conn is not None
         async with self._mu:
-            ts_now = datetime.now().isoformat()
+            ts_now = datetime.now(timezone.utc).isoformat()
             await self._conn.execute(
                 "INSERT INTO trusted_bindings (mac, ip, source, created_at, interface)"
                 " VALUES (?, ?, ?, ?, ?)"
@@ -1225,7 +1261,7 @@ ON CONFLICT(mac) DO UPDATE SET
         """Track an ARP exchange, incrementing the packet counter on conflict."""
         assert self._conn is not None
         async with self._mu:
-            ts_now = datetime.now().isoformat()
+            ts_now = datetime.now(timezone.utc).isoformat()
             await self._conn.execute(
                 "INSERT INTO arp_history"
                 " (mac, ip, interface, first_seen, last_seen,"
@@ -1300,7 +1336,7 @@ ON CONFLICT(mac) DO UPDATE SET
         """Create a suppression rule. Returns its ID."""
         assert self._conn is not None
         async with self._mu:
-            ts_now = datetime.now().isoformat()
+            ts_now = datetime.now(timezone.utc).isoformat()
             async with self._conn.execute(
                 "INSERT INTO suppression_rules"
                 " (mac, ip, subtype, reason, created_at)"
@@ -1348,7 +1384,7 @@ ON CONFLICT(mac) DO UPDATE SET
         async with self.transaction():
             cursor = await self._conn.execute(
                 "INSERT INTO auth_tokens (token_hash, role, label, created_at) VALUES (?, ?, ?, ?)",
-                (token_hash, role, label, datetime.now().isoformat()),
+                (token_hash, role, label, datetime.now(timezone.utc).isoformat()),
             )
             return cursor.lastrowid
 
@@ -1367,7 +1403,7 @@ ON CONFLICT(mac) DO UPDATE SET
         # Update last_used
         await self._conn.execute(
             "UPDATE auth_tokens SET last_used = ? WHERE token_hash = ?",
-            (datetime.now().isoformat(), token_hash),
+            (datetime.now(timezone.utc).isoformat(), token_hash),
         )
         await self._conn.commit()
         # Re-fetch with updated last_used
@@ -1424,7 +1460,7 @@ ON CONFLICT(mac) DO UPDATE SET
         """Capture a point-in-time fingerprint for drift/clone detection."""
         assert self._conn is not None
         async with self._mu:
-            ts_now = datetime.now().isoformat()
+            ts_now = datetime.now(timezone.utc).isoformat()
             await self._conn.execute(
                 "INSERT INTO fingerprint_history"
                 " (mac, timestamp, os_family, manufacturer,"
@@ -1478,7 +1514,7 @@ ON CONFLICT(mac) DO UPDATE SET
         from datetime import timedelta
 
         assert self._conn is not None
-        cutoff = (datetime.now() - timedelta(days=retention_days)).isoformat()
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
         async with self._mu:
             cursor = await self._conn.execute(
                 "DELETE FROM observations WHERE timestamp < ?", (cutoff,)
@@ -1491,7 +1527,7 @@ ON CONFLICT(mac) DO UPDATE SET
         from datetime import timedelta
 
         assert self._conn is not None
-        cutoff = (datetime.now() - timedelta(days=retention_days)).isoformat()
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
         async with self._mu:
             cursor = await self._conn.execute(
                 "DELETE FROM alerts WHERE timestamp < ?", (cutoff,)

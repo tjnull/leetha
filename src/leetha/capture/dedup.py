@@ -14,6 +14,12 @@ from collections import OrderedDict
 class TTLDedup:
     """Deduplication filter backed by an OrderedDict for LRU ordering.
 
+    .. warning::
+
+        This class is **not** thread-safe.  It must only be accessed from
+        the asyncio event loop (or otherwise serialised by the caller).
+        Do not share instances across threads without external locking.
+
     Parameters
     ----------
     max_entries:

@@ -15,7 +15,7 @@ import asyncio
 import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from leetha.fingerprint.evidence import FingerprintMatch
 from leetha.probe.engine import ProbeEngine
@@ -61,7 +61,9 @@ class ProbeScheduler:
                 last = t.get("last_probed")
                 if last:
                     last_dt = datetime.fromisoformat(last)
-                    if datetime.now() - last_dt < self.cooldown:
+                    if last_dt.tzinfo is None:
+                        last_dt = last_dt.replace(tzinfo=timezone.utc)
+                    if datetime.now(timezone.utc) - last_dt < self.cooldown:
                         logger.debug("Skipping %s:%d (within cooldown)", mac, port)
                         return
 
@@ -92,9 +94,7 @@ class ProbeScheduler:
         async with self._semaphore:
             result = await loop.run_in_executor(
                 self._executor,
-                self.engine.probe,
-                host,
-                port,
+                lambda: self.engine.scan_service(host, port, protocol=protocol),
             )
             return result
 

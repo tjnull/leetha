@@ -19,7 +19,7 @@ class TestBannerProcessor:
         assert len(result) == 1
         ev = result[0]
         assert ev.source == "passive_banner"
-        assert ev.certainty == 0.85
+        assert ev.certainty == 0.30  # SSH certainty lowered to avoid false server classification
         assert ev.vendor == "OpenSSH"
         assert ev.platform_version == "9.2p1"
         assert ev.platform == "Linux"
@@ -48,7 +48,8 @@ class TestBannerProcessor:
         assert len(result) == 1
         assert result[0].source == "passive_banner"
 
-    def test_rdp_banner_windows_platform(self):
+    def test_rdp_banner_no_automatic_windows_platform(self):
+        """RDP no longer auto-assigns Windows -- xrdp on Linux is a known FP."""
         pkt = CapturedPacket(
             protocol="service_banner", hw_addr="aa:bb:cc:dd:ee:ff",
             ip_addr="192.168.1.40",
@@ -57,7 +58,8 @@ class TestBannerProcessor:
         )
         result = self.processor.analyze(pkt)
         assert len(result) == 1
-        assert result[0].platform == "Windows"
+        # Platform should NOT be auto-assigned based on service name alone
+        assert result[0].platform is None
 
     def test_printer_ipp_banner(self):
         pkt = CapturedPacket(

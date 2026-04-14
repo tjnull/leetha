@@ -5,6 +5,8 @@ each managing its own SQL operations.
 """
 from __future__ import annotations
 
+import asyncio
+
 import aiosqlite
 from pathlib import Path
 
@@ -24,6 +26,7 @@ class Store:
     def __init__(self, db_path: str | Path):
         self.db_path = str(db_path)
         self._conn: aiosqlite.Connection | None = None
+        self._write_lock = asyncio.Lock()
         self.hosts: HostRepository | None = None
         self.findings: FindingRepository | None = None
         self.sightings: SightingRepository | None = None
@@ -41,10 +44,10 @@ class Store:
         await self._conn.execute("PRAGMA journal_mode=WAL")
         await self._conn.execute("PRAGMA synchronous=NORMAL")
         await self._conn.execute("PRAGMA busy_timeout=30000")
-        self.hosts = HostRepository(self._conn)
-        self.findings = FindingRepository(self._conn)
-        self.sightings = SightingRepository(self._conn)
-        self.verdicts = VerdictRepository(self._conn)
+        self.hosts = HostRepository(self._conn, self._write_lock)
+        self.findings = FindingRepository(self._conn, self._write_lock)
+        self.sightings = SightingRepository(self._conn, self._write_lock)
+        self.verdicts = VerdictRepository(self._conn, self._write_lock)
         self.identities = IdentityRepository(self._conn)
         self.snapshots = SnapshotRepository(self._conn)
         await self.hosts.create_tables()

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from leetha.rules.registry import register_rule
 from leetha.rules.base import FindingRule as RuleBase
 from leetha.store.models import Host, Finding, FindingRule, AlertSeverity
@@ -32,11 +32,18 @@ class IdentityShiftRule(RuleBase):
         if len(existing.evidence_chain) < _MIN_EVIDENCE_COUNT:
             return None
 
-        age = (datetime.now() - host.discovered_at).total_seconds()
+        age = (datetime.now(timezone.utc) - host.discovered_at).total_seconds()
         if age < _GRACE_PERIOD_SECONDS:
             return None
 
         now = time.monotonic()
+
+        # Prune stale cooldown entries to prevent unbounded growth
+        if len(_last_fired) > 10000:
+            stale = [k for k, v in _last_fired.items() if now - v > 600]
+            for k in stale:
+                del _last_fired[k]
+
         last = _last_fired.get(host.hw_addr, 0)
         if now - last < _COOLDOWN_SECONDS:
             return None
@@ -83,6 +90,10 @@ class IdentityShiftRule(RuleBase):
         )
 
 
+_addr_conflict_last_fired: dict[str, float] = {}
+_ADDR_CONFLICT_COOLDOWN = 300  # 5 minutes
+
+
 @register_rule("addr_conflict")
 class AddrConflictRule(RuleBase):
     """Detect multiple MACs claiming the same IP address."""
@@ -91,18 +102,44 @@ class AddrConflictRule(RuleBase):
     async def evaluate(self, host: Host, verdict: Verdict, store) -> Finding | None:
         if not host.ip_addr:
             return None
-        # Targeted query instead of full table scan
+
+        # In-memory cooldown per MAC
+        now = time.monotonic()
+
+        # Prune stale cooldown entries to prevent unbounded growth
+        if len(_addr_conflict_last_fired) > 10000:
+            stale = [k for k, v in _addr_conflict_last_fired.items() if now - v > 600]
+            for k in stale:
+                del _addr_conflict_last_fired[k]
+
+        last = _addr_conflict_last_fired.get(host.hw_addr, 0)
+        if now - last < _ADDR_CONFLICT_COOLDOWN:
+            return None
+
+        # Only consider recently-active hosts to avoid stale conflicts
         cursor = await store.connection.execute(
-            "SELECT hw_addr FROM hosts WHERE ip_addr = ? AND hw_addr != ?",
+            "SELECT hw_addr FROM hosts WHERE ip_addr = ? AND hw_addr != ? "
+            "AND last_active > datetime('now', '-5 minutes')",
             (host.ip_addr, host.hw_addr),
         )
         conflicts = await cursor.fetchall()
-        if conflicts:
-            return Finding(
-                hw_addr=host.hw_addr,
-                rule=FindingRule.ADDR_CONFLICT,
-                severity=AlertSeverity.HIGH,
-                message=f"Address conflict: {host.ip_addr} claimed by "
-                        f"{host.hw_addr} and {conflicts[0][0]}",
-            )
-        return None
+        if not conflicts:
+            return None
+
+        # DB-level dedup: skip if an unresolved finding already exists
+        dedup_cursor = await store.connection.execute(
+            "SELECT COUNT(*) FROM findings WHERE hw_addr = ? AND rule = 'addr_conflict' AND resolved = 0",
+            (host.hw_addr,),
+        )
+        if (await dedup_cursor.fetchone())[0] > 0:
+            return None
+
+        _addr_conflict_last_fired[host.hw_addr] = now
+
+        return Finding(
+            hw_addr=host.hw_addr,
+            rule=FindingRule.ADDR_CONFLICT,
+            severity=AlertSeverity.HIGH,
+            message=f"Address conflict: {host.ip_addr} claimed by "
+                    f"{host.hw_addr} and {conflicts[0][0]}",
+        )

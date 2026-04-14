@@ -26,6 +26,13 @@ class NotificationDispatcher:
         for url in urls:
             self._apprise.add(url)
 
+    def update_urls(self, urls: list[str]) -> None:
+        """Replace notification URLs and rebuild the Apprise instance."""
+        self._urls = urls
+        self._apprise = apprise.Apprise()
+        for url in urls:
+            self._apprise.add(url)
+
     def format(self, finding: Finding) -> tuple[str, str]:
         """Return (title, body) for a finding notification."""
         sev = finding.severity.value.upper() if hasattr(finding.severity, "value") else str(finding.severity).upper()
@@ -52,6 +59,12 @@ class NotificationDispatcher:
         rule_str = finding.rule.value if hasattr(finding.rule, "value") else str(finding.rule)
         dedup_key = f"{rule_str}:{finding.hw_addr}"
         now = time.monotonic()
+
+        # Prune stale entries to prevent unbounded growth
+        stale = [k for k, v in self._recent.items() if now - v > _COOLDOWN_SECONDS]
+        for k in stale:
+            del self._recent[k]
+
         last = self._recent.get(dedup_key)
         if last is not None and (now - last) < _COOLDOWN_SECONDS:
             return

@@ -43,9 +43,9 @@ fastapi_app = FastAPI(
     title="LEETHA",
     description="Network host identification and threat surface analysis",
     lifespan=lifespan,
-    docs_url="/api/docs",
-    redoc_url="/api/redoc",
-    openapi_url="/api/openapi.json",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 import re as _re
@@ -216,7 +216,12 @@ from starlette.middleware import Middleware
 fastapi_app.user_middleware.append(
     Middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=[
+            "https://localhost",
+            "https://localhost:443",
+            "https://127.0.0.1",
+            "https://127.0.0.1:443",
+        ],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -1197,7 +1202,7 @@ async def _build_context_from_store(store, data_dir, interface=None,
     This replaces the old _build_context which reads from the legacy 'devices' table
     that the new pipeline no longer populates.
     """
-    from datetime import datetime
+    from datetime import datetime, timezone
     from leetha.analysis.attack_surface import AnalysisContext
     from leetha.store.models import Device, Observation
 
@@ -1217,8 +1222,8 @@ async def _build_context_from_store(store, data_dir, interface=None,
             os_version=v.platform_version if v else None,
             hostname=v.hostname if v else None,
             confidence=v.certainty if v else 0,
-            first_seen=h.discovered_at if h.discovered_at else datetime.now(),
-            last_seen=h.last_active if h.last_active else datetime.now(),
+            first_seen=h.discovered_at if h.discovered_at else datetime.now(timezone.utc),
+            last_seen=h.last_active if h.last_active else datetime.now(timezone.utc),
             alert_status=h.disposition or "new",
             is_randomized_mac=h.mac_randomized,
             correlated_mac=h.real_hw_addr,
@@ -1323,7 +1328,7 @@ async def _get_cached_attack_surface():
     global _attack_surface_cache, _attack_surface_cache_ts
     now = _time.monotonic()
     if _attack_surface_cache is None or (now - _attack_surface_cache_ts) > _ATTACK_SURFACE_TTL:
-        from datetime import datetime
+        from datetime import datetime, timezone
         from leetha.analysis.attack_surface import (
             build_chains, _build_summary,
         )
@@ -1378,7 +1383,7 @@ async def _get_cached_attack_surface():
             chains = build_chains(all_findings, ctx)
             summary = _build_summary(all_findings, chains)
             _attack_surface_cache = {
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "findings": [f.to_dict() for f in all_findings],
                 "chains": [c.to_dict() for c in chains],
                 "summary": summary,
@@ -1430,7 +1435,7 @@ async def api_attack_surface_exclusions():
 async def api_attack_surface_exclude(request: Request):
     """Add an exclusion (type: ip|mac|rule, value: string)."""
     import json as _json
-    from datetime import datetime
+    from datetime import datetime, timezone
     body = await request.json()
     exc_type = body.get("type")
     exc_value = body.get("value")
@@ -1460,7 +1465,7 @@ async def api_attack_surface_exclude(request: Request):
             return {"status": "already_excluded"}
     data["exclusions"].append({
         "type": exc_type, "value": exc_value,
-        "added": datetime.now().isoformat(),
+        "added": datetime.now(timezone.utc).isoformat(),
     })
     exc_file.write_text(_json.dumps(data, indent=2))
     return {"status": "excluded"}
@@ -2126,7 +2131,7 @@ async def api_incident_stats():
     from datetime import datetime, timedelta, timezone
     from collections import Counter
 
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     cutoff_24h = now - timedelta(hours=24)
 
     active = await app_instance.store.findings.list_active(limit=10000)
@@ -2185,7 +2190,7 @@ async def api_incident_timeline():
     from datetime import datetime, timedelta, timezone
     from collections import defaultdict
 
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=7)
 
     all_findings = await app_instance.store.findings.list_all(limit=50000)
@@ -2287,11 +2292,11 @@ async def api_incident_bulk(request: Request):
 async def api_incidents_grouped():
     """Return deduplicated finding groups with device counts, sparkline data."""
     from collections import defaultdict
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
     # Unsnooze is handled by the periodic background task — don't write here
     all_findings = await app_instance.store.findings.list_all(limit=50000)
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
 
     # Group by rule type
     rule_groups: dict[str, list] = defaultdict(list)
@@ -2390,11 +2395,11 @@ async def api_incidents_grouped():
 @fastapi_app.post("/api/incidents/{incident_id}/snooze")
 async def api_snooze_incident(incident_id: str, request: Request):
     """Snooze finding(s) for a duration."""
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
     body = await request.json()
     hours = body.get("hours", 1)
-    until = datetime.now() + timedelta(hours=hours)
+    until = datetime.now(timezone.utc) + timedelta(hours=hours)
 
     last_underscore = incident_id.rfind("_")
     if last_underscore == -1:
@@ -2417,12 +2422,12 @@ async def api_snooze_incident(incident_id: str, request: Request):
 @fastapi_app.post("/api/incidents/snooze-rule")
 async def api_snooze_rule(request: Request):
     """Snooze all findings of a rule type."""
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
     body = await request.json()
     rule = body.get("rule")
     hours = body.get("hours", 1)
-    until = datetime.now() + timedelta(hours=hours)
+    until = datetime.now(timezone.utc) + timedelta(hours=hours)
 
     active = await app_instance.store.findings.list_active(limit=10000)
     count = 0
@@ -3112,7 +3117,14 @@ async def api_import_pcap(file: UploadFile = File(...)):
     from leetha.import_pcap import validate_pcap_file, process_pcap, SUPPORTED_EXTENSIONS
 
     # Validate extension
+    import re
     filename = file.filename or "upload.pcap"
+    # Strip path components to prevent traversal
+    filename = re.sub(r'[/\\]', '', filename)
+    # Extra safety: only keep the basename
+    filename = os.path.basename(filename)
+    if not filename:
+        filename = "upload.pcap"
     ext = os.path.splitext(filename)[1].lower()
     if ext not in SUPPORTED_EXTENSIONS:
         return JSONResponse(status_code=400, content={
@@ -3327,11 +3339,11 @@ async def websocket_endpoint(websocket: WebSocket):
         if not token:
             await websocket.close(code=1008, reason="Token required")
             return
-        # Echo the auth subprotocol so the handshake succeeds
         for proto in (websocket.headers.get("sec-websocket-protocol") or "").split(","):
             proto = proto.strip()
             if proto.startswith("auth."):
-                accepted_subprotocol = proto
+                # Extract token but don't echo it back
+                accepted_subprotocol = "leetha-v1"
                 break
         from leetha.auth.tokens import hash_token
         token_info = await app_instance.db.validate_token(hash_token(token))
@@ -3454,7 +3466,8 @@ async def websocket_console(websocket: WebSocket):
         for proto in (websocket.headers.get("sec-websocket-protocol") or "").split(","):
             proto = proto.strip()
             if proto.startswith("auth."):
-                accepted_subprotocol = proto
+                # Extract token but don't echo it back
+                accepted_subprotocol = "leetha-v1"
                 break
         from leetha.auth.tokens import hash_token
         token_info = await app_instance.db.validate_token(hash_token(token))
@@ -3678,7 +3691,7 @@ async def ws_remote_sensor(websocket: WebSocket):
 
 # --- Entry Point ---
 
-def run_web(interfaces: list | None = None, host: str = "0.0.0.0", port: int = 8080, app: LeethaApp | None = None, force_auth=None):
+def run_web(interfaces: list | None = None, host: str = "0.0.0.0", port: int = 443, app: LeethaApp | None = None, force_auth=None, tls: bool = True, tls_cert: str = "", tls_key: str = ""):
     """Start the web UI server (blocking — creates its own event loop).
 
     The LeethaApp is constructed in a background thread to avoid blocking
@@ -3699,7 +3712,10 @@ def run_web(interfaces: list | None = None, host: str = "0.0.0.0", port: int = 8
                 _init_app_inner()
             except BaseException as e:
                 import traceback
-                with open("/tmp/leetha_thread_crash.txt", "a") as f:
+                import os
+                crash_path = os.path.join(os.environ.get("LEETHA_DATA_DIR", os.path.expanduser("~/.leetha")), "crash.log")
+                fd = os.open(crash_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+                with os.fdopen(fd, "a") as f:
                     f.write(f"\n=== THREAD CRASH ===\n{traceback.format_exc()}\n")
 
         def _init_app_inner():
@@ -3752,10 +3768,29 @@ def run_web(interfaces: list | None = None, host: str = "0.0.0.0", port: int = 8
         init_thread = threading.Thread(target=_init_app, daemon=True)
         init_thread.start()
 
-    uvicorn.run(_wrapped_app, host=host, port=port, log_level="info")
+    ssl_certfile = None
+    ssl_keyfile = None
+    if tls:
+        if tls_cert and tls_key:
+            ssl_certfile = tls_cert
+            ssl_keyfile = tls_key
+        else:
+            from leetha.capture.remote.ca import ensure_web_cert
+            from leetha.config import get_config
+            ca_dir = get_config().data_dir / "ca"
+            cert_path, key_path = ensure_web_cert(ca_dir)
+            ssl_certfile = str(cert_path)
+            ssl_keyfile = str(key_path)
+        scheme = "https"
+    else:
+        scheme = "http"
+
+    logger.info("Leetha web UI: %s://%s:%d", scheme, host, port)
+    uvicorn.run(_wrapped_app, host=host, port=port, log_level="info",
+                ssl_keyfile=ssl_keyfile, ssl_certfile=ssl_certfile)
 
 
-async def run_web_async(interfaces: list | None = None, host: str = "0.0.0.0", port: int = 8080, app: LeethaApp | None = None, force_auth=None):
+async def run_web_async(interfaces: list | None = None, host: str = "0.0.0.0", port: int = 443, app: LeethaApp | None = None, force_auth=None, tls: bool = True, tls_cert: str = "", tls_key: str = ""):
     """Start the web UI server within an existing event loop."""
     global app_instance, _auth_enabled
     from leetha.auth.middleware import check_auth_required
@@ -3775,9 +3810,41 @@ async def run_web_async(interfaces: list | None = None, host: str = "0.0.0.0", p
             rc.print("\n[bold green]Admin token is active.[/bold green]")
             rc.print("[dim]To view token use: leetha auth show-token[/dim]\n")
 
-    config = uvicorn.Config(_wrapped_app, host=host, port=port, log_level="info")
+    ssl_certfile = None
+    ssl_keyfile = None
+    if tls:
+        if tls_cert and tls_key:
+            ssl_certfile = tls_cert
+            ssl_keyfile = tls_key
+        else:
+            from leetha.capture.remote.ca import ensure_web_cert
+            from leetha.config import get_config
+            ca_dir = get_config().data_dir / "ca"
+            cert_path, key_path = ensure_web_cert(ca_dir)
+            ssl_certfile = str(cert_path)
+            ssl_keyfile = str(key_path)
+
+    config = uvicorn.Config(_wrapped_app, host=host, port=port, log_level="info",
+                            ssl_keyfile=ssl_keyfile, ssl_certfile=ssl_certfile)
     server = uvicorn.Server(config)
-    await server.serve()
+    # Disable uvicorn's own signal handlers — the console manages SIGINT
+    # and sets server.should_exit / force_exit directly.
+    server.install_signal_handlers = lambda: None
+    global _last_server
+    _last_server = server
+    try:
+        await server.serve()
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        server.should_exit = True
+        server.force_exit = True
+    finally:
+        _last_server = None
+
+_last_server: uvicorn.Server | None = None
+
+def _get_last_server() -> uvicorn.Server | None:
+    """Return the running uvicorn server instance (used by console for clean shutdown)."""
+    return _last_server
 
 
 # --- React SPA ---

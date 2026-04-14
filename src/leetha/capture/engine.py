@@ -129,14 +129,14 @@ class PacketCapture:
             self._spawn_worker(dev_name, cfg)
 
     def shutdown(self) -> None:
-        """Signal all workers to stop and wait for them to finish."""
+        """Signal all workers to stop and wait briefly for them to finish."""
         # raise halt flags first so workers notice promptly
         for flag in self._halt_flags.values():
             flag.set()
         # drop event-loop ref so no further enqueue attempts succeed
         self._event_loop = None
         for worker in self._workers.values():
-            worker.join(timeout=2)
+            worker.join(timeout=0.5)
         self._workers.clear()
         self._halt_flags.clear()
 

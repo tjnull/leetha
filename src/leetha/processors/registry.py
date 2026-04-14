@@ -13,6 +13,11 @@ def register_processor(*protocols: str):
     """Decorator to register a processor class for one or more protocols."""
     def decorator(cls):
         for proto in protocols:
+            if proto in _REGISTRY and _REGISTRY[proto] is not cls:
+                logger.warning(
+                    "Processor for protocol %s overwritten: %s -> %s",
+                    proto, _REGISTRY[proto].__name__, cls.__name__,
+                )
             _REGISTRY[proto] = cls
             logger.debug("Registered processor %s for protocol %s", cls.__name__, proto)
         cls._registered_protocols = list(protocols)

@@ -20,10 +20,13 @@ def parse_ntp(packet) -> CapturedPacket | None:
     """Extract NTP fields from UDP port 123 packets."""
     try:
         from scapy.layers.inet import IP, UDP
+        from scapy.layers.inet6 import IPv6
     except ImportError:
         return None
 
-    if not packet.haslayer(UDP) or not packet.haslayer(IP):
+    if not packet.haslayer(UDP):
+        return None
+    if not packet.haslayer(IP) and not packet.haslayer(IPv6):
         return None
 
     udp = packet[UDP]
@@ -56,11 +59,18 @@ def parse_ntp(packet) -> CapturedPacket | None:
         # Stratum 2+: IP address of upstream NTP server
         reference_id = f"{ref_bytes[0]}.{ref_bytes[1]}.{ref_bytes[2]}.{ref_bytes[3]}"
 
+    if packet.haslayer(IP):
+        src_ip = packet[IP].src
+        dst_ip = packet[IP].dst
+    else:
+        src_ip = packet[IPv6].src
+        dst_ip = packet[IPv6].dst
+
     return CapturedPacket(
         protocol="ntp",
         hw_addr=packet.src,
-        ip_addr=packet[IP].src,
-        target_ip=packet[IP].dst,
+        ip_addr=src_ip,
+        target_ip=dst_ip,
         fields={
             "mode": mode,
             "stratum": stratum,

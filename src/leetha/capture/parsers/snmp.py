@@ -64,7 +64,7 @@ def parse_snmp(packet) -> dict | None:
     try:
         # Version
         version = int(snmp.version)
-        result["version"] = {0: "v1", 1: "v2c", 3: "v3"}.get(version, f"v{version}")
+        result["version"] = {0: "v1", 1: "v2c", 2: "v2c", 3: "v3"}.get(version, f"v{version}")
 
         # Community string (only in v1/v2c -- plaintext!)
         if hasattr(snmp, "community") and snmp.community:

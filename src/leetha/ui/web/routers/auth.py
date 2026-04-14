@@ -42,6 +42,7 @@ async def api_auth_login(request: Request):
         key="leetha_token",
         value=raw_token,
         httponly=True,
+        secure=True,
         samesite="lax",
         path="/",
     )

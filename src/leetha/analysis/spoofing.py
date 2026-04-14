@@ -23,10 +23,31 @@ _log = logging.getLogger(__name__)
 
 # --- Tunables ---
 GRATUITOUS_BURST_WINDOW = 60          # seconds
-GRATUITOUS_BURST_LIMIT = 10           # packets within window
+GRATUITOUS_BURST_LIMIT = 20           # packets within window
+GRATUITOUS_BURST_LIMIT_INFRA = 50     # higher threshold for infrastructure devices
 MAC_OSCILLATION_WINDOW = 300          # seconds
 MAC_OSCILLATION_CHANGE_LIMIT = 3      # transitions
 RATE_LIMIT_INTERVAL = 300             # seconds between duplicate alerts
+
+_INFRA_TYPES = {"router", "switch", "gateway", "access_point", "firewall",
+                "load_balancer", "Router", "UniFi Switch", "UniFi AP"}
+
+# Known-legitimate OUI vendor -> behavioural manufacturer pairings.
+# Many devices use NICs made by a different vendor than the device manufacturer.
+_KNOWN_OUI_VENDOR_PAIRS: dict[str, set[str]] = {
+    "hon hai": {"apple", "apple inc", "dell", "dell inc", "dell technologies", "hp", "hewlett-packard", "hewlett packard", "lenovo", "lenovo group", "cisco"},
+    "foxconn": {"apple", "apple inc", "dell", "dell inc", "dell technologies", "hp", "hewlett-packard", "hewlett packard", "lenovo", "lenovo group", "cisco"},
+    "murata": {"apple", "apple inc", "sony", "samsung"},
+    "intel": {"dell", "dell inc", "dell technologies", "hp", "hewlett-packard", "hewlett packard", "lenovo", "lenovo group", "apple", "apple inc", "microsoft"},
+    "broadcom": {"apple", "apple inc", "dell", "dell inc", "dell technologies", "hp", "hewlett-packard", "hewlett packard"},
+    "qualcomm": {"samsung", "oneplus", "xiaomi", "oppo"},
+    "realtek": {"dell", "dell inc", "dell technologies", "hp", "hewlett-packard", "hewlett packard", "lenovo", "lenovo group", "asus"},
+    "quanta": {"dell", "dell inc", "dell technologies", "hp", "hewlett-packard", "hewlett packard", "lenovo", "lenovo group"},
+    "pegatron": {"apple", "apple inc", "asus"},
+    "wistron": {"dell", "dell inc", "dell technologies", "hp", "hewlett-packard", "hewlett packard", "lenovo", "lenovo group", "acer"},
+    "compal": {"dell", "dell inc", "dell technologies", "hp", "hewlett-packard", "hewlett packard", "lenovo", "lenovo group", "toshiba"},
+    "lite-on": {"dell", "dell inc", "dell technologies", "hp", "hewlett-packard", "hewlett packard", "lenovo", "lenovo group"},
+}
 
 
 class AddressVerifier:
@@ -179,7 +200,18 @@ class AddressVerifier:
             while ts_queue and ts_queue[0] <= earliest_valid:
                 ts_queue.popleft()
 
-            if len(ts_queue) > GRATUITOUS_BURST_LIMIT:
+            # Infrastructure devices (VRRP/HSRP) legitimately send more
+            # gratuitous ARPs during failover — use a higher threshold.
+            is_infra_device = False
+            try:
+                dev_record = await self._db.get_device(src_mac)
+                if dev_record and dev_record.device_type in _INFRA_TYPES:
+                    is_infra_device = True
+            except Exception:
+                pass
+            burst_limit = GRATUITOUS_BURST_LIMIT_INFRA if is_infra_device else GRATUITOUS_BURST_LIMIT
+
+            if len(ts_queue) > burst_limit:
                 rl_key = f"grat_flood:{src_mac}"
                 if self._rate_limit_ok(rl_key) and not self.is_suppressed(src_mac, src_ip, "grat_flood"):
                     src_label = await self._describe_host(src_mac, src_ip)
@@ -202,7 +234,17 @@ class AddressVerifier:
         self._oscillation_log[src_ip] = [
             pair for pair in osc_entries if pair[1] > earliest_valid
         ]
-        osc_entries = self._oscillation_log[src_ip]
+        # Clean up empty entries
+        empty_ips = [ip for ip, entries in self._oscillation_log.items() if not entries]
+        for ip in empty_ips:
+            del self._oscillation_log[ip]
+        # Cap total size
+        if len(self._oscillation_log) > 10000:
+            oldest = sorted(self._oscillation_log.keys(),
+                            key=lambda ip: min(e[1] for e in self._oscillation_log[ip]) if self._oscillation_log[ip] else 0)
+            for ip in oldest[:len(self._oscillation_log) - 10000]:
+                del self._oscillation_log[ip]
+        osc_entries = self._oscillation_log.get(src_ip, [])
 
         # Tally transitions (consecutive entries with different MACs)
         change_count = sum(
@@ -273,8 +315,6 @@ class AddressVerifier:
             return findings
 
         # --- Check 5: fingerprint shift ---
-        _INFRA_TYPES = {"router", "switch", "gateway", "access_point", "firewall",
-                        "load_balancer", "Router", "UniFi Switch", "UniFi AP"}
         is_infra = device.device_type in _INFRA_TYPES
 
         # Also check the DB record — current packet's device_type may be
@@ -328,7 +368,14 @@ class AddressVerifier:
         ):
             oui_norm = oui_vendor.lower()
             mfg_norm = device.manufacturer.lower()
-            if oui_norm not in mfg_norm and mfg_norm not in oui_norm:
+            # Check if this is a known-legitimate OUI-to-manufacturer pairing
+            # Uses substring matching to handle vendor name variations
+            # (e.g. "hewlett-packard" matches "hp" set entry and vice versa)
+            is_known_pair = any(
+                oui_key in oui_norm and any(mfg in mfg_norm or mfg_norm in mfg for mfg in allowed_mfgs)
+                for oui_key, allowed_mfgs in _KNOWN_OUI_VENDOR_PAIRS.items()
+            )
+            if not is_known_pair and oui_norm not in mfg_norm and mfg_norm not in oui_norm:
                 rl_key = f"oui_mismatch:{device.mac}"
                 if self._rate_limit_ok(rl_key) and not self.is_suppressed(device.mac, device.ip_v4, "oui_mismatch"):
                     id_parts = [device.mac]

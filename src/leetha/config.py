@@ -37,7 +37,10 @@ class LeethaConfig:
 
     # Web UI
     web_host: str = "0.0.0.0"
-    web_port: int = 8080
+    web_port: int = 443
+    web_tls: bool = True
+    web_tls_cert: str = ""
+    web_tls_key: str = ""
 
     # Sync
     sync_interval_days: int = 7
@@ -119,7 +122,8 @@ def set_config(config: LeethaConfig) -> None:
 _SETTINGS_FILE = "settings.json"
 
 _PERSISTABLE_FIELDS = [
-    "web_host", "web_port", "worker_count",
+    "web_host", "web_port", "web_tls", "web_tls_cert", "web_tls_key",
+    "worker_count",
     "db_batch_size", "db_flush_interval", "sync_interval_days",
     "bpf_filter", "probe_enabled", "probe_max_concurrent",
     "probe_cooldown_seconds",

@@ -3,11 +3,11 @@
     "hop_limit": 64,
     "managed": 0,
     "other": 0,
-    "os_family": "Linux",
+    "os_family": "Unix-like",
     "device_type": null,
     "manufacturer": null,
-    "confidence": 0.7,
-    "note": "Linux default RA (hop_limit=64, M=0, O=0)"
+    "confidence": 0.50,
+    "note": "hop_limit=64, M=0, O=0 -- ambiguous: Linux, FreeBSD, EdgeOS all share this signature"
   },
   {
     "hop_limit": 255,
@@ -16,8 +16,8 @@
     "os_family": "Cisco IOS",
     "device_type": "router",
     "manufacturer": "Cisco",
-    "confidence": 0.85,
-    "note": "Cisco IOS default RA (hop_limit=255)"
+    "confidence": 0.70,
+    "note": "hop_limit=255, M=0, O=0 -- ambiguous: Cisco IOS and OpenBSD share this signature"
   },
   {
     "hop_limit": 64,
@@ -48,35 +48,5 @@
     "manufacturer": "Microsoft",
     "confidence": 0.75,
     "note": "Windows Server RRAS (hop_limit=128)"
-  },
-  {
-    "hop_limit": 64,
-    "managed": 0,
-    "other": 0,
-    "os_family": "FreeBSD",
-    "device_type": null,
-    "manufacturer": null,
-    "confidence": 0.65,
-    "note": "FreeBSD default RA"
-  },
-  {
-    "hop_limit": 255,
-    "managed": 0,
-    "other": 0,
-    "os_family": "OpenBSD",
-    "device_type": null,
-    "manufacturer": null,
-    "confidence": 0.7,
-    "note": "OpenBSD RA (hop_limit=255, M=0, O=0)"
-  },
-  {
-    "hop_limit": 64,
-    "managed": 0,
-    "other": 0,
-    "os_family": "EdgeOS",
-    "device_type": "router",
-    "manufacturer": "Ubiquiti",
-    "confidence": 0.6,
-    "note": "Ubiquiti EdgeRouter (based on Vyatta/Linux)"
   }
 ]

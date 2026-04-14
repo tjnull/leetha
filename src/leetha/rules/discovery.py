@@ -1,6 +1,6 @@
 """Discovery-related finding rules."""
 from __future__ import annotations
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from leetha.rules.registry import register_rule
 from leetha.rules.base import FindingRule as RuleBase
 from leetha.store.models import Host, Finding, FindingRule, AlertSeverity
@@ -40,11 +40,11 @@ class LowCertaintyRule(RuleBase):
     severity = "low"
 
     async def evaluate(self, host: Host, verdict: Verdict, store) -> Finding | None:
-        if verdict.certainty < 50 and host.disposition == "known":
+        if verdict.certainty < 50 and host.disposition in ("known", "new"):
             hw_addr = host.hw_addr
             # In-memory cooldown: don't fire more than once per hour
             last = _LOW_CERT_LAST_FIRED.get(hw_addr)
-            if last and (datetime.now() - last) < _LOW_CERT_COOLDOWN:
+            if last and (datetime.now(timezone.utc) - last) < _LOW_CERT_COOLDOWN:
                 return None
             # DB dedup: skip if an unresolved finding already exists
             cursor = await store.connection.execute(
@@ -53,7 +53,7 @@ class LowCertaintyRule(RuleBase):
             )
             if (await cursor.fetchone())[0] > 0:
                 return None
-            _LOW_CERT_LAST_FIRED[hw_addr] = datetime.now()
+            _LOW_CERT_LAST_FIRED[hw_addr] = datetime.now(timezone.utc)
             return Finding(
                 hw_addr=hw_addr,
                 rule=FindingRule.LOW_CERTAINTY,

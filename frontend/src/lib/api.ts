@@ -787,6 +787,9 @@ export async function removeExclusion(type: string, value: string) {
 export interface LeethaSettings {
   web_host: string;
   web_port: number;
+  web_tls: boolean;
+  web_tls_cert: string;
+  web_tls_key: string;
   sync_interval: number;
   worker_count: number;
   db_batch_size: number;
@@ -842,6 +845,17 @@ export async function exportSettings() {
 
 export async function importSettings(data: Record<string, unknown>): Promise<LeethaSettings> {
   return apiFetch("/api/settings/import", { method: "POST", body: JSON.stringify(data) });
+}
+
+export interface BrowseResult {
+  current: string;
+  parent: string | null;
+  entries: { name: string; path: string; is_dir: boolean; size: number | null }[];
+}
+
+export async function browseFilesystem(path?: string): Promise<BrowseResult> {
+  const params = path ? `?path=${encodeURIComponent(path)}` : "";
+  return apiFetch(`/api/settings/browse${params}`);
 }
 
 export async function fetchDbInfo(): Promise<DbInfo> {

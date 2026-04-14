@@ -4,16 +4,15 @@ from __future__ import annotations
 from leetha.capture.packets import CapturedPacket
 
 
-def _guess_initial_ttl(ttl: int) -> tuple[int, str]:
+def _guess_initial_ttl(ttl: int) -> tuple[int, str | None]:
     """Guess the initial TTL and broad OS hint from observed TTL.
 
-    TTL 64: Linux, iOS, macOS, Android, FreeBSD — reported as "linux"
-    since it's the most common and helps distinguish from Windows.
-    TTL 128: Windows.
-    TTL 255: Network device (Cisco, etc.).
+    TTL 1-64: Too ambiguous (Linux, iOS, macOS, Android, FreeBSD all use 64).
+    TTL 65-128: Windows.
+    TTL 129-255: Network device (Cisco, etc.).
     """
     if ttl <= 64:
-        return 64, "linux"
+        return 64, None
     if ttl <= 128:
         return 128, "windows"
     return 255, "network_device"

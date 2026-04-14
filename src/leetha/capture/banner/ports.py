@@ -12,9 +12,9 @@ _SERVICE_PORTS: dict[str, list[int]] = {
     "SSH": [22],
     "FTP": [21],
     "Telnet": [23],
-    "SMTP": [25, 465, 587],
-    "POP3": [110, 995],
-    "IMAP": [143, 993],
+    "SMTP": [25, 587],
+    "POP3": [110],
+    "IMAP": [143],
     "VNC": [5900, 5901, 5902, 5903],
     "IRC": [6667, 6697],
     # Databases

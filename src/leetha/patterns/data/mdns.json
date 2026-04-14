@@ -192,12 +192,6 @@
       "platform": null,
       "certainty": 80
     },
-    "_afpovertcp._tcp.": {
-      "category": "workstation",
-      "vendor": "Apple",
-      "platform": "macOS",
-      "certainty": 85
-    },
     "_ftp._tcp": {
       "category": "server",
       "vendor": null,
@@ -336,12 +330,6 @@
       "platform": "ESPHome",
       "certainty": 85
     },
-    "_tasmota._tcp": {
-      "category": "iot",
-      "vendor": null,
-      "platform": "Tasmota",
-      "certainty": 85
-    },
     "_postgresql._tcp": {
       "category": "server",
       "vendor": null,
@@ -468,12 +456,6 @@
       "platform": "Windows",
       "certainty": 70
     },
-    "_hubitat._tcp": {
-      "category": "smart_home",
-      "vendor": "Hubitat",
-      "platform": null,
-      "certainty": 90
-    },
     "_openhab._tcp": {
       "category": "smart_home",
       "vendor": "openHAB",
@@ -491,12 +473,6 @@
       "vendor": "Lutron",
       "platform": null,
       "certainty": 90
-    },
-    "_meross._tcp": {
-      "category": "smart_home",
-      "vendor": "Meross",
-      "platform": null,
-      "certainty": 85
     },
     "_steam-casts._tcp": {
       "category": "game_console",
@@ -732,12 +708,6 @@
       "platform": "AdGuard Home",
       "certainty": 85
     },
-    "_proxmox._tcp": {
-      "category": "hypervisor",
-      "vendor": "Proxmox",
-      "platform": "PVE",
-      "certainty": 90
-    },
     "_unraid._tcp": {
       "category": "nas",
       "vendor": "Lime Technology",
@@ -783,12 +753,6 @@
       "certainty": 80
     },
 
-    "_nfs._tcp": {
-      "category": "storage_array",
-      "vendor": null,
-      "platform": null,
-      "certainty": 70
-    },
     "_iscsi._tcp": {
       "category": "storage_array",
       "vendor": null,
@@ -1088,7 +1052,7 @@
       "certainty": 90
     },
     {
-      "match": ".*Pixel.*",
+      "match": "\\bPixel\\s?\\d",
       "category": "mobile",
       "vendor": "Google",
       "platform": "Android",
@@ -1158,7 +1122,7 @@
       "certainty": 85
     },
     {
-      "match": ".*Echo.*",
+      "match": "^(Amazon-)?Echo[\\s\\-]",
       "category": "smart_speaker",
       "vendor": "Amazon",
       "platform": null,
@@ -1186,14 +1150,14 @@
       "certainty": 85
     },
     {
-      "match": ".*Alexa.*",
+      "match": "^(Amazon-)?Alexa[\\s\\-]",
       "category": "smart_speaker",
       "vendor": "Amazon",
       "platform": null,
       "certainty": 80
     },
     {
-      "match": ".*Ring.*",
+      "match": "\\bRing[\\s\\-]",
       "category": "camera",
       "vendor": "Amazon",
       "platform": null,

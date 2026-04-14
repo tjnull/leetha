@@ -7,7 +7,7 @@ host's identity, derived by fusing all available evidence.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 @dataclass
@@ -28,7 +28,7 @@ class Evidence:
 
     # Provenance
     raw: dict = field(default_factory=dict)
-    observed_at: datetime = field(default_factory=datetime.now)
+    observed_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -54,7 +54,7 @@ class Verdict:
     hostname: str | None = None
     certainty: int = 0     # 0-100 overall confidence
     evidence_chain: list[Evidence] = field(default_factory=list)
-    computed_at: datetime = field(default_factory=datetime.now)
+    computed_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def to_dict(self) -> dict:
         d = {

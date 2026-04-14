@@ -43,16 +43,20 @@ leetha auth revoke-token <token-id>
 Include the token in the `Authorization` header:
 
 ```bash
-curl -H "Authorization: Bearer ltk_..." http://host:8080/api/devices
+curl -k -H "Authorization: Bearer ltk_..." https://host/api/devices
 ```
 
 ## WebSocket Authentication
 
-WebSocket connections pass the token as a subprotocol:
+WebSocket connections use the `leetha-v1` subprotocol. The auth token is passed as a query parameter or cookie -- the subprotocol name is fixed and no longer echoes the token value:
 
 ```javascript
-new WebSocket("ws://host:8080/ws", ["auth.ltk_..."]);
+new WebSocket("wss://host/ws", ["leetha-v1"]);
 ```
+
+## Cookie Security
+
+When TLS is enabled (the default), the authentication cookie is set with `secure=True`, ensuring it is only transmitted over HTTPS connections.
 
 ## Exempt Paths
 
@@ -60,3 +64,11 @@ These paths do not require authentication:
 - `/login` -- login page
 - `/api/health` -- health check
 - Static assets (`/assets/*`)
+
+The `/metrics` endpoint **requires authentication** (it is not exempt).
+
+## Disabled Endpoints
+
+OpenAPI documentation endpoints are disabled for security hardening:
+- `/api/docs` -- not available
+- `/api/redoc` -- not available

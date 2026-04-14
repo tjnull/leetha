@@ -29,8 +29,7 @@ class TestRuleRegistry:
         assert "low_certainty" in rules
         assert "identity_shift" in rules
         assert "addr_conflict" in rules
-        assert "dhcp_anomaly" in rules
-        assert "stale_source" in rules
+        # dhcp_anomaly and stale_source removed -- always returned None (dead code)
         assert "randomized_addr" in rules
 
     def test_unknown_rule(self):

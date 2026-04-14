@@ -61,7 +61,7 @@ export function useWebSocket(path = "/ws") {
     const token = localStorage.getItem("leetha_token");
     const wsUrl = `${proto}//${location.host}${pathRef.current}`;
     const ws = token
-      ? new WebSocket(wsUrl, [`auth.${token}`])
+      ? new WebSocket(wsUrl, [`auth.${token}`, "leetha-v1"])
       : new WebSocket(wsUrl);
     wsRef.current = ws;
 

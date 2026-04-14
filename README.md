@@ -92,7 +92,7 @@ sudo $(which leetha) -i eth0
 sudo $(which leetha) -i eth0 -i wlan0
 ```
 
-Open `http://localhost:8080` to view discovered devices in real-time.
+Open `https://localhost` to view discovered devices in real-time.
 
 ## Installation
 
@@ -117,8 +117,10 @@ pip install -e .
 ```bash
 # Build locally (includes frontend build)
 docker build -t leetha .
-docker run --net=host --cap-add=NET_RAW leetha --web
+docker run --net=host --cap-add=NET_RAW --cap-add=NET_BIND_SERVICE leetha --web
 ```
+
+The Docker image exposes port 443 (HTTPS) by default and adds `cap_net_bind_service` for binding to privileged ports.
 
 ### Docker Compose
 

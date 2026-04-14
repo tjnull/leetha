@@ -1,6 +1,6 @@
 """MAC randomization detection rules."""
 from __future__ import annotations
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from leetha.rules.registry import register_rule
 from leetha.rules.base import FindingRule as RuleBase
 from leetha.store.models import Host, Finding, FindingRule, AlertSeverity
@@ -72,7 +72,7 @@ class RandomizedAddrCollisionRule(RuleBase):
             "SELECT COUNT(*) FROM findings WHERE hw_addr = ? "
             "AND rule IN ('behavioral_drift', 'randomized_addr') "
             "AND resolved = 0 "
-            "AND message LIKE '%shares hostname%' OR message LIKE '%MAC rotation%'",
+            "AND (message LIKE '%shares hostname%' OR message LIKE '%MAC rotation%')",
             (hw_addr,),
         )
         if (await cursor.fetchone())[0] > 0:
@@ -92,7 +92,7 @@ class RandomizedAddrCollisionRule(RuleBase):
             return None
 
         # Check if any match is still recently active (within 30 minutes)
-        active_threshold = datetime.now() - timedelta(minutes=30)
+        active_threshold = datetime.now(timezone.utc) - timedelta(minutes=30)
         active_matches = []
         stale_matches = []
         for m in matches:
@@ -111,7 +111,7 @@ class RandomizedAddrCollisionRule(RuleBase):
             other_label = f"{other[3]} {other[1]}" if other[3] else other[0]
             return Finding(
                 hw_addr=hw_addr,
-                rule=FindingRule.BEHAVIORAL_DRIFT,
+                rule=FindingRule.ADDR_CONFLICT,
                 severity=AlertSeverity.WARNING,
                 message=(
                     f"Randomized MAC {hw_addr} shares hostname \"{verdict.hostname}\" "

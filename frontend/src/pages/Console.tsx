@@ -72,7 +72,7 @@ function _ensureConsoleWs() {
   const token = localStorage.getItem("leetha_token");
   const wsUrl = `${proto}//${window.location.host}/ws/console`;
   const ws = token
-    ? new WebSocket(wsUrl, [`auth.${token}`])
+    ? new WebSocket(wsUrl, [`auth.${token}`, "leetha-v1"])
     : new WebSocket(wsUrl);
   _consoleWs = ws;
 

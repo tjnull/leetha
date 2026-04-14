@@ -12,6 +12,7 @@ def parse_dns(packet) -> CapturedPacket | None:
     """
     try:
         from scapy.layers.inet import IP, UDP
+        from scapy.layers.inet6 import IPv6
         from scapy.layers.dns import DNS, DNSQR
     except ImportError:
         return None
@@ -29,7 +30,12 @@ def parse_dns(packet) -> CapturedPacket | None:
     # and responses (qr=1) to identify DNS servers/resolvers.
     if dns.qr == 1:
         # DNS response — attribute to the responder (DNS server/resolver)
-        src_ip = packet[IP].src if packet.haslayer(IP) else "0.0.0.0"
+        if packet.haslayer(IP):
+            src_ip = packet[IP].src
+        elif packet.haslayer(IPv6):
+            src_ip = packet[IPv6].src
+        else:
+            src_ip = "0.0.0.0"
         src_mac = packet.src.lower() if hasattr(packet, "src") else ""
         return CapturedPacket(
             protocol="dns_server",
@@ -59,17 +65,29 @@ def parse_dns(packet) -> CapturedPacket | None:
     except (IndexError, AttributeError):
         return None
 
-    src_ip = packet[IP].src if packet.haslayer(IP) else "0.0.0.0"
+    if packet.haslayer(IP):
+        src_ip = packet[IP].src
+    elif packet.haslayer(IPv6):
+        src_ip = packet[IPv6].src
+    else:
+        src_ip = "0.0.0.0"
 
     src_mac = packet.src.lower() if hasattr(packet, "src") and packet.src else ""
     if not src_mac:
         return None
 
+    if packet.haslayer(IP):
+        target_ip = packet[IP].dst
+    elif packet.haslayer(IPv6):
+        target_ip = packet[IPv6].dst
+    else:
+        target_ip = None
+
     return CapturedPacket(
         protocol="dns",
         hw_addr=src_mac,
         ip_addr=src_ip,
-        target_ip=packet[IP].dst if packet.haslayer(IP) else None,
+        target_ip=target_ip,
         fields={
             "query_name": qname.rstrip('.'),
             "query_type": qtype,
@@ -85,21 +103,23 @@ def parse_dns_answer(packet) -> list[CapturedPacket]:
     Returns a list because a single DNS response can contain multiple
     answer records, each revealing a different device.
     """
-    from scapy.all import IP, DNS, DNSRR
+    from scapy.layers.inet import IP
+    from scapy.layers.inet6 import IPv6
+    from scapy.layers.dns import DNS, DNSRR
 
     if DNS not in packet or not packet[DNS].qr:
         return []
-    if IP not in packet:
+    if IP not in packet and IPv6 not in packet:
         return []
 
-    # Re-parse from bytes so scapy computes ancount and builds proper lists
-    try:
-        raw_bytes = bytes(packet)
-        from scapy.all import Ether
-        packet = Ether(raw_bytes)
-        dns = packet[DNS]
-    except Exception:
-        dns = packet[DNS]
+    dns = packet[DNS]
+
+    if IP in packet:
+        src_ip = packet[IP].src
+        dst_ip = packet[IP].dst
+    else:
+        src_ip = packet[IPv6].src
+        dst_ip = packet[IPv6].dst
 
     src_mac = packet.src if hasattr(packet, "src") else ""
     results = []
@@ -132,7 +152,7 @@ def parse_dns_answer(packet) -> list[CapturedPacket]:
                 results.append(CapturedPacket(
                     protocol="dns_answer",
                     hw_addr=src_mac,
-                    ip_addr=packet[IP].src,
+                    ip_addr=src_ip,
                     target_ip=rdata,
                     fields=fields,
                 ))
@@ -141,8 +161,8 @@ def parse_dns_answer(packet) -> list[CapturedPacket]:
                 results.append(CapturedPacket(
                     protocol="dns_answer",
                     hw_addr=src_mac,
-                    ip_addr=packet[IP].src,
-                    target_ip=packet[IP].dst,
+                    ip_addr=src_ip,
+                    target_ip=dst_ip,
                     fields=fields,
                 ))
         except Exception:

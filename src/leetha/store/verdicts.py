@@ -1,14 +1,16 @@
 """Verdict repository -- computed host assessments."""
 from __future__ import annotations
 
+import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from leetha.evidence.models import Evidence, Verdict
 
 
 class VerdictRepository:
-    def __init__(self, conn):
+    def __init__(self, conn, write_lock=None):
         self._conn = conn
+        self._mu = write_lock or asyncio.Lock()
 
     async def create_tables(self):
         await self._conn.execute("""
@@ -28,27 +30,28 @@ class VerdictRepository:
         await self._conn.commit()
 
     async def upsert(self, verdict: Verdict) -> None:
-        chain_json = json.dumps([e.to_dict() for e in verdict.evidence_chain])
-        await self._conn.execute("""
-            INSERT INTO verdicts (hw_addr, category, vendor, platform,
-                                  platform_version, model, hostname,
-                                  certainty, evidence_chain, computed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(hw_addr) DO UPDATE SET
-                category = excluded.category,
-                vendor = excluded.vendor,
-                platform = excluded.platform,
-                platform_version = excluded.platform_version,
-                model = excluded.model,
-                hostname = COALESCE(excluded.hostname, verdicts.hostname),
-                certainty = excluded.certainty,
-                evidence_chain = excluded.evidence_chain,
-                computed_at = excluded.computed_at
-        """, (verdict.hw_addr, verdict.category, verdict.vendor,
-              verdict.platform, verdict.platform_version, verdict.model,
-              verdict.hostname, verdict.certainty, chain_json,
-              verdict.computed_at.isoformat()))
-        await self._conn.commit()
+        async with self._mu:
+            chain_json = json.dumps([e.to_dict() for e in verdict.evidence_chain])
+            await self._conn.execute("""
+                INSERT INTO verdicts (hw_addr, category, vendor, platform,
+                                      platform_version, model, hostname,
+                                      certainty, evidence_chain, computed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(hw_addr) DO UPDATE SET
+                    category = excluded.category,
+                    vendor = excluded.vendor,
+                    platform = excluded.platform,
+                    platform_version = excluded.platform_version,
+                    model = excluded.model,
+                    hostname = COALESCE(excluded.hostname, verdicts.hostname),
+                    certainty = excluded.certainty,
+                    evidence_chain = excluded.evidence_chain,
+                    computed_at = excluded.computed_at
+            """, (verdict.hw_addr, verdict.category, verdict.vendor,
+                  verdict.platform, verdict.platform_version, verdict.model,
+                  verdict.hostname, verdict.certainty, chain_json,
+                  verdict.computed_at.isoformat()))
+            await self._conn.commit()
 
     async def find_by_addr(self, hw_addr: str) -> Verdict | None:
         cursor = await self._conn.execute(
@@ -218,6 +221,11 @@ class VerdictRepository:
         chain_data = json.loads(row["evidence_chain"]) if row["evidence_chain"] else []
         evidence_chain = []
         for e in chain_data:
+            observed_at_raw = e.get("observed_at")
+            if observed_at_raw:
+                observed_at = datetime.fromisoformat(observed_at_raw)
+            else:
+                observed_at = datetime.now(timezone.utc)
             evidence_chain.append(Evidence(
                 source=e.get("source", ""),
                 method=e.get("method", ""),
@@ -229,6 +237,7 @@ class VerdictRepository:
                 model=e.get("model"),
                 hostname=e.get("hostname"),
                 raw=e.get("raw", {}),
+                observed_at=observed_at,
             ))
         return Verdict(
             hw_addr=row["hw_addr"],

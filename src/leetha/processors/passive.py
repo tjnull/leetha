@@ -22,12 +22,13 @@ class PassiveObserverProcessor(Processor):
             # TTL 64 is shared by Linux, macOS, iOS, Android, FreeBSD —
             # too ambiguous to label as any specific OS.
             os_hint = self._ttl_os_hint(ttl)
-            evidence.append(Evidence(
-                source="ip_observed_ttl", method="heuristic",
-                certainty=0.40 if os_hint else 0.15,
-                platform=os_hint,
-                raw={"ttl": ttl, "os_hint": os_hint},
-            ))
+            if os_hint:
+                evidence.append(Evidence(
+                    source="ip_observed_ttl", method="heuristic",
+                    certainty=0.40,
+                    platform=os_hint,
+                    raw={"ttl": ttl, "os_hint": os_hint},
+                ))
 
         if port is not None:
             service_hint = self._port_service_hint(port)
@@ -56,8 +57,10 @@ class PassiveObserverProcessor(Processor):
     def _port_service_hint(port: int) -> str | None:
         """Map well-known ports to service hints."""
         common = {
-            22: "ssh", 23: "telnet", 25: "smtp", 53: "dns",
-            80: "http", 443: "https", 445: "smb", 3389: "rdp",
-            5060: "sip", 8080: "http-proxy", 8443: "https-alt",
+            21: "ftp", 22: "ssh", 23: "telnet", 25: "smtp", 53: "dns",
+            80: "http", 110: "pop3", 143: "imap", 443: "https", 445: "smb",
+            993: "imaps", 995: "pop3s", 1433: "mssql", 3306: "mysql",
+            3389: "rdp", 5060: "sip", 5432: "postgresql", 6379: "redis",
+            8080: "http-proxy", 8443: "https-alt", 8883: "mqtt-tls",
         }
         return common.get(port)

@@ -5,8 +5,15 @@ Extracts device type, manufacturer, model, and firmware from XML payloads.
 """
 from __future__ import annotations
 
-import xml.etree.ElementTree as ET
 from leetha.capture.packets import CapturedPacket
+
+try:
+    from defusedxml.ElementTree import fromstring as _xml_fromstring
+except ImportError:
+    from xml.etree.ElementTree import fromstring as _xml_fromstring
+import xml.etree.ElementTree as ET
+
+MAX_WSD_PAYLOAD = 65536
 
 # WSD type URIs mapped to normalized device types
 _TYPE_MAP = {
@@ -117,8 +124,11 @@ def parse_ws_discovery(packet) -> CapturedPacket | None:
     if not payload or not payload.strip().startswith("<"):
         return None
 
+    if len(payload) > MAX_WSD_PAYLOAD:
+        return None
+
     try:
-        root = ET.fromstring(payload)
+        root = _xml_fromstring(payload)
     except ET.ParseError:
         return None
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import datetime
+import os
 from pathlib import Path
 from cryptography import x509
 from cryptography.x509.oid import NameOID
@@ -27,6 +28,7 @@ def _write_key(key: ec.EllipticCurvePrivateKey, path: Path) -> None:
             serialization.NoEncryption(),
         )
     )
+    os.chmod(str(path), 0o600)
 
 
 def _write_cert(cert: x509.Certificate, path: Path) -> None:
@@ -156,6 +158,64 @@ def ensure_server_cert(ca_dir: Path) -> tuple[Path, Path]:
     now = datetime.datetime.now(datetime.timezone.utc)
 
     # Include all local IPs in SAN so sensors can connect to any address
+    san_entries: list[x509.GeneralName] = [
+        x509.DNSName("localhost"),
+        x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
+    ]
+    try:
+        import psutil
+        for addrs in psutil.net_if_addrs().values():
+            for addr in addrs:
+                if addr.family.name == "AF_INET" and addr.address != "127.0.0.1":
+                    san_entries.append(
+                        x509.IPAddress(ipaddress.IPv4Address(addr.address))
+                    )
+    except Exception:
+        pass
+
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(ca_cert.subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now)
+        .not_valid_after(now + datetime.timedelta(days=3650))
+        .add_extension(
+            x509.ExtendedKeyUsage([x509.oid.ExtendedKeyUsageOID.SERVER_AUTH]),
+            critical=False,
+        )
+        .add_extension(
+            x509.SubjectAlternativeName(san_entries),
+            critical=False,
+        )
+        .sign(ca_key, hashes.SHA256())
+    )
+    _write_key(key, key_path)
+    _write_cert(cert, cert_path)
+    return cert_path, key_path
+
+
+def ensure_web_cert(ca_dir: Path) -> tuple[Path, Path]:
+    """Return (cert_path, key_path) for the web UI's TLS cert.
+
+    Generates a new one signed by the CA if it doesn't exist yet.
+    Auto-initializes the CA if needed.
+    """
+    cert_path = ca_dir / "web.crt"
+    key_path = ca_dir / "web.key"
+    if cert_path.exists() and key_path.exists():
+        return cert_path, key_path
+
+    # Auto-initialize CA if not present
+    if not (ca_dir / "ca.crt").exists():
+        init_ca(ca_dir)
+
+    ca_cert, ca_key = load_ca(ca_dir)
+    key = _generate_key()
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "leetha-web")])
+    now = datetime.datetime.now(datetime.timezone.utc)
+
     san_entries: list[x509.GeneralName] = [
         x509.DNSName("localhost"),
         x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),

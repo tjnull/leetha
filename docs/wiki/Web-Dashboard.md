@@ -3,7 +3,7 @@
 Leetha ships a React single-page application (built with shadcn/ui and Tailwind CSS) that provides real-time visibility into discovered devices, security findings, and system configuration. The frontend is pre-compiled -- no Node.js installation is necessary.
 
 ```bash
-leetha start web                        # listen on 0.0.0.0:8080
+leetha start web                        # listen on 0.0.0.0:443
 leetha start web --port 9090            # alternative port
 leetha start web --host 127.0.0.1       # restrict to loopback
 ```
@@ -67,6 +67,7 @@ Adapters are grouped into cards by type (physical, tap, tun). Each card displays
 Tabbed configuration panel:
 
 - **General**: Dashboard host/port, worker count, database batch options
+- **TLS/HTTPS**: TLS certificate and private key selection with a file browser (restricted to `~/`, `/etc/leetha`, `/var/lib/leetha`). Private keys are written with `0o600` permissions.
 - **Capture**: Adapter defaults, BPF filter customization, probe parameters
 - **Sync**: Auto-sync cadence, source toggles, cache path
 - **Advanced**: Debug logging, Store maintenance, configuration import/export
@@ -171,7 +172,7 @@ API endpoints that accept MAC addresses (e.g. `/api/devices/{mac}`, `/api/trust`
 
 ## WebSocket Stream
 
-Connect to `ws://<host>:<port>/ws` to receive push events:
+Connect to `wss://<host>:<port>/ws` using the `leetha-v1` subprotocol to receive push events:
 
 | Event | Payload Summary |
 |-------|-----------------|
@@ -182,3 +183,15 @@ Connect to `ws://<host>:<port>/ws` to receive push events:
 | `capture_status` | Adapter name and new state (started / stopped) |
 
 The React frontend subscribes automatically and applies incremental DOM updates -- no polling required.
+
+---
+
+## Security Hardening
+
+- **TLS enabled by default** -- the dashboard serves over HTTPS. Use `--no-tls` to disable TLS if needed for development.
+- **CORS** -- restricted to localhost origins only.
+- **OpenAPI docs disabled** -- `/api/docs` and `/api/redoc` are not available.
+- **`/metrics` requires auth** -- the metrics endpoint is not exempt from authentication.
+- **SQL query endpoint** -- uses read-only mode to prevent data modification.
+- **PCAP upload** -- filenames are sanitized to prevent path traversal.
+- **Filesystem browsing** -- the TLS cert/key file browser is restricted to `~/`, `/etc/leetha`, and `/var/lib/leetha`.

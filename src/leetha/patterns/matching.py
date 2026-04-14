@@ -1142,17 +1142,19 @@ def match_dhcpv6_oro(oro: str) -> Optional[Dict]:
     if not oro:
         return None
 
-    # ORO patterns are defined inline (same as legacy Python) because
-    # the JSON dhcpv6.json has "oro": [] (empty).
-    ORO_PATTERNS = {
-        "23,24,39,56": ("workstation", "Windows", "Microsoft", 85),
-        "23,24,31,39,56": ("server", "Windows Server", "Microsoft", 85),
-        "23,24,39": ("workstation", "macOS", "Apple", 85),
-        "23,24": ("workstation", "Linux", None, 70),
-        "17,23,24": ("router", "IOS", "Cisco", 80),
-        "17,23,24,56": ("router", "JunOS", "Juniper", 80),
-        "23,24,56": ("firewall", "FortiOS", "Fortinet", 75),
-    }
+    data = load("dhcpv6")
+    oro_data = data.get("oro", {})
+
+    # Build ORO_PATTERNS from JSON data (dict keyed by sorted option string)
+    ORO_PATTERNS: dict = {}
+    if isinstance(oro_data, dict):
+        for key, entry in oro_data.items():
+            ORO_PATTERNS[key] = (
+                entry.get("device_type"),
+                entry.get("os_family"),
+                entry.get("manufacturer"),
+                entry.get("confidence", 50),
+            )
 
     try:
         opts = [int(o.strip()) for o in oro.split(",") if o.strip()]

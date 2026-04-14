@@ -21,10 +21,21 @@ class FingerprintEngine:
 
     def __init__(self) -> None:
         self.lookup = FingerprintLookup()
+        self._oui_seen: set[str] = set()
 
     def reload(self):
         """Reload all fingerprint lookup data after sync."""
         self.lookup.reload()
+
+    def _lookup_oui_once(self, mac: str) -> list[FingerprintMatch]:
+        """Return OUI matches for *mac*, but only the first time per MAC."""
+        if mac in self._oui_seen:
+            return []
+        self._oui_seen.add(mac)
+        # Cap the set size to prevent unbounded memory growth
+        if len(self._oui_seen) > 50000:
+            self._oui_seen.clear()
+        return self.lookup.lookup_mac(mac)
 
     def process_tcp_syn(
         self,
@@ -39,7 +50,7 @@ class FingerprintEngine:
         matches: list[FingerprintMatch] = []
 
         # OUI lookup from MAC
-        matches.extend(self.lookup.lookup_mac(src_mac))
+        matches.extend(self._lookup_oui_once(src_mac))
 
         # Build p0f-style TCP signature and look it up
         sig = self._build_tcp_signature(ttl, window_size, mss, tcp_options)
@@ -74,13 +85,13 @@ class FingerprintEngine:
         matches: list[FingerprintMatch] = []
 
         # OUI lookup — try layer-2 MAC first
-        oui_matches = self.lookup.lookup_mac(client_mac)
+        oui_matches = self._lookup_oui_once(client_mac)
         matches.extend(oui_matches)
 
         # If layer-2 MAC is randomized but Option 61 has a real MAC, use it
         if not oui_matches and client_id and is_randomized_mac(client_mac):
             if not is_randomized_mac(client_id) and client_id != client_mac:
-                opt61_matches = self.lookup.lookup_mac(client_id)
+                opt61_matches = self._lookup_oui_once(client_id)
                 for m in opt61_matches:
                     m.raw_data["via_option61"] = True
                     m.raw_data["option61_mac"] = client_id
@@ -110,7 +121,7 @@ class FingerprintEngine:
         matches: list[FingerprintMatch] = []
 
         # OUI lookup
-        matches.extend(self.lookup.lookup_mac(client_mac))
+        matches.extend(self._lookup_oui_once(client_mac))
 
         # DHCPv6 lookup (returns list of parallel evidence)
         dhcpv6_matches = self.lookup.lookup_dhcpv6(
@@ -132,7 +143,7 @@ class FingerprintEngine:
         matches: list[FingerprintMatch] = []
 
         # OUI lookup
-        matches.extend(self.lookup.lookup_mac(src_mac))
+        matches.extend(self._lookup_oui_once(src_mac))
 
         # mDNS service lookup (now returns a list and uses TXT record data)
         mdns_matches = self.lookup.lookup_mdns(service_type, name, packet_data)
@@ -148,7 +159,7 @@ class FingerprintEngine:
         st: str | None = None,
     ) -> list[FingerprintMatch]:
         matches: list[FingerprintMatch] = []
-        matches.extend(self.lookup.lookup_mac(src_mac))
+        matches.extend(self._lookup_oui_once(src_mac))
         ssdp_match = self.lookup.lookup_ssdp(server=server, st=st)
         if ssdp_match:
             matches.append(ssdp_match)
@@ -170,9 +181,25 @@ class FingerprintEngine:
             elif "scanner" in st_lower:
                 upnp_type = "scanner"
             elif "samsung" in st_lower:
-                upnp_type = "smart_tv"
+                # Samsung ST alone doesn't imply smart_tv -- could be phone, tablet, etc.
+                matches.append(FingerprintMatch(
+                    source="ssdp_upnp",
+                    match_type="pattern",
+                    confidence=0.55,
+                    manufacturer="Samsung",
+                    raw_data={"st": st},
+                ))
+                upnp_type = None  # already emitted
             elif "dial" in st_lower:
-                upnp_type = "smart_tv"  # DIAL is used by smart TVs
+                # DIAL is used by Chromecasts, Fire TVs, game consoles -- not just smart TVs
+                matches.append(FingerprintMatch(
+                    source="ssdp_upnp",
+                    match_type="pattern",
+                    confidence=0.50,
+                    device_type="media_device",
+                    raw_data={"st": st},
+                ))
+                upnp_type = None  # already emitted
 
             if upnp_type:
                 matches.append(FingerprintMatch(
@@ -187,7 +214,7 @@ class FingerprintEngine:
 
     def process_netbios(self, src_mac: str, src_ip: str, query_name: str, query_type: str = "llmnr", netbios_suffix: int | None = None) -> list[FingerprintMatch]:
         matches: list[FingerprintMatch] = []
-        matches.extend(self.lookup.lookup_mac(src_mac))
+        matches.extend(self._lookup_oui_once(src_mac))
         nb_match = self.lookup.lookup_netbios(query_name=query_name, query_type=query_type, netbios_suffix=netbios_suffix)
         if nb_match:
             matches.append(nb_match)
@@ -204,7 +231,7 @@ class FingerprintEngine:
         """Process TLS Client Hello fingerprints."""
         matches: list[FingerprintMatch] = []
 
-        matches.extend(self.lookup.lookup_mac(src_mac))
+        matches.extend(self._lookup_oui_once(src_mac))
 
         ja3_match = self.lookup.lookup_ja3(ja3_hash)
         if ja3_match:
@@ -225,17 +252,21 @@ class FingerprintEngine:
             sni_lower = sni.lower()
             sni_vendor = None
             sni_platform = None
-            if any(d in sni_lower for d in ("apple.com", "icloud.com", "mzstatic.com")):
+
+            def _sni_matches_domain(sni_host: str, domain: str) -> bool:
+                return sni_host == domain or sni_host.endswith("." + domain)
+
+            if any(_sni_matches_domain(sni_lower, d) for d in ("apple.com", "icloud.com", "mzstatic.com")):
                 sni_vendor, sni_platform = "Apple", "iOS/macOS"
-            elif any(d in sni_lower for d in ("google.com", "googleapis.com", "gstatic.com", "android.com")):
+            elif any(_sni_matches_domain(sni_lower, d) for d in ("google.com", "googleapis.com", "gstatic.com", "android.com")):
                 sni_vendor = "Google"
-            elif any(d in sni_lower for d in ("microsoft.com", "windows.com", "msftconnecttest.com", "live.com", "office.com")):
+            elif any(_sni_matches_domain(sni_lower, d) for d in ("microsoft.com", "windows.com", "msftconnecttest.com", "live.com", "office.com")):
                 sni_vendor, sni_platform = "Microsoft", "Windows"
-            elif any(d in sni_lower for d in ("samsung.com", "samsungcloud.com")):
+            elif any(_sni_matches_domain(sni_lower, d) for d in ("samsung.com", "samsungcloud.com")):
                 sni_vendor = "Samsung"
-            elif any(d in sni_lower for d in ("amazon.com", "amazonaws.com", "alexa.amazon.com")):
+            elif any(_sni_matches_domain(sni_lower, d) for d in ("amazon.com", "amazonaws.com", "alexa.amazon.com")):
                 sni_vendor = "Amazon"
-            elif "roku.com" in sni_lower:
+            elif _sni_matches_domain(sni_lower, "roku.com"):
                 sni_vendor, sni_platform = "Roku", "RokuOS"
 
             if sni_vendor:
@@ -257,7 +288,7 @@ class FingerprintEngine:
     ) -> list[FingerprintMatch]:
         """Process ARP packet. Returns OUI match only."""
         matches: list[FingerprintMatch] = []
-        matches.extend(self.lookup.lookup_mac(src_mac))
+        matches.extend(self._lookup_oui_once(src_mac))
         return matches
 
     def process_dns(
@@ -272,7 +303,7 @@ class FingerprintEngine:
         matches = []
 
         # OUI lookup
-        matches.extend(self.lookup.lookup_mac(src_mac))
+        matches.extend(self._lookup_oui_once(src_mac))
 
         # DNS domain pattern
         dns_match = self.lookup.lookup_dns(query_name, query_type)
@@ -296,7 +327,7 @@ class FingerprintEngine:
         matches = []
 
         # OUI lookup
-        matches.extend(self.lookup.lookup_mac(src_mac))
+        matches.extend(self._lookup_oui_once(src_mac))
 
         # ICMPv6 RA fingerprint
         if icmpv6_type == "router_advertisement" and hop_limit is not None:
@@ -313,7 +344,7 @@ class FingerprintEngine:
     ) -> list[FingerprintMatch]:
         """Process an ip_observed event. Returns OUI + TTL heuristic matches."""
         matches = []
-        matches.extend(self.lookup.lookup_mac(src_mac))
+        matches.extend(self._lookup_oui_once(src_mac))
         ttl_match = self.lookup.lookup_ttl(ttl)
         if ttl_match:
             matches.append(ttl_match)
@@ -336,7 +367,7 @@ class FingerprintEngine:
     ) -> list[FingerprintMatch]:
         """Process an http_useragent event. Returns OUI + UA + host matches."""
         matches = []
-        matches.extend(self.lookup.lookup_mac(src_mac))
+        matches.extend(self._lookup_oui_once(src_mac))
         ua_match = self.lookup.lookup_useragent(user_agent)
         if ua_match:
             matches.append(ua_match)
@@ -395,22 +426,40 @@ class FingerprintEngine:
             manufacturer = "MikroTik"
             os_family = "RouterOS"
 
-        match = FingerprintMatch(
-            source="lldp",
-            match_type="exact",
-            confidence=0.90,
-            device_type=device_type,
-            manufacturer=manufacturer,
-            os_family=os_family,
-            model=system_name or None,
-            raw_data={
-                "system_name": system_name,
-                "system_description": system_description,
-                "capabilities": capabilities,
-                "management_ip": management_ip,
-            },
-        )
-        matches.append(match)
+        # Only emit a high-confidence match if we extracted useful identity info
+        has_identity = any(v is not None for v in (device_type, manufacturer, os_family))
+        if has_identity:
+            match = FingerprintMatch(
+                source="lldp",
+                match_type="exact",
+                confidence=0.90,
+                device_type=device_type,
+                manufacturer=manufacturer,
+                os_family=os_family,
+                model=system_name or None,
+                raw_data={
+                    "system_name": system_name,
+                    "system_description": system_description,
+                    "capabilities": capabilities,
+                    "management_ip": management_ip,
+                },
+            )
+            matches.append(match)
+        elif system_name or system_description:
+            # We have some raw data but couldn't parse identity -- low confidence
+            match = FingerprintMatch(
+                source="lldp",
+                match_type="heuristic",
+                confidence=0.10,
+                model=system_name or None,
+                raw_data={
+                    "system_name": system_name,
+                    "system_description": system_description,
+                    "capabilities": capabilities,
+                    "management_ip": management_ip,
+                },
+            )
+            matches.append(match)
         return matches
 
     def process_cdp(self, src_mac: str, device_id: str = "",
@@ -496,7 +545,7 @@ class FingerprintEngine:
         elif bridge_priority < 32768:
             confidence = 0.50
         else:
-            confidence = 0.40
+            confidence = 0.15
 
         if is_root:
             confidence = min(confidence + 0.10, 0.70)
@@ -586,7 +635,7 @@ class FingerprintEngine:
     ) -> list[FingerprintMatch]:
         """Process WS-Discovery announcement."""
         matches: list[FingerprintMatch] = []
-        matches.extend(self.lookup.lookup_mac(src_mac))
+        matches.extend(self._lookup_oui_once(src_mac))
         if manufacturer or model:
             device_type = device_types[0] if device_types else None
             matches.append(FingerprintMatch(
@@ -612,7 +661,7 @@ class FingerprintEngine:
     ) -> list[FingerprintMatch]:
         """Process NTP packet."""
         matches: list[FingerprintMatch] = []
-        matches.extend(self.lookup.lookup_mac(src_mac))
+        matches.extend(self._lookup_oui_once(src_mac))
         if mode in ("server", "broadcast"):
             matches.append(FingerprintMatch(
                 source="ntp",
@@ -629,7 +678,7 @@ class FingerprintEngine:
     ) -> list[FingerprintMatch]:
         """Process a passively captured service banner."""
         matches: list[FingerprintMatch] = []
-        matches.extend(self.lookup.lookup_mac(src_mac))
+        matches.extend(self._lookup_oui_once(src_mac))
 
         device_type = None
         if service in ("ipp", "jetdirect", "lpd"):
@@ -655,7 +704,7 @@ class FingerprintEngine:
                 source="passive_banner",
                 match_type="pattern",
                 confidence=0.85,
-                manufacturer=software,
+                manufacturer=None,
                 device_type=device_type,
                 os_family=os_family,
                 os_version=version,
@@ -671,7 +720,7 @@ class FingerprintEngine:
     ) -> list[FingerprintMatch]:
         """Process an IoT/SCADA protocol packet (Modbus, BACnet, CoAP, MQTT, EtherNet/IP)."""
         matches: list[FingerprintMatch] = []
-        matches.extend(self.lookup.lookup_mac(src_mac))
+        matches.extend(self._lookup_oui_once(src_mac))
 
         device_type_map = {
             "modbus": "ics_device",

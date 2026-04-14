@@ -93,7 +93,7 @@ Leetha provides three primary entry points. Pick whichever fits your workflow.
 leetha start web
 ```
 
-Navigates to `http://localhost:8080` -- a React single-page application with live device discovery, alert management, attack surface analysis, and database sync controls.
+Navigates to `https://localhost` -- a React single-page application with live device discovery, alert management, attack surface analysis, and database sync controls.
 
 See [Web Dashboard](Web-Dashboard.md) for a full tour.
 
@@ -200,7 +200,8 @@ Leetha uses two filesystem locations:
 | Setting | Default | Purpose |
 |---------|---------|---------|
 | `web_host` | `0.0.0.0` | Bind address for the React dashboard |
-| `web_port` | `8080` | Port for the dashboard |
+| `web_port` | `443` | Port for the dashboard |
+| `web_tls` | `true` | Enable TLS (HTTPS). Use `--no-tls` to disable |
 | `worker_count` | `4` | Parallel packet processing workers |
 | `db_batch_size` | `50` | Rows buffered before flushing to Store |
 | `db_flush_interval` | `0.1` | Flush cadence in seconds |

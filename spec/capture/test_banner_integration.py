@@ -61,4 +61,4 @@ class TestBannerPipelineIntegration:
         assert len(result) >= 1
         assert isinstance(result[0], Evidence)
         assert result[0].source == "passive_banner"
-        assert result[0].certainty == 0.85
+        assert result[0].certainty == 0.30  # SSH certainty lowered

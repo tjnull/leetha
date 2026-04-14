@@ -11,13 +11,23 @@ Alert types:
 
 from __future__ import annotations
 
+import time
+
 from leetha.store.database import Database
 from leetha.store.models import Alert, AlertType, AlertSeverity, Device
+
+_OS_CHANGE_COOLDOWN = 300  # 5 minutes
+_INFRA_DEVICE_TYPES = frozenset({
+    "router", "switch", "gateway", "access_point", "firewall",
+    "load_balancer", "Router", "UniFi Switch", "UniFi AP",
+    "mesh_router", "network_device", "wireless_bridge", "cable_modem",
+})
 
 
 class AlertEngine:
     def __init__(self, db: Database) -> None:
         self.db = db
+        self._os_change_last_fired: dict[str, float] = {}
 
     @staticmethod
     def _device_summary(device: Device) -> str:
@@ -36,6 +46,13 @@ class AlertEngine:
 
     async def evaluate(self, device: Device) -> list[Alert]:
         """Evaluate a device against alert rules. Returns new alerts."""
+        # Check which alert types are now handled by FindingRule system
+        # to avoid duplicate detections.
+        from leetha.rules.registry import get_rule
+        _rules_handle_new_device = get_rule("new_host") is not None
+        _rules_handle_os_change = get_rule("identity_shift") is not None
+        _rules_handle_low_confidence = get_rule("low_certainty") is not None
+
         alerts: list[Alert] = []
         existing = await self.db.get_device(device.mac)
         summary = self._device_summary(device)
@@ -46,7 +63,10 @@ class AlertEngine:
             return alerts
 
         # Rule 1: New device (never seen before)
-        if existing is None:
+        # Skip if FindingRule system handles new host detection
+        if _rules_handle_new_device:
+            pass
+        elif existing is None:
             alerts.append(Alert(
                 device_mac=device.mac,
                 alert_type=AlertType.NEW_DEVICE,
@@ -55,24 +75,47 @@ class AlertEngine:
             ))
 
         # Rule 2: OS change on known device
-        if existing and existing.alert_status == "known":
+        # Skip if FindingRule system handles identity shift detection
+        if _rules_handle_os_change:
+            pass
+        elif existing and existing.alert_status == "known":
             if (
                 existing.os_family
                 and device.os_family
                 and existing.os_family != device.os_family
             ):
-                alerts.append(Alert(
-                    device_mac=device.mac,
-                    alert_type=AlertType.OS_CHANGE,
-                    severity=AlertSeverity.WARNING,
-                    message=(
-                        f"OS changed on {summary}: "
-                        f"{existing.os_family} -> {device.os_family}"
-                    ),
-                ))
+                # Skip low-confidence detections
+                if device.confidence is not None and device.confidence < 50:
+                    pass
+                # Skip infrastructure devices (routers, switches, APs)
+                elif device.device_type and device.device_type in _INFRA_DEVICE_TYPES:
+                    pass
+                else:
+                    # Per-MAC cooldown (5 minutes)
+                    now = time.monotonic()
+                    # Prune stale cooldown entries to prevent unbounded growth
+                    if len(self._os_change_last_fired) > 10000:
+                        stale = [k for k, v in self._os_change_last_fired.items() if now - v > 600]
+                        for k in stale:
+                            del self._os_change_last_fired[k]
+                    last = self._os_change_last_fired.get(device.mac, 0)
+                    if now - last >= _OS_CHANGE_COOLDOWN:
+                        self._os_change_last_fired[device.mac] = now
+                        alerts.append(Alert(
+                            device_mac=device.mac,
+                            alert_type=AlertType.OS_CHANGE,
+                            severity=AlertSeverity.WARNING,
+                            message=(
+                                f"OS changed on {summary}: "
+                                f"{existing.os_family} -> {device.os_family}"
+                            ),
+                        ))
 
         # Rule 3: Low confidence (unclassified)
-        if (
+        # Skip if FindingRule system handles low certainty detection
+        if _rules_handle_low_confidence:
+            pass
+        elif (
             device.confidence is not None
             and device.confidence < 50
             and device.alert_status == "known"
@@ -144,13 +187,14 @@ class AlertEngine:
         hasn't been seen for longer than `offline_minutes`. Gateways get CRITICAL
         severity; other infrastructure gets WARNING.
         """
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
         from leetha.topology import _normalize_device_type, _INFRA_TYPES
 
         alerts: list[Alert] = []
-        threshold = datetime.now() - timedelta(minutes=offline_minutes)
+        threshold = datetime.now(timezone.utc) - timedelta(minutes=offline_minutes)
 
         all_devices = await self.db.list_devices()
+        existing_alerts = await self.db.list_alerts(acknowledged=False)
         for device in all_devices:
             if not device.device_type:
                 continue
@@ -175,7 +219,6 @@ class AlertEngine:
 
             # Rate-limit: don't re-alert if we already have an active infra_offline
             # alert for this device
-            existing_alerts = await self.db.list_alerts(acknowledged=False)
             already_alerted = any(
                 a.device_mac == device.mac and a.alert_type == AlertType.INFRA_OFFLINE.value
                 for a in existing_alerts
@@ -183,7 +226,7 @@ class AlertEngine:
             if already_alerted:
                 continue
 
-            minutes_ago = int((datetime.now() - last_seen).total_seconds() / 60)
+            minutes_ago = int((datetime.now(timezone.utc) - last_seen).total_seconds() / 60)
             summary = self._device_summary(device)
             is_gateway = normalized in ("router", "gateway", "firewall")
             severity = AlertSeverity.CRITICAL if is_gateway else AlertSeverity.WARNING

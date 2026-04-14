@@ -1,7 +1,7 @@
 """Fingerprint snapshot repository -- point-in-time device fingerprints."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class SnapshotRepository:
@@ -28,7 +28,7 @@ class SnapshotRepository:
     async def add(self, hw_addr: str, *, os_family: str | None = None,
                   manufacturer: str | None = None, device_type: str | None = None,
                   hostname: str | None = None, oui_vendor: str | None = None) -> None:
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         await self._conn.execute("""
             INSERT INTO fingerprint_snapshots
                 (hw_addr, timestamp, os_family, manufacturer, device_type, hostname, oui_vendor)

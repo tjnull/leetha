@@ -8,111 +8,13 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 from leetha.evidence.models import Evidence, Verdict
 
 logger = logging.getLogger(__name__)
 
-# Source reliability weights — how much we trust each evidence source
-_SOURCE_WEIGHTS: dict[str, float] = {
-    # MAC OUI identification — highest reliability
-    "oui": 0.90,
-    "huginn_mac": 0.85,
-    # Infrastructure protocols
-    "lldp": 0.95,
-    "cdp": 0.95,
-    "snmp": 0.90,
-    "dhcpv4": 0.85,
-    "dhcpv4_vendor": 0.85,
-    "dhcpv4_fingerprint": 0.80,
-    "dhcpv6_vendor": 0.85,
-    "dhcpv6_oro": 0.75,
-    "dhcpv6": 0.75,
-    "probe": 0.85,
-    "tcp_syn": 0.70,
-    "tls": 0.70,
-    "http_useragent": 0.75,
-    "ssdp": 0.65,
-    "mdns": 0.70,
-    "mdns_exclusive": 0.80,  # vendor-exclusive services — below OUI (0.90) because
-                              # routers/gateways forward mDNS, rewriting source MAC
-    "mdns_txt": 0.75,
-    "tls_sni": 0.50,
-    "dns": 0.50,
-    "dns_vendor": 0.55,
-    "dns_behavioral": 0.60,
-    "netbios": 0.60,
-    "icmpv6_ra": 0.60,
-    "stp": 0.50,
-    "arp": 0.30,
-    "ip_observed": 0.30,
-    "hostname": 0.65,
-    # TCP/TLS sources
-    "tcp_syn_ttl": 0.50,
-    "tcp_syn_sig": 0.65,
-    "tls_ja3": 0.75,
-    "tls_ja4": 0.75,
-    "http_host": 0.40,
-    # DNS sources
-    "dns_query": 0.45,
-    "dns_ntp_hint": 0.55,
-    # mDNS sources
-    "mdns_service": 0.65,
-    "mdns_srv": 0.85,    # SRV target = device's actual .local hostname
-    "mdns_name": 0.60,
-    # Banner source
-    "passive_banner": 0.85,
-    # IoT/SCADA sources
-    "modbus": 0.60,
-    "bacnet": 0.65,
-    "coap": 0.50,
-    "mqtt": 0.55,
-    "enip": 0.65,
-    "dnp3": 0.75,
-    "s7comm": 0.80,
-    "opcua": 0.75,
-    "goose": 0.85,
-    "profinet": 0.80,
-    "umas": 0.85,
-    # Other
-    "ip_observed_ttl": 0.35,
-    "ip_observed_port": 0.30,
-    "dns_answer": 0.50,
-    "ws_discovery": 0.85,
-    # Discovery-enhanced sources
-    "dhcp_server": 0.85,
-    "dns_server": 0.50,
-    "ntp": 0.55,
-    "ssdp_server": 0.65,
-    # Fingerprint lookup sources (from fingerprint/lookup.py)
-    "banner": 0.75,
-    "banner_cache": 0.70,
-    "dhcp": 0.80,
-    "dhcp_vendor": 0.80,
-    "huginn_device": 0.85,
-    "huginn_dhcp": 0.80,
-    "huginn_dhcp_vendor": 0.80,
-    "huginn_dhcpv6": 0.75,
-    "huginn_dhcpv6_enterprise": 0.75,
-    "icmpv6": 0.60,
-    "ja3": 0.75,
-    "ja4": 0.75,
-    "tcp": 0.65,
-    "ttl": 0.15,
-    "ssdp_upnp": 0.65,
-    "mdns_service_map": 0.70,
-    "manual": 0.99,
-    "active_probe": 0.85,
-    # New protocol sources
-    "igmp": 0.35,
-    "eap": 0.60,
-    "stun": 0.45,
-    "quic_sni": 0.60,
-    "radius": 0.65,
-    "upnp": 0.55,
-    "apple_model": 0.90,
-    "mdns_apple_model": 0.90,
-}
+# Source reliability weights — single source of truth in evidence/weights.py
+from leetha.evidence.weights import SOURCE_WEIGHTS as _SOURCE_WEIGHTS
 
 # Agreement boost: when N independent sources agree, multiply certainty
 _AGREEMENT_BONUS = {1: 1.0, 2: 1.1, 3: 1.2, 4: 1.25}
@@ -250,7 +152,7 @@ class VerdictEngine:
             hostname=chosen_hostname,
             certainty=overall,
             evidence_chain=list(evidence),
-            computed_at=datetime.now(),
+            computed_at=datetime.now(timezone.utc),
         )
 
     def update(self, existing: Verdict, new_evidence: list[Evidence]) -> Verdict:

@@ -30,8 +30,8 @@ async def put_notification_settings(request: Request):
     if "min_severity" in body:
         config.notification_min_severity = body["min_severity"]
 
-    # Update live dispatcher
-    app_instance._notifier._urls = config.notification_urls
+    # Update live dispatcher (rebuild Apprise with new URLs)
+    app_instance._notifier.update_urls(config.notification_urls)
     from leetha.notifications import _SEVERITY_ORDER
     app_instance._notifier._min_level = _SEVERITY_ORDER.get(
         config.notification_min_severity, 2)
@@ -69,4 +69,6 @@ async def test_notification():
             return {"status": "ok", "message": "Test notification sent"}
         return JSONResponse(status_code=500, content={"error": "Notification delivery failed"})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        import logging
+        logging.getLogger(__name__).exception("Notification test failed")
+        return JSONResponse(status_code=500, content={"error": "Operation failed"})

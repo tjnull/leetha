@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 
 from leetha.capture.packets import CapturedPacket
 from leetha.evidence.models import Evidence, Verdict
@@ -404,6 +404,15 @@ class Pipeline:
             except Exception:
                 logger.debug("IP overwrite check failed for %s", hw_addr, exc_info=True)
 
+        # Guard IPv6 against public overwrite too
+        if ip_v6 and not _is_private_ip(ip_v6):
+            try:
+                existing = await self.store.hosts.find_by_addr(hw_addr)
+                if existing and existing.ip_v6 and _is_private_ip(existing.ip_v6):
+                    ip_v6 = existing.ip_v6
+            except Exception:
+                logger.debug("IPv6 overwrite check failed for %s", hw_addr, exc_info=True)
+
         # MAC randomization detection
         from leetha.fingerprint.mac_intel import is_randomized_mac
         mac_random = is_randomized_mac(hw_addr)
@@ -436,7 +445,7 @@ class Pipeline:
             hw_addr=hw_addr,
             ip_addr=ip_v4,
             ip_v6=ip_v6,
-            last_active=datetime.now(),
+            last_active=datetime.now(timezone.utc),
             mac_randomized=mac_random,
             real_hw_addr=real_mac,
             disposition=disposition,
@@ -663,7 +672,7 @@ class Pipeline:
             identity.hostname = verdict.hostname
         if verdict.certainty:
             identity.confidence = max(identity.confidence, verdict.certainty)
-        identity.last_seen = datetime.now()
+        identity.last_seen = datetime.now(timezone.utc)
 
         # Keep correlation fingerprint up-to-date so future randomized
         # MACs can match against this identity's signals.

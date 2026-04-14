@@ -13,6 +13,8 @@ import {
   clearDatabase,
   exportDatabase,
   type LeethaSettings,
+  browseFilesystem,
+  type BrowseResult,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,6 +38,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useTheme, ACCENT_PRESETS } from "@/providers/theme-provider";
 import {
@@ -57,6 +60,11 @@ import {
   Plus,
   X,
   Send,
+  ShieldCheck,
+  FolderOpen,
+  Folder,
+  FileText,
+  ChevronUp,
 } from "lucide-react";
 import {
   Select,
@@ -281,6 +289,29 @@ export default function Settings() {
                 <SettingField label="Bind Address" hint="IP address to bind the web server to" value={merged.web_host ?? ""} onChange={(v) => updateField("web_host", v)} placeholder="0.0.0.0" />
                 <SettingField label="Port" hint="Port for the web server" type="number" value={merged.web_port ?? ""} onChange={(v) => updateField("web_port", Number(v))} />
               </div>
+            </div>
+
+            <Separator />
+
+            {/* TLS / HTTPS */}
+            <div className="space-y-4">
+              <div>
+                <h4 className="text-sm font-semibold flex items-center gap-1.5"><ShieldCheck className="h-4 w-4" /> TLS / HTTPS</h4>
+                <p className="text-xs text-muted-foreground">Encrypt web traffic with HTTPS. Auto-generates a self-signed certificate if no custom cert is provided.</p>
+              </div>
+              <div className="flex items-center justify-between rounded-lg bg-secondary/50 border border-border p-4">
+                <div>
+                  <div className="text-sm font-medium">HTTPS Enabled</div>
+                  <div className="text-xs text-muted-foreground">Serve the web UI over HTTPS (requires restart)</div>
+                </div>
+                <Switch checked={merged.web_tls ?? true} onCheckedChange={(c) => updateField("web_tls", c)} />
+              </div>
+              {merged.web_tls !== false && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <FilePathField label="TLS Certificate" hint="Leave empty to auto-generate a self-signed cert" value={merged.web_tls_cert ?? ""} onChange={(v) => updateField("web_tls_cert", v)} placeholder="Auto-generated" browseTitle="Select TLS Certificate" />
+                  <FilePathField label="TLS Private Key" hint="Leave empty to auto-generate" value={merged.web_tls_key ?? ""} onChange={(v) => updateField("web_tls_key", v)} placeholder="Auto-generated" browseTitle="Select TLS Private Key" />
+                </div>
+              )}
             </div>
 
             <Separator />
@@ -911,6 +942,162 @@ function SettingField({ label, hint, type = "text", value, onChange, mono, place
         className={cn("bg-secondary border-border", mono && "font-mono")}
         placeholder={placeholder}
         step={step}
+      />
+    </div>
+  );
+}
+
+function FileBrowserDialog({ open, onOpenChange, onSelect, title, filter }: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSelect: (path: string) => void;
+  title: string;
+  filter?: (name: string) => boolean;
+}) {
+  const [browsePath, setBrowsePath] = useState<string>("");
+  const [browseData, setBrowseData] = useState<BrowseResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const loadDir = useCallback(async (path?: string) => {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await browseFilesystem(path);
+      setBrowseData(data);
+      setBrowsePath(data.current);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to browse");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Load initial directory when opened
+  const prevOpen = useRef(false);
+  if (open && !prevOpen.current) {
+    prevOpen.current = true;
+    loadDir();
+  }
+  if (!open && prevOpen.current) {
+    prevOpen.current = false;
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>Navigate to select a file</DialogDescription>
+        </DialogHeader>
+
+        {/* Current path */}
+        <div className="flex items-center gap-2">
+          <Input
+            value={browsePath}
+            onChange={(e) => setBrowsePath(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") loadDir(browsePath); }}
+            className="font-mono text-xs bg-secondary border-border"
+            placeholder="/path/to/directory"
+          />
+          <Button variant="outline" size="sm" onClick={() => loadDir(browsePath)}>Go</Button>
+        </div>
+
+        {error && <div className="text-sm text-destructive">{error}</div>}
+
+        {/* File listing */}
+        <ScrollArea className="h-72 rounded-md border border-border">
+          {loading ? (
+            <div className="flex items-center justify-center h-full text-sm text-muted-foreground">Loading...</div>
+          ) : browseData ? (
+            <div className="p-1">
+              {browseData.parent && (
+                <button
+                  onClick={() => loadDir(browseData.parent!)}
+                  className="flex items-center gap-2 w-full rounded-md px-3 py-2 text-sm hover:bg-secondary/80 transition-colors text-muted-foreground"
+                >
+                  <ChevronUp className="h-4 w-4" />
+                  <span>..</span>
+                </button>
+              )}
+              {browseData.entries.map((entry) => (
+                <button
+                  key={entry.path}
+                  onClick={() => {
+                    if (entry.is_dir) {
+                      loadDir(entry.path);
+                    } else {
+                      onSelect(entry.path);
+                      onOpenChange(false);
+                    }
+                  }}
+                  className={cn(
+                    "flex items-center gap-2 w-full rounded-md px-3 py-2 text-sm hover:bg-secondary/80 transition-colors text-left",
+                    !entry.is_dir && filter && !filter(entry.name) && "opacity-40"
+                  )}
+                >
+                  {entry.is_dir ? (
+                    <Folder className="h-4 w-4 text-blue-400 shrink-0" />
+                  ) : (
+                    <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                  )}
+                  <span className="truncate font-mono text-xs">{entry.name}</span>
+                  {!entry.is_dir && entry.size != null && (
+                    <span className="ml-auto text-xs text-muted-foreground shrink-0">
+                      {entry.size < 1024 ? `${entry.size} B` : `${(entry.size / 1024).toFixed(1)} KB`}
+                    </span>
+                  )}
+                </button>
+              ))}
+              {browseData.entries.length === 0 && (
+                <div className="text-sm text-muted-foreground text-center py-8">Empty directory</div>
+              )}
+            </div>
+          ) : null}
+        </ScrollArea>
+
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button variant="outline" size="sm">Cancel</Button>
+          </DialogClose>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function FilePathField({ label, hint, value, onChange, placeholder, browseTitle }: {
+  label: string;
+  hint?: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  browseTitle: string;
+}) {
+  const [browserOpen, setBrowserOpen] = useState(false);
+  const certFilter = (name: string) => /\.(pem|crt|cer|key|pub)$/i.test(name);
+
+  return (
+    <div>
+      <div className="text-sm font-medium mb-1">{label}</div>
+      {hint && <div className="text-xs text-muted-foreground mb-1.5">{hint}</div>}
+      <div className="flex gap-2">
+        <Input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="bg-secondary border-border font-mono flex-1"
+          placeholder={placeholder}
+        />
+        <Button variant="outline" size="icon" onClick={() => setBrowserOpen(true)} title="Browse...">
+          <FolderOpen className="h-4 w-4" />
+        </Button>
+      </div>
+      <FileBrowserDialog
+        open={browserOpen}
+        onOpenChange={setBrowserOpen}
+        onSelect={onChange}
+        title={browseTitle}
+        filter={certFilter}
       />
     </div>
   );
