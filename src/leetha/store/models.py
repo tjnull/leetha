@@ -51,6 +51,10 @@ class Device:
     criticality: str | None = None
     tags: list[str] = field(default_factory=list)
     notes: str | None = None
+    # Phase A.2 — tri-state authorization
+    authorization: str = "unapproved"  # 'unapproved' | 'approved' | 'rejected'
+    authorized_at: datetime | None = None
+    authorized_by: str | None = None
 
     def to_dict(self) -> dict:
         import re
@@ -118,6 +122,16 @@ class Device:
                     pass
             return datetime.now(_tz.utc)
 
+        def _dt_opt(key, idx):
+            """Like _dt but returns None when column is null/missing."""
+            val = _get(key, idx)
+            if val and isinstance(val, str):
+                try:
+                    return datetime.fromisoformat(val)
+                except (ValueError, TypeError):
+                    return None
+            return None
+
         raw_ev = _get("raw_evidence", 12)
         override = _get("manual_override", 16)
 
@@ -157,7 +171,22 @@ class Device:
             criticality=_get("criticality", 19),
             tags=tags_val,
             notes=_get("notes", 21),
+            authorization=_get("authorization", 22, "unapproved") or "unapproved",
+            authorized_at=_dt_opt("authorized_at", 23),
+            authorized_by=_get("authorized_by", 24),
         )
+
+
+@dataclass
+class AuthorizationHistory:
+    """Audit-trail entry for a device authorization state transition."""
+    mac: str
+    previous_state: str
+    new_state: str
+    actor: str
+    timestamp: datetime
+    reason: str | None = None
+    id: int | None = None
 
 
 @dataclass

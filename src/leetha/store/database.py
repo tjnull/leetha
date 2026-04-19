@@ -264,6 +264,14 @@ def _marshal_device(rec: aiosqlite.Row) -> Device:
     else:
         tags_val = []
 
+    auth_at_raw = _opt("authorized_at")
+    auth_at = None
+    if auth_at_raw and isinstance(auth_at_raw, str):
+        try:
+            auth_at = datetime.fromisoformat(auth_at_raw)
+        except (ValueError, TypeError):
+            auth_at = None
+
     return Device(
         mac=rec["mac"],
         ip_v4=rec["ip_v4"],
@@ -287,6 +295,9 @@ def _marshal_device(rec: aiosqlite.Row) -> Device:
         criticality=_opt("criticality"),
         tags=tags_val,
         notes=_opt("notes"),
+        authorization=_opt("authorization") or "unapproved",
+        authorized_at=auth_at,
+        authorized_by=_opt("authorized_by"),
     )
 
 
