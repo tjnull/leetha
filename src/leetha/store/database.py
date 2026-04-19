@@ -46,7 +46,12 @@ CREATE TABLE IF NOT EXISTS devices (
     last_seen          TEXT,
     raw_evidence       TEXT NOT NULL DEFAULT '{}',
     is_randomized_mac  INTEGER NOT NULL DEFAULT 0,
-    correlated_mac     TEXT
+    correlated_mac     TEXT,
+    owner              TEXT,
+    location           TEXT,
+    criticality        TEXT CHECK (criticality IN ('low','medium','high','critical') OR criticality IS NULL),
+    tags               TEXT,
+    notes              TEXT
 );
 """
 
@@ -362,6 +367,8 @@ class Database:
         for idx_sql in (
             "CREATE INDEX IF NOT EXISTS idx_dev_ipv4 ON devices(ip_v4)",
             "CREATE INDEX IF NOT EXISTS idx_dev_identity ON devices(identity_id)",
+            "CREATE INDEX IF NOT EXISTS idx_devices_criticality ON devices(criticality)",
+            "CREATE INDEX IF NOT EXISTS idx_devices_location ON devices(location)",
             "CREATE INDEX IF NOT EXISTS idx_probe_status ON probe_targets(status)",
             "CREATE INDEX IF NOT EXISTS idx_fp_hist_mac ON fingerprint_history(mac)",
             "CREATE INDEX IF NOT EXISTS idx_fp_hist_ts ON fingerprint_history(timestamp)",
@@ -397,6 +404,19 @@ class Database:
             await self._conn.execute(
                 "ALTER TABLE devices ADD COLUMN manual_override TEXT DEFAULT NULL"
             )
+
+        # Phase A.1 — custom property columns. CHECK constraint on criticality
+        # is only attached on fresh DBs (via _TABLE_DEVICES); existing DBs rely
+        # on application-level validation in the PATCH endpoint/pydantic model.
+        for col_name, col_sql in (
+            ("owner", "ALTER TABLE devices ADD COLUMN owner TEXT"),
+            ("location", "ALTER TABLE devices ADD COLUMN location TEXT"),
+            ("criticality", "ALTER TABLE devices ADD COLUMN criticality TEXT"),
+            ("tags", "ALTER TABLE devices ADD COLUMN tags TEXT"),
+            ("notes", "ALTER TABLE devices ADD COLUMN notes TEXT"),
+        ):
+            if col_name not in dev_cols:
+                await self._conn.execute(col_sql)
 
         obs_cols = await self._column_names("observations")
         if "interface" not in obs_cols:
