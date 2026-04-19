@@ -229,6 +229,24 @@ def _sanitize_hostname_db(name: str | None) -> str | None:
 def _marshal_device(rec: aiosqlite.Row) -> Device:
     evidence = json.loads(rec["raw_evidence"]) if rec["raw_evidence"] else {}
     override = json.loads(rec["manual_override"]) if rec["manual_override"] else None
+    row_keys = rec.keys()
+
+    def _opt(col: str):
+        return rec[col] if col in row_keys else None
+
+    raw_tags = _opt("tags")
+    if isinstance(raw_tags, str):
+        try:
+            tags_val = json.loads(raw_tags)
+            if not isinstance(tags_val, list):
+                tags_val = []
+        except (ValueError, TypeError):
+            tags_val = []
+    elif isinstance(raw_tags, list):
+        tags_val = list(raw_tags)
+    else:
+        tags_val = []
+
     return Device(
         mac=rec["mac"],
         ip_v4=rec["ip_v4"],
@@ -245,8 +263,13 @@ def _marshal_device(rec: aiosqlite.Row) -> Device:
         raw_evidence=evidence,
         is_randomized_mac=bool(rec["is_randomized_mac"]),
         correlated_mac=rec["correlated_mac"],
-        identity_id=rec["identity_id"] if "identity_id" in rec.keys() else None,
+        identity_id=_opt("identity_id"),
         manual_override=override,
+        owner=_opt("owner"),
+        location=_opt("location"),
+        criticality=_opt("criticality"),
+        tags=tags_val,
+        notes=_opt("notes"),
     )
 
 
@@ -522,13 +545,15 @@ INSERT INTO devices (
     os_family, os_version, ip_v4, ip_v6,
     confidence, alert_status, first_seen, last_seen,
     raw_evidence, is_randomized_mac, correlated_mac,
-    identity_id, manual_override
+    identity_id, manual_override,
+    owner, location, criticality, tags, notes
 ) VALUES (
     ?1, ?2, ?3, ?4,
     ?5, ?6, ?7, ?8,
     ?9, ?10, ?11, ?12,
     ?13, ?14, ?15,
-    ?16, ?17
+    ?16, ?17,
+    ?18, ?19, ?20, ?21, ?22
 )
 ON CONFLICT(mac) DO UPDATE SET
     hostname       = COALESCE(excluded.hostname, devices.hostname),
@@ -553,7 +578,12 @@ ON CONFLICT(mac) DO UPDATE SET
     is_randomized_mac = excluded.is_randomized_mac,
     correlated_mac = COALESCE(excluded.correlated_mac, devices.correlated_mac),
     identity_id    = COALESCE(excluded.identity_id, devices.identity_id),
-    manual_override = COALESCE(excluded.manual_override, devices.manual_override)
+    manual_override = COALESCE(excluded.manual_override, devices.manual_override),
+    owner          = COALESCE(excluded.owner, devices.owner),
+    location       = COALESCE(excluded.location, devices.location),
+    criticality    = COALESCE(excluded.criticality, devices.criticality),
+    tags           = COALESCE(excluded.tags, devices.tags),
+    notes          = COALESCE(excluded.notes, devices.notes)
 """
 
     @staticmethod
@@ -577,6 +607,7 @@ ON CONFLICT(mac) DO UPDATE SET
         ts_last = dev.last_seen.isoformat()
         evidence_json = json.dumps(dev.raw_evidence)
         override_json = json.dumps(dev.manual_override) if dev.manual_override else None
+        tags_json = json.dumps(list(dev.tags)) if dev.tags else None
         return (
             dev.mac,
             self._sanitize_hostname(dev.hostname),
@@ -595,6 +626,11 @@ ON CONFLICT(mac) DO UPDATE SET
             dev.correlated_mac,
             dev.identity_id,
             override_json,
+            dev.owner,
+            dev.location,
+            dev.criticality,
+            tags_json,
+            dev.notes,
         )
 
     async def upsert_device(self, device: Device) -> None:
@@ -635,9 +671,23 @@ ON CONFLICT(mac) DO UPDATE SET
             rec = await cur.fetchone()
             return _marshal_device(rec) if rec is not None else None
 
-    async def list_devices(self, interface: str | None = None) -> list[Device]:
-        """Return every known device, optionally scoped to an interface."""
+    async def list_devices(
+        self,
+        interface: str | None = None,
+        *,
+        criticality: str | None = None,
+        owner: str | None = None,
+        location: str | None = None,
+        tag: str | None = None,
+    ) -> list[Device]:
+        """Return every known device, optionally filtered.
+
+        ``interface`` scopes to devices seen on a given capture interface.
+        ``criticality`` / ``owner`` / ``location`` match custom-property columns.
+        ``tag`` matches any element of the JSON tags array.
+        """
         assert self._conn is not None
+        params: list = []
         if interface:
             sql = (
                 "SELECT DISTINCT d.*"
@@ -645,9 +695,25 @@ ON CONFLICT(mac) DO UPDATE SET
                 " INNER JOIN observations AS o ON o.device_mac = d.mac"
                 " WHERE o.interface = ?"
             )
-            async with self._conn.execute(sql, (interface,)) as cur:
-                return [_marshal_device(r) for r in await cur.fetchall()]
-        async with self._conn.execute("SELECT * FROM devices") as cur:
+            params.append(interface)
+        else:
+            sql = "SELECT * FROM devices WHERE 1=1"
+        if criticality is not None:
+            sql += " AND criticality = ?"
+            params.append(criticality)
+        if owner is not None:
+            sql += " AND owner = ?"
+            params.append(owner)
+        if location is not None:
+            sql += " AND location = ?"
+            params.append(location)
+        if tag is not None:
+            sql += (
+                " AND tags IS NOT NULL"
+                " AND EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?)"
+            )
+            params.append(tag)
+        async with self._conn.execute(sql, params) as cur:
             return [_marshal_device(r) for r in await cur.fetchall()]
 
     async def get_device_count(self) -> int:
