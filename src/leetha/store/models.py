@@ -55,6 +55,10 @@ class Device:
     authorization: str = "unapproved"  # 'unapproved' | 'approved' | 'rejected'
     authorized_at: datetime | None = None
     authorized_by: str | None = None
+    # Phase A.3 — True when the device has been seen in live packet capture.
+    # Importer-sourced devices start with False; the pipeline flips to True
+    # once a real observation arrives.
+    passively_observed: bool = True
 
     def to_dict(self) -> dict:
         import re
@@ -174,6 +178,7 @@ class Device:
             authorization=_get("authorization", 22, "unapproved") or "unapproved",
             authorized_at=_dt_opt("authorized_at", 23),
             authorized_by=_get("authorized_by", 24),
+            passively_observed=bool(_get("passively_observed", 25, 1) or 0),
         )
 
 

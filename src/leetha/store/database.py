@@ -54,7 +54,8 @@ CREATE TABLE IF NOT EXISTS devices (
     notes              TEXT,
     authorization      TEXT NOT NULL DEFAULT 'unapproved',
     authorized_at      TEXT,
-    authorized_by      TEXT
+    authorized_by      TEXT,
+    passively_observed INTEGER NOT NULL DEFAULT 1
 );
 """
 
@@ -298,6 +299,7 @@ def _marshal_device(rec: aiosqlite.Row) -> Device:
         authorization=_opt("authorization") or "unapproved",
         authorized_at=auth_at,
         authorized_by=_opt("authorized_by"),
+        passively_observed=bool(_opt("passively_observed") if _opt("passively_observed") is not None else 1),
     )
 
 
@@ -472,6 +474,9 @@ class Database:
              "ALTER TABLE devices ADD COLUMN authorization TEXT NOT NULL DEFAULT 'unapproved'"),
             ("authorized_at", "ALTER TABLE devices ADD COLUMN authorized_at TEXT"),
             ("authorized_by", "ALTER TABLE devices ADD COLUMN authorized_by TEXT"),
+            # Phase A.3 — passively_observed flag for importer-sourced devices
+            ("passively_observed",
+             "ALTER TABLE devices ADD COLUMN passively_observed INTEGER NOT NULL DEFAULT 1"),
         ):
             if col_name not in dev_cols:
                 await self._conn.execute(col_sql)
@@ -581,14 +586,16 @@ INSERT INTO devices (
     confidence, alert_status, first_seen, last_seen,
     raw_evidence, is_randomized_mac, correlated_mac,
     identity_id, manual_override,
-    owner, location, criticality, tags, notes
+    owner, location, criticality, tags, notes,
+    passively_observed
 ) VALUES (
     ?1, ?2, ?3, ?4,
     ?5, ?6, ?7, ?8,
     ?9, ?10, ?11, ?12,
     ?13, ?14, ?15,
     ?16, ?17,
-    ?18, ?19, ?20, ?21, ?22
+    ?18, ?19, ?20, ?21, ?22,
+    ?23
 )
 ON CONFLICT(mac) DO UPDATE SET
     hostname       = COALESCE(excluded.hostname, devices.hostname),
@@ -618,7 +625,9 @@ ON CONFLICT(mac) DO UPDATE SET
     location       = COALESCE(excluded.location, devices.location),
     criticality    = COALESCE(excluded.criticality, devices.criticality),
     tags           = COALESCE(excluded.tags, devices.tags),
-    notes          = COALESCE(excluded.notes, devices.notes)
+    notes          = COALESCE(excluded.notes, devices.notes),
+    -- passively_observed: flip to True once we see any live packet; never flip back
+    passively_observed = MAX(devices.passively_observed, excluded.passively_observed)
 """
 
     @staticmethod
@@ -666,6 +675,7 @@ ON CONFLICT(mac) DO UPDATE SET
             dev.criticality,
             tags_json,
             dev.notes,
+            int(dev.passively_observed),
         )
 
     async def upsert_device(self, device: Device) -> None:

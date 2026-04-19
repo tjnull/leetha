@@ -30,6 +30,20 @@ async def _device_authorization(store, mac: str) -> str:
     return row[0]
 
 
+async def _device_passively_observed(store, mac: str) -> bool:
+    """True if the device has been observed in live capture (or row missing)."""
+    try:
+        cursor = await store.connection.execute(
+            "SELECT passively_observed FROM devices WHERE mac = ?", (mac,),
+        )
+        row = await cursor.fetchone()
+    except Exception:
+        return True
+    if row is None or row[0] is None:
+        return True
+    return bool(row[0])
+
+
 @register_rule("new_host")
 class NewHostRule(RuleBase):
     severity = "info"  # graded dynamically; retained for registry-level defaults
@@ -39,6 +53,11 @@ class NewHostRule(RuleBase):
         # The pipeline transitions disposition to "known" after rules run,
         # so this will only fire once per host.
         if host.disposition == "new":
+            # Suppress new_host while the device is importer-sourced but not
+            # yet seen in live capture: an imported row on its own shouldn't
+            # trip alerts.
+            if not await _device_passively_observed(store, host.hw_addr):
+                return None
             auth = await _device_authorization(store, host.hw_addr)
             sev = _AUTH_SEVERITY.get(auth, AlertSeverity.WARNING)
             parts = [f"New host discovered: {host.hw_addr}"]
