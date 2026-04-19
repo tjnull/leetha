@@ -7,6 +7,10 @@ from leetha.inventory.registry import (
     clear_registry,
 )
 from leetha.inventory.base import BaseImporter, TestResult
+# Importing this subpackage fires the @register_importer decorators for every
+# shipped importer — keep this at module load so get_importer("dhcp_leases")
+# works without callers having to know which module contains it.
+from leetha.inventory import importers as _importers  # noqa: F401
 
 __all__ = [
     "BaseImporter",
