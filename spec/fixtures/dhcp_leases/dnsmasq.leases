@@ -1,0 +1,3 @@
+1745064000 aa:bb:cc:dd:ee:11 10.0.0.10 alice-pc 01:aa:bb:cc:dd:ee:11
+1745064120 aa:bb:cc:dd:ee:12 10.0.0.11 * *
+1745064240 aa:bb:cc:dd:ee:13 10.0.0.12 bob-tv 01:aa:bb:cc:dd:ee:13

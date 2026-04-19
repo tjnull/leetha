@@ -1,0 +1,4 @@
+1745064000 aa:bb:cc:dd:ee:11 10.0.0.10 alice-pc
+not-a-mac 10.0.0.11 nobody
+too-few-fields
+1745064120 aa:bb:cc:dd:ee:12 10.0.0.12 bob-tv
