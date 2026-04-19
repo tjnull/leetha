@@ -208,6 +208,30 @@ console commands:
     override_clear = override_sub.add_parser("clear", help="Clear override for a device")
     override_clear.add_argument("mac", help="Device MAC address")
 
+    # Device subcommand (Phase A.1 — custom properties + tags)
+    device_parser = sub.add_parser("device", help="Manage device custom properties")
+    device_sub = device_parser.add_subparsers(dest="device_action")
+
+    device_set = device_sub.add_parser("set", help="Set custom-property fields on a device")
+    device_set.add_argument("mac", help="Device MAC address")
+    device_set.add_argument("--owner")
+    device_set.add_argument("--location")
+    device_set.add_argument(
+        "--criticality",
+        choices=["low", "medium", "high", "critical"],
+    )
+    device_set.add_argument("--tags", help="Comma-separated tag list")
+    device_set.add_argument("--notes")
+
+    device_tags = device_sub.add_parser("tags", help="Manage device tags")
+    device_tags_sub = device_tags.add_subparsers(dest="tags_action")
+    device_tags_add = device_tags_sub.add_parser("add", help="Add a tag to a device")
+    device_tags_add.add_argument("mac")
+    device_tags_add.add_argument("tag")
+    device_tags_remove = device_tags_sub.add_parser("remove", help="Remove a tag from a device")
+    device_tags_remove.add_argument("mac")
+    device_tags_remove.add_argument("tag")
+
     # Patterns subcommand
     patterns_parser = sub.add_parser("patterns", help="Manage custom fingerprint patterns")
     patterns_sub = patterns_parser.add_subparsers(dest="patterns_action")
@@ -309,7 +333,7 @@ console commands:
 
 def _needs_capture(args: argparse.Namespace) -> bool:
     """Return True if the selected mode requires packet capture privileges."""
-    return args.command not in ("sync", "override", "patterns", "validate", "probe", "interfaces", "trust", "auth", "import", "remote")
+    return args.command not in ("sync", "override", "device", "patterns", "validate", "probe", "interfaces", "trust", "auth", "import", "remote")
 
 
 def _has_capture_privilege() -> bool:
@@ -406,6 +430,10 @@ def main():
     elif args.command == "override":
         from leetha.cli_override import run_override
         asyncio.run(run_override(args))
+
+    elif args.command == "device":
+        from leetha.cli_device import handle_device_command
+        sys.exit(asyncio.run(handle_device_command(args)))
         return
     elif args.command == "patterns":
         from leetha.cli_patterns import run_patterns
