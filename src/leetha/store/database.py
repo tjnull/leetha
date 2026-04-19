@@ -740,9 +740,18 @@ ON CONFLICT(mac) DO UPDATE SET
         return await self.get_device(mac)
 
     async def approve_device(self, mac: str, *, actor: str, reason: str | None = None) -> Device | None:
-        return await self._transition_authorization(
+        result = await self._transition_authorization(
             mac, new_state="approved", actor=actor, reason=reason,
         )
+        if result is not None:
+            # Auto-resolve any unresolved new_host findings for this MAC.
+            await self._conn.execute(
+                "UPDATE findings SET resolved = 1 "
+                "WHERE hw_addr = ? AND rule = 'new_host' AND resolved = 0",
+                (mac,),
+            )
+            await self._conn.commit()
+        return result
 
     async def reject_device(self, mac: str, *, actor: str, reason: str | None = None) -> Device | None:
         return await self._transition_authorization(

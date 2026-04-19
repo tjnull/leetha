@@ -9,15 +9,38 @@ from leetha.evidence.models import Verdict
 _LOW_CERT_LAST_FIRED: dict[str, datetime] = {}
 _LOW_CERT_COOLDOWN = timedelta(hours=1)
 
+_AUTH_SEVERITY = {
+    "approved": AlertSeverity.INFO,
+    "unapproved": AlertSeverity.WARNING,
+    "rejected": AlertSeverity.CRITICAL,
+}
+
+
+async def _device_authorization(store, mac: str) -> str:
+    """Look up a device's authorization state. Default: 'unapproved'."""
+    try:
+        cursor = await store.connection.execute(
+            "SELECT authorization FROM devices WHERE mac = ?", (mac,),
+        )
+        row = await cursor.fetchone()
+    except Exception:
+        return "unapproved"
+    if row is None or row[0] is None:
+        return "unapproved"
+    return row[0]
+
+
 @register_rule("new_host")
 class NewHostRule(RuleBase):
-    severity = "info"
+    severity = "info"  # graded dynamically; retained for registry-level defaults
 
     async def evaluate(self, host: Host, verdict: Verdict, store) -> Finding | None:
         # Only fire on truly new hosts (disposition still "new").
         # The pipeline transitions disposition to "known" after rules run,
         # so this will only fire once per host.
         if host.disposition == "new":
+            auth = await _device_authorization(store, host.hw_addr)
+            sev = _AUTH_SEVERITY.get(auth, AlertSeverity.WARNING)
             parts = [f"New host discovered: {host.hw_addr}"]
             if verdict.vendor:
                 parts.append(verdict.vendor)
@@ -27,10 +50,12 @@ class NewHostRule(RuleBase):
                 parts.append(host.ip_addr)
             if host.mac_randomized:
                 parts.append("randomized MAC")
+            if auth != "approved":
+                parts.append(f"authorization: {auth}")
             return Finding(
                 hw_addr=host.hw_addr,
                 rule=FindingRule.NEW_HOST,
-                severity=AlertSeverity.INFO,
+                severity=sev,
                 message=" — ".join(parts),
             )
         return None
