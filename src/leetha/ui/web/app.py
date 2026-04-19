@@ -417,6 +417,9 @@ async def info_index(request: Request):
 from leetha.ui.web.routers.devices import router as _devices_router
 fastapi_app.include_router(_devices_router)
 
+from leetha.ui.web.routers.inventory import router as _inventory_router
+fastapi_app.include_router(_inventory_router)
+
 
 @fastapi_app.get("/api/trust")
 async def api_trust_list():

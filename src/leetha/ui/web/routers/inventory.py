@@ -1,0 +1,56 @@
+"""Phase A.3 Task 25 — inventory router (DHCP lease upload, etc)."""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import JSONResponse
+
+from leetha.inventory.importers.dhcp_leases import parse_lease_file
+from leetha.store.models import Device
+
+router = APIRouter()
+
+
+def _get_app():
+    from leetha.ui.web.app import app_instance
+    return app_instance
+
+
+@router.post("/api/inventory/dhcp-leases/upload")
+async def upload_dhcp_leases(file: UploadFile = File(...)):
+    """Parse an uploaded DHCP lease file in memory and persist discovered devices."""
+    if file.size is not None and file.size > 5 * 1024 * 1024:
+        raise HTTPException(413, "File too large; max 5MB")
+
+    raw = await file.read()
+    try:
+        text = raw.decode("utf-8", errors="replace")
+    except Exception:
+        raise HTTPException(400, "File must be text")
+
+    devices = parse_lease_file(text)
+    if not devices:
+        return JSONResponse({
+            "imported": 0,
+            "message": "No parseable lease entries found",
+        })
+
+    app_instance = _get_app()
+    if app_instance is None or getattr(app_instance, "db", None) is None:
+        raise HTTPException(503, "Server not ready")
+
+    ts = datetime.now(timezone.utc)
+    count = 0
+    for d in devices:
+        await app_instance.db.upsert_device(Device(
+            mac=d.mac,
+            ip_v4=d.ip,
+            hostname=d.hostname,
+            first_seen=ts, last_seen=ts,
+            passively_observed=False,
+        ))
+        count += 1
+
+    return {"imported": count, "flavor": devices[0].metadata.get("flavor") if devices else None}
