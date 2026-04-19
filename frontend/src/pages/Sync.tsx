@@ -9,6 +9,7 @@ import {
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { InventorySources } from "@/components/InventorySources";
 import { cn } from "@/lib/utils";
 import {
   RefreshCw,
@@ -232,6 +233,9 @@ export default function Sync() {
 
   return (
     <div className="space-y-6">
+      {/* Phase A.3 — inventory-source uploads */}
+      <InventorySources />
+
       {/* Header */}
       <div className="flex items-start justify-between">
         <p className="text-sm text-muted-foreground max-w-xl">
