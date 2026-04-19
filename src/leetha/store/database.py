@@ -700,6 +700,106 @@ ON CONFLICT(mac) DO UPDATE SET
         "owner", "location", "criticality", "tags", "notes",
     })
 
+    _AUTH_STATES = frozenset({"unapproved", "approved", "rejected"})
+
+    async def _transition_authorization(
+        self, mac: str, *, new_state: str, actor: str, reason: str | None = None,
+    ) -> Device | None:
+        """Internal: atomically update authorization + insert audit row."""
+        assert self._conn is not None
+        if new_state not in self._AUTH_STATES:
+            raise ValueError(f"invalid authorization state: {new_state!r}")
+        existing = await self.get_device(mac)
+        if existing is None:
+            return None
+        previous = existing.authorization or "unapproved"
+        if previous == new_state:
+            return existing  # no-op, no history row
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        async with self._mu:
+            if new_state == "unapproved":
+                await self._conn.execute(
+                    "UPDATE devices SET authorization = ?, authorized_at = NULL, "
+                    "authorized_by = NULL WHERE mac = ?",
+                    (new_state, mac),
+                )
+            else:
+                await self._conn.execute(
+                    "UPDATE devices SET authorization = ?, authorized_at = ?, "
+                    "authorized_by = ? WHERE mac = ?",
+                    (new_state, now_iso, actor, mac),
+                )
+            await self._conn.execute(
+                "INSERT INTO authorization_history "
+                "(mac, previous_state, new_state, actor, reason, timestamp) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (mac, previous, new_state, actor, reason, now_iso),
+            )
+            await self._conn.commit()
+        return await self.get_device(mac)
+
+    async def approve_device(self, mac: str, *, actor: str, reason: str | None = None) -> Device | None:
+        return await self._transition_authorization(
+            mac, new_state="approved", actor=actor, reason=reason,
+        )
+
+    async def reject_device(self, mac: str, *, actor: str, reason: str | None = None) -> Device | None:
+        return await self._transition_authorization(
+            mac, new_state="rejected", actor=actor, reason=reason,
+        )
+
+    async def revoke_device(self, mac: str, *, actor: str, reason: str | None = None) -> Device | None:
+        return await self._transition_authorization(
+            mac, new_state="unapproved", actor=actor, reason=reason,
+        )
+
+    async def baseline_set(self, *, actor: str = "baseline") -> int:
+        """Approve every currently-unapproved device. Returns count touched."""
+        assert self._conn is not None
+        now_iso = datetime.now(timezone.utc).isoformat()
+        async with self._mu:
+            async with self._conn.execute(
+                "SELECT mac FROM devices WHERE authorization = 'unapproved'"
+            ) as cur:
+                macs = [row[0] for row in await cur.fetchall()]
+            if not macs:
+                return 0
+            for mac in macs:
+                await self._conn.execute(
+                    "UPDATE devices SET authorization = 'approved', "
+                    "authorized_at = ?, authorized_by = ? WHERE mac = ?",
+                    (now_iso, actor, mac),
+                )
+                await self._conn.execute(
+                    "INSERT INTO authorization_history "
+                    "(mac, previous_state, new_state, actor, reason, timestamp) "
+                    "VALUES (?, 'unapproved', 'approved', ?, 'baseline', ?)",
+                    (mac, actor, now_iso),
+                )
+            await self._conn.commit()
+        return len(macs)
+
+    async def baseline_status(self) -> dict:
+        """Return per-state counts + last baseline timestamp."""
+        assert self._conn is not None
+        async with self._conn.execute(
+            "SELECT authorization, COUNT(*) FROM devices GROUP BY authorization"
+        ) as cur:
+            rows = await cur.fetchall()
+        counts = {r[0] or "unapproved": r[1] for r in rows}
+        out = {
+            "approved": counts.get("approved", 0),
+            "unapproved": counts.get("unapproved", 0),
+            "rejected": counts.get("rejected", 0),
+        }
+        async with self._conn.execute(
+            "SELECT MAX(timestamp) FROM authorization_history WHERE reason = 'baseline'"
+        ) as cur:
+            row = await cur.fetchone()
+        out["last_baseline_at"] = row[0] if row else None
+        return out
+
     async def update_device_props(self, mac: str, **updates) -> Device | None:
         """Apply a partial update to a device's custom-property columns.
 
