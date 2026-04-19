@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/select";
 import { fetchDevices, fetchFilterOptions, type Device } from "@/lib/api";
 import { DeviceDrawer } from "@/components/shared/DeviceDrawer";
+import { BaselineBanner } from "@/components/BaselineBanner";
 import { getDeviceTypeColor } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import {
@@ -274,6 +275,8 @@ export default function Devices({ subscribe }: DevicesProps) {
           </Button>
         </div>
       </div>
+
+      <BaselineBanner />
 
       {/* Filter bar */}
       <div className="flex flex-col gap-3">

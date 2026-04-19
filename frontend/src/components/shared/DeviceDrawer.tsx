@@ -13,6 +13,8 @@ import { X, ChevronDown } from "lucide-react";
 import { authHeaders, fetchDeviceTimeline, type TimelineEvent } from "@/lib/api";
 import { CustomProperties, type CustomPropsValues } from "@/components/shared/CustomProperties";
 import { CriticalityPill, type Criticality } from "@/components/CriticalityPill";
+import { AuthorizationBadge, type AuthorizationState } from "@/components/AuthorizationBadge";
+import { AuthorizationPanel } from "@/components/shared/AuthorizationPanel";
 
 // --- API ---
 
@@ -35,6 +37,10 @@ interface DeviceInfo {
   criticality?: Criticality;
   tags?: string[];
   notes?: string | null;
+  // Phase A.2 authorization
+  authorization?: AuthorizationState | null;
+  authorized_at?: string | null;
+  authorized_by?: string | null;
 }
 interface DeviceDetailResponse { device: DeviceInfo; evidence: Array<Record<string, unknown>>; }
 interface Observation { id: number; timestamp: string; source_type: string; confidence: number | null; }
@@ -231,8 +237,26 @@ export function DeviceDrawer({ mac, open, onClose }: DeviceDrawerProps) {
                   {device.criticality && (
                     <LabelValue label="Criticality"><CriticalityPill value={device.criticality} /></LabelValue>
                   )}
+                  <LabelValue label="Authorization">
+                    <AuthorizationBadge value={device.authorization ?? "unapproved"} />
+                  </LabelValue>
                 </div>
               </Section>
+
+              {/* ── Authorization (Phase A.2) ── */}
+              {mac && (
+                <AuthorizationPanel
+                  mac={mac}
+                  current={device.authorization ?? "unapproved"}
+                  authorizedBy={device.authorized_by ?? null}
+                  authorizedAt={device.authorized_at ?? null}
+                  onChanged={() => {
+                    queryClient.invalidateQueries({ queryKey: ["device-detail", mac] });
+                    queryClient.invalidateQueries({ queryKey: ["devices"] });
+                    queryClient.invalidateQueries({ queryKey: ["baseline-status"] });
+                  }}
+                />
+              )}
 
               {/* ── Custom Properties ── */}
               {mac && (
