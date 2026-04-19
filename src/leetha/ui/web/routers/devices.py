@@ -281,6 +281,68 @@ async def patch_device(mac: str, patch: DevicePatch):
     return updated.to_dict()
 
 
+class AuthorizationBody(BaseModel):
+    """Phase A.2 — body for approve/reject/revoke endpoints."""
+    reason: str | None = Field(default=None, max_length=500)
+
+
+def _actor_from_request(request: Request) -> str:
+    """Pull the actor identity from request.state.token_id (auth middleware)."""
+    token_id = getattr(request.state, "token_id", None)
+    return str(token_id) if token_id else "anonymous"
+
+
+@router.post("/api/devices/{mac}/approve")
+async def approve_device_endpoint(mac: str, body: AuthorizationBody, request: Request):
+    app_instance = _get_app()
+    existing = await app_instance.db.get_device(mac)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+    updated = await app_instance.db.approve_device(
+        mac, actor=_actor_from_request(request), reason=body.reason,
+    )
+    return (updated or existing).to_dict()
+
+
+@router.post("/api/devices/{mac}/reject")
+async def reject_device_endpoint(mac: str, body: AuthorizationBody, request: Request):
+    app_instance = _get_app()
+    existing = await app_instance.db.get_device(mac)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+    updated = await app_instance.db.reject_device(
+        mac, actor=_actor_from_request(request), reason=body.reason,
+    )
+    return (updated or existing).to_dict()
+
+
+@router.post("/api/devices/{mac}/revoke")
+async def revoke_device_endpoint(mac: str, body: AuthorizationBody, request: Request):
+    app_instance = _get_app()
+    existing = await app_instance.db.get_device(mac)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+    updated = await app_instance.db.revoke_device(
+        mac, actor=_actor_from_request(request), reason=body.reason,
+    )
+    return (updated or existing).to_dict()
+
+
+@router.post("/api/baseline/set")
+async def baseline_set_endpoint(body: AuthorizationBody, request: Request):
+    """Bulk-approve every currently unapproved device."""
+    app_instance = _get_app()
+    touched = await app_instance.db.baseline_set(actor="baseline")
+    return {"touched": touched}
+
+
+@router.get("/api/baseline/status")
+async def baseline_status_endpoint():
+    app_instance = _get_app()
+    status = await app_instance.db.baseline_status()
+    return status
+
+
 @router.get("/api/devices/{mac}")
 async def api_device(mac: str):
     _validate_mac, _sanitize_hostname, _build_device_dict = _get_helpers()
