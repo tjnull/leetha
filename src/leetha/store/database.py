@@ -661,6 +661,44 @@ ON CONFLICT(mac) DO UPDATE SET
             rec = await cur.fetchone()
             return _marshal_device(rec) if rec is not None else None
 
+    _UPDATABLE_DEVICE_PROPS = frozenset({
+        "owner", "location", "criticality", "tags", "notes",
+    })
+
+    async def update_device_props(self, mac: str, **updates) -> Device | None:
+        """Apply a partial update to a device's custom-property columns.
+
+        Keys must be in ``_UPDATABLE_DEVICE_PROPS``. ``tags`` may be a list
+        (JSON-encoded) or a pre-encoded string. Returns the refreshed Device,
+        or None if no row exists.
+        """
+        assert self._conn is not None
+        if not updates:
+            return await self.get_device(mac)
+
+        invalid = set(updates) - self._UPDATABLE_DEVICE_PROPS
+        if invalid:
+            raise ValueError(f"unsupported update keys: {sorted(invalid)}")
+
+        bound: list = []
+        set_clauses: list[str] = []
+        for key, value in updates.items():
+            if key == "tags" and isinstance(value, list):
+                bound.append(json.dumps(value))
+            else:
+                bound.append(value)
+            set_clauses.append(f"{key} = ?")
+
+        async with self._mu:
+            cur = await self._conn.execute(
+                f"UPDATE devices SET {', '.join(set_clauses)} WHERE mac = ?",
+                (*bound, mac),
+            )
+            await self._conn.commit()
+            if cur.rowcount == 0:
+                return None
+        return await self.get_device(mac)
+
     async def get_device_by_ip(self, ip: str) -> Device | None:
         """Find the first device matching an IPv4 or IPv6 address."""
         assert self._conn is not None

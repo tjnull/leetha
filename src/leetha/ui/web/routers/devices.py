@@ -3,11 +3,33 @@
 from __future__ import annotations
 
 import json
+from typing import Literal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, field_validator
 
 router = APIRouter()
+
+
+class DevicePatch(BaseModel):
+    """Partial update of device custom-property fields (Phase A.1)."""
+
+    owner: str | None = Field(default=None, max_length=200)
+    location: str | None = Field(default=None, max_length=200)
+    criticality: Literal["low", "medium", "high", "critical"] | None = None
+    tags: list[str] | None = Field(default=None, max_length=20)
+    notes: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("tags")
+    @classmethod
+    def _tags_are_non_empty_strings(cls, v):
+        if v is None:
+            return v
+        for t in v:
+            if not isinstance(t, str) or not t.strip():
+                raise ValueError("all tags must be non-empty strings")
+        return [t.strip() for t in v]
 
 
 def _get_app():
@@ -217,6 +239,19 @@ async def bulk_device_action(request: Request):
             updated += 1
 
     return {"status": "ok", "updated": updated}
+
+
+@router.patch("/api/devices/{mac}")
+async def patch_device(mac: str, patch: DevicePatch):
+    """Apply a partial update to a device's custom-property fields."""
+    app_instance = _get_app()
+    updates = patch.model_dump(exclude_unset=True)
+    existing = await app_instance.db.get_device(mac)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+    updated = await app_instance.db.update_device_props(mac, **updates)
+    assert updated is not None  # existing confirmed above
+    return updated.to_dict()
 
 
 @router.get("/api/devices/{mac}")
