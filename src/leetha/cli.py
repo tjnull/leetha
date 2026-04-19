@@ -249,6 +249,15 @@ console commands:
     baseline_sub.add_parser("set", help="Approve all currently unapproved devices")
     baseline_sub.add_parser("status", help="Show authorization counts")
 
+    # Phase A.3 — DHCP lease importer CLI
+    dhcp_parser = sub.add_parser("dhcp-leases", help="DHCP lease file importer")
+    dhcp_sub = dhcp_parser.add_subparsers(dest="dhcp_action")
+    dhcp_import = dhcp_sub.add_parser("import", help="One-shot import from a lease file")
+    dhcp_import.add_argument("path", help="Path to dhcpd.leases or dnsmasq.leases")
+    dhcp_setpath = dhcp_sub.add_parser("set-path",
+                                       help="Configure and enable the scheduled importer")
+    dhcp_setpath.add_argument("path", help="Path to the lease file")
+
     # Patterns subcommand
     patterns_parser = sub.add_parser("patterns", help="Manage custom fingerprint patterns")
     patterns_sub = patterns_parser.add_subparsers(dest="patterns_action")
@@ -350,7 +359,7 @@ console commands:
 
 def _needs_capture(args: argparse.Namespace) -> bool:
     """Return True if the selected mode requires packet capture privileges."""
-    return args.command not in ("sync", "override", "device", "baseline", "patterns", "validate", "probe", "interfaces", "trust", "auth", "import", "remote")
+    return args.command not in ("sync", "override", "device", "baseline", "dhcp-leases", "patterns", "validate", "probe", "interfaces", "trust", "auth", "import", "remote")
 
 
 def _has_capture_privilege() -> bool:
@@ -455,6 +464,10 @@ def main():
     elif args.command == "baseline":
         from leetha.cli_device import handle_baseline_command
         sys.exit(asyncio.run(handle_baseline_command(args)))
+
+    elif args.command == "dhcp-leases":
+        from leetha.cli_dhcp import handle_dhcp_command
+        sys.exit(asyncio.run(handle_dhcp_command(args)))
         return
     elif args.command == "patterns":
         from leetha.cli_patterns import run_patterns
