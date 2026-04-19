@@ -81,6 +81,10 @@ class VerdictRepository:
         alert_status: str | None = None,
         interface: str | None = None,
         confidence_min: int | None = None,
+        criticality: str | None = None,
+        owner: str | None = None,
+        location: str | None = None,
+        tag: str | None = None,
     ) -> tuple[list[dict], int]:
         """Return paginated, filtered device list with total count.
 
@@ -116,14 +120,19 @@ class VerdictRepository:
                    h.ip_addr, h.ip_v6, h.discovered_at, h.last_active,
                    h.mac_randomized, h.real_hw_addr, h.disposition,
                    h.identity_id,
+                   d.owner AS d_owner, d.location AS d_location,
+                   d.criticality AS d_criticality, d.tags AS d_tags,
+                   d.notes AS d_notes,
                    {_IP_SORT_EXPR} AS ip_sort_key
             FROM hosts h
             LEFT JOIN verdicts v ON h.hw_addr = v.hw_addr
+            LEFT JOIN devices d ON d.mac = h.hw_addr
         """
         count_select = """
             SELECT COUNT(*)
             FROM hosts h
             LEFT JOIN verdicts v ON h.hw_addr = v.hw_addr
+            LEFT JOIN devices d ON d.mac = h.hw_addr
         """
 
         conditions: list[str] = []
@@ -155,6 +164,21 @@ class VerdictRepository:
                 "h.hw_addr IN (SELECT DISTINCT hw_addr FROM sightings WHERE interface = ?)"
             )
             params.append(interface)
+        if criticality:
+            conditions.append("d.criticality = ?")
+            params.append(criticality)
+        if owner:
+            conditions.append("d.owner = ?")
+            params.append(owner)
+        if location:
+            conditions.append("d.location = ?")
+            params.append(location)
+        if tag:
+            conditions.append(
+                "d.tags IS NOT NULL AND EXISTS ("
+                "SELECT 1 FROM json_each(d.tags) WHERE value = ?)"
+            )
+            params.append(tag)
 
         where = ""
         if conditions:
@@ -188,6 +212,16 @@ class VerdictRepository:
 
         devices = []
         for row in rows:
+            tags_raw = row["d_tags"] if "d_tags" in row.keys() else None
+            if isinstance(tags_raw, str):
+                try:
+                    tags_val = json.loads(tags_raw)
+                    if not isinstance(tags_val, list):
+                        tags_val = []
+                except (ValueError, TypeError):
+                    tags_val = []
+            else:
+                tags_val = []
             devices.append({
                 "mac": row["hw_addr"],
                 "manufacturer": row["vendor"],
@@ -205,6 +239,11 @@ class VerdictRepository:
                 "is_randomized_mac": bool(row["mac_randomized"]) if row["mac_randomized"] is not None else False,
                 "correlated_mac": row["real_hw_addr"],
                 "identity_id": row["identity_id"] if "identity_id" in row.keys() else None,
+                "owner": row["d_owner"] if "d_owner" in row.keys() else None,
+                "location": row["d_location"] if "d_location" in row.keys() else None,
+                "criticality": row["d_criticality"] if "d_criticality" in row.keys() else None,
+                "tags": tags_val,
+                "notes": row["d_notes"] if "d_notes" in row.keys() else None,
             })
             chain_raw = row["evidence_chain"]
             if chain_raw:

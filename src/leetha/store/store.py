@@ -56,6 +56,11 @@ class Store:
         await self.verdicts.create_tables()
         await self.identities.create_tables()
         await self.snapshots.create_tables()
+        # Phase A.1: ensure devices table exists so verdicts.list_devices's
+        # LEFT JOIN to custom-property columns works even when Store is used
+        # without a parallel Database().initialize().
+        from leetha.store.database import _TABLE_DEVICES
+        await self._conn.executescript(_TABLE_DEVICES)
         self.overrides = OverrideRepository(self._conn)
         await self.overrides.create_tables()
         self.topology_overrides = TopologyOverrideRepository(self._conn)

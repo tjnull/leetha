@@ -99,6 +99,7 @@ export default function Devices({ subscribe }: DevicesProps) {
   const manufacturer = searchParams.get("manufacturer") ?? "";
   const statusFilter = searchParams.get("status") ?? "all";
   const confidenceMin = searchParams.get("confidence_min") ?? "";
+  const criticality = searchParams.get("criticality") ?? "";
 
   // Helper to update URL params
   const setParam = useCallback(
@@ -138,7 +139,7 @@ export default function Devices({ subscribe }: DevicesProps) {
 
   // Has any active filter?
   const hasFilters =
-    q || deviceType || osFamily || manufacturer || statusFilter !== "all" || confidenceMin;
+    q || deviceType || osFamily || manufacturer || statusFilter !== "all" || confidenceMin || criticality;
 
   // --- Fetch filter options ---
   const { data: filterOpts } = useQuery({
@@ -161,8 +162,9 @@ export default function Devices({ subscribe }: DevicesProps) {
       ...(manufacturer ? { manufacturer } : {}),
       ...(statusFilter !== "all" ? { alert_status: statusFilter } : {}),
       ...(confidenceMin ? { confidence_min: Number(confidenceMin) } : {}),
+      ...(criticality ? { criticality } : {}),
     }),
-    [page, perPage, sort, order, q, deviceType, osFamily, manufacturer, statusFilter, confidenceMin]
+    [page, perPage, sort, order, q, deviceType, osFamily, manufacturer, statusFilter, confidenceMin, criticality]
   );
 
   const { data: deviceData, isFetching, isError, error } = useQuery({
@@ -369,6 +371,25 @@ export default function Devices({ subscribe }: DevicesProps) {
                   {o.label}
                 </SelectItem>
               ))}
+            </SelectContent>
+          </Select>
+
+          {/* Criticality (Phase A.1) */}
+          <Select
+            value={criticality || "__any__"}
+            onValueChange={(v) =>
+              setParam({ criticality: v === "__any__" ? "" : v, page: "1" })
+            }
+          >
+            <SelectTrigger size="sm" className="w-32 text-xs">
+              <SelectValue placeholder="Criticality" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__any__">Any Criticality</SelectItem>
+              <SelectItem value="low">low</SelectItem>
+              <SelectItem value="medium">medium</SelectItem>
+              <SelectItem value="high">high</SelectItem>
+              <SelectItem value="critical">critical</SelectItem>
             </SelectContent>
           </Select>
 
