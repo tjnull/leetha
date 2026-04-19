@@ -241,6 +241,28 @@ async def bulk_device_action(request: Request):
     return {"status": "ok", "updated": updated}
 
 
+def _merge_custom_props(device_dict: dict, row) -> dict:
+    """Merge Phase A.1 custom-property fields from a devices-row into the API dict."""
+    if row is None:
+        device_dict.setdefault("owner", None)
+        device_dict.setdefault("location", None)
+        device_dict.setdefault("criticality", None)
+        device_dict.setdefault("tags", [])
+        # 'notes' already used by overrides; keep only if not already set
+        device_dict.setdefault("notes", None)
+        return device_dict
+    device_dict["owner"] = row.owner
+    device_dict["location"] = row.location
+    device_dict["criticality"] = row.criticality
+    device_dict["tags"] = list(row.tags) if row.tags else []
+    # Custom notes override the override-style notes only if non-null
+    if row.notes is not None:
+        device_dict["notes"] = row.notes
+    else:
+        device_dict.setdefault("notes", None)
+    return device_dict
+
+
 @router.patch("/api/devices/{mac}")
 async def patch_device(mac: str, patch: DevicePatch):
     """Apply a partial update to a device's custom-property fields."""
@@ -273,6 +295,9 @@ async def api_device(mac: str):
     from leetha.evidence.hostname import hostname_matches_vendor
     if device.get("hostname") and not hostname_matches_vendor(device["hostname"], device.get("manufacturer")):
         device["hostname"] = None
+    # Merge Phase A.1 custom properties from the devices row
+    dev_row = await app_instance.db.get_device(mac)
+    _merge_custom_props(device, dev_row)
     # Include sightings as observations for compatibility
     try:
         sightings = await app_instance.store.sightings.for_host(mac)

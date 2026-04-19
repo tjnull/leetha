@@ -11,6 +11,8 @@ import { getDeviceTypeColor } from "@/lib/constants";
 import { toast } from "sonner";
 import { X, ChevronDown } from "lucide-react";
 import { authHeaders, fetchDeviceTimeline, type TimelineEvent } from "@/lib/api";
+import { CustomProperties, type CustomPropsValues } from "@/components/shared/CustomProperties";
+import { CriticalityPill, type Criticality } from "@/components/CriticalityPill";
 
 // --- API ---
 
@@ -27,6 +29,12 @@ interface DeviceInfo {
   is_randomized_mac: boolean; correlated_mac: string | null;
   first_seen: string | null; last_seen: string | null;
   alert_status: string | null; manual_override: Record<string, string> | null;
+  // Phase A.1 custom properties (merged from devices table row)
+  owner?: string | null;
+  location?: string | null;
+  criticality?: Criticality;
+  tags?: string[];
+  notes?: string | null;
 }
 interface DeviceDetailResponse { device: DeviceInfo; evidence: Array<Record<string, unknown>>; }
 interface Observation { id: number; timestamp: string; source_type: string; confidence: number | null; }
@@ -220,8 +228,30 @@ export function DeviceDrawer({ mac, open, onClose }: DeviceDrawerProps) {
                   <LabelValue label="IPv4" mono>{device.ip_v4 || "-"}</LabelValue>
                   <LabelValue label="IPv6" mono><span className="break-all">{device.ip_v6 || "-"}</span></LabelValue>
                   {device.correlated_mac && <LabelValue label="Correlated MAC" mono>{device.correlated_mac}</LabelValue>}
+                  {device.criticality && (
+                    <LabelValue label="Criticality"><CriticalityPill value={device.criticality} /></LabelValue>
+                  )}
                 </div>
               </Section>
+
+              {/* ── Custom Properties ── */}
+              {mac && (
+                <CustomProperties
+                  mac={mac}
+                  initial={{
+                    owner: device.owner ?? null,
+                    location: device.location ?? null,
+                    criticality: device.criticality ?? null,
+                    tags: device.tags ?? [],
+                    notes: device.notes ?? null,
+                  }}
+                  onSaved={(next: CustomPropsValues) => {
+                    queryClient.invalidateQueries({ queryKey: ["device-detail", mac] });
+                    queryClient.invalidateQueries({ queryKey: ["devices"] });
+                    void next;
+                  }}
+                />
+              )}
 
               {/* ── Classification ── */}
               <Section title="Classification">
