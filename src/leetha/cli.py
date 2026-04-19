@@ -232,6 +232,23 @@ console commands:
     device_tags_remove.add_argument("mac")
     device_tags_remove.add_argument("tag")
 
+    # Phase A.2 — tri-state authorization commands
+    for verb, help_text in (
+        ("approve", "Mark device as approved"),
+        ("reject", "Mark device as rejected"),
+        ("revoke", "Return device to unapproved"),
+    ):
+        p = device_sub.add_parser(verb, help=help_text)
+        p.add_argument("mac")
+        p.add_argument("--actor", help="Actor recorded in audit trail (default: cli)")
+        p.add_argument("--reason", help="Optional reason string")
+
+    # Baseline subcommand (Phase A.2)
+    baseline_parser = sub.add_parser("baseline", help="Manage authorization baseline")
+    baseline_sub = baseline_parser.add_subparsers(dest="baseline_action")
+    baseline_sub.add_parser("set", help="Approve all currently unapproved devices")
+    baseline_sub.add_parser("status", help="Show authorization counts")
+
     # Patterns subcommand
     patterns_parser = sub.add_parser("patterns", help="Manage custom fingerprint patterns")
     patterns_sub = patterns_parser.add_subparsers(dest="patterns_action")
@@ -333,7 +350,7 @@ console commands:
 
 def _needs_capture(args: argparse.Namespace) -> bool:
     """Return True if the selected mode requires packet capture privileges."""
-    return args.command not in ("sync", "override", "device", "patterns", "validate", "probe", "interfaces", "trust", "auth", "import", "remote")
+    return args.command not in ("sync", "override", "device", "baseline", "patterns", "validate", "probe", "interfaces", "trust", "auth", "import", "remote")
 
 
 def _has_capture_privilege() -> bool:
@@ -434,6 +451,10 @@ def main():
     elif args.command == "device":
         from leetha.cli_device import handle_device_command
         sys.exit(asyncio.run(handle_device_command(args)))
+
+    elif args.command == "baseline":
+        from leetha.cli_device import handle_baseline_command
+        sys.exit(asyncio.run(handle_baseline_command(args)))
         return
     elif args.command == "patterns":
         from leetha.cli_patterns import run_patterns

@@ -26,10 +26,58 @@ async def handle_device_command(parsed_args) -> int:
                 return await _cmd_tags_remove(db, parsed_args)
             print("Usage: leetha device tags {add|remove} <mac> <tag>")
             return 2
-        print("Usage: leetha device {set|tags} ...")
+        if action in ("approve", "reject", "revoke"):
+            return await _cmd_authorize(db, parsed_args, action)
+        print("Usage: leetha device {set|tags|approve|reject|revoke} ...")
         return 2
     finally:
         await db.close()
+
+
+async def handle_baseline_command(parsed_args) -> int:
+    """Dispatch the 'baseline' subcommand (Phase A.2)."""
+    cfg = get_config()
+    db = Database(cfg.db_path)
+    await db.initialize()
+    try:
+        action = getattr(parsed_args, "baseline_action", None)
+        if action == "set":
+            touched = await db.baseline_set(actor="baseline")
+            print(f"Baseline set: approved {touched} previously-unapproved device(s).")
+            return 0
+        if action == "status":
+            status = await db.baseline_status()
+            print(
+                f"approved={status['approved']} "
+                f"unapproved={status['unapproved']} "
+                f"rejected={status['rejected']}"
+            )
+            if status["last_baseline_at"]:
+                print(f"last_baseline_at={status['last_baseline_at']}")
+            return 0
+        print("Usage: leetha baseline {set|status}")
+        return 2
+    finally:
+        await db.close()
+
+
+async def _cmd_authorize(db: Database, args, action: str) -> int:
+    mac = args.mac
+    existing = await db.get_device(mac)
+    if existing is None:
+        print(f"Device {mac} not found.")
+        return 1
+    actor = getattr(args, "actor", None) or "cli"
+    reason = getattr(args, "reason", None)
+    if action == "approve":
+        dev = await db.approve_device(mac, actor=actor, reason=reason)
+    elif action == "reject":
+        dev = await db.reject_device(mac, actor=actor, reason=reason)
+    else:  # revoke
+        dev = await db.revoke_device(mac, actor=actor, reason=reason)
+    assert dev is not None
+    print(f"{mac} → {dev.authorization} (by {actor})")
+    return 0
 
 
 async def _cmd_set(db: Database, args) -> int:
