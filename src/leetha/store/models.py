@@ -46,6 +46,11 @@ class Device:
     correlated_mac: str | None = None
     identity_id: int | None = None
     manual_override: dict | None = None
+    owner: str | None = None
+    location: str | None = None
+    criticality: str | None = None
+    tags: list[str] = field(default_factory=list)
+    notes: str | None = None
 
     def to_dict(self) -> dict:
         import re
@@ -63,6 +68,7 @@ class Device:
             if c.endswith(".local"):
                 c = c[:-6]
             d["hostname"] = c.rstrip(".") or hn
+        d["tags"] = list(self.tags) if self.tags else []
         return d
 
     @classmethod
@@ -115,6 +121,19 @@ class Device:
         raw_ev = _get("raw_evidence", 12)
         override = _get("manual_override", 16)
 
+        raw_tags = _get("tags", 20)
+        if isinstance(raw_tags, str):
+            try:
+                tags_val = json.loads(raw_tags)
+                if not isinstance(tags_val, list):
+                    tags_val = []
+            except (ValueError, TypeError):
+                tags_val = []
+        elif isinstance(raw_tags, list):
+            tags_val = list(raw_tags)
+        else:
+            tags_val = []
+
         return cls(
             mac=_get("mac", 0, ""),
             ip_v4=_get("ip_v4", 1),
@@ -133,6 +152,11 @@ class Device:
             correlated_mac=_get("correlated_mac", 14),
             identity_id=_get("identity_id", 15),
             manual_override=json.loads(override) if isinstance(override, str) else override,
+            owner=_get("owner", 17),
+            location=_get("location", 18),
+            criticality=_get("criticality", 19),
+            tags=tags_val,
+            notes=_get("notes", 21),
         )
 
 
