@@ -55,7 +55,10 @@ CREATE TABLE IF NOT EXISTS devices (
     authorization      TEXT NOT NULL DEFAULT 'unapproved',
     authorized_at      TEXT,
     authorized_by      TEXT,
-    passively_observed INTEGER NOT NULL DEFAULT 1
+    passively_observed INTEGER NOT NULL DEFAULT 1,
+    is_online          INTEGER NOT NULL DEFAULT 1,
+    offline_since      TEXT,
+    presence_threshold_seconds INTEGER NOT NULL DEFAULT 300
 );
 """
 
@@ -300,6 +303,13 @@ def _marshal_device(rec: aiosqlite.Row) -> Device:
         authorized_at=auth_at,
         authorized_by=_opt("authorized_by"),
         passively_observed=bool(_opt("passively_observed") if _opt("passively_observed") is not None else 1),
+        is_online=bool(_opt("is_online") if _opt("is_online") is not None else 1),
+        offline_since=(
+            datetime.fromisoformat(_opt("offline_since"))
+            if _opt("offline_since") and isinstance(_opt("offline_since"), str)
+            else None
+        ),
+        presence_threshold_seconds=int(_opt("presence_threshold_seconds") or 300),
     )
 
 
@@ -477,6 +487,13 @@ class Database:
             # Phase A.3 — passively_observed flag for importer-sourced devices
             ("passively_observed",
              "ALTER TABLE devices ADD COLUMN passively_observed INTEGER NOT NULL DEFAULT 1"),
+            # Phase A.4 — presence heartbeat
+            ("is_online",
+             "ALTER TABLE devices ADD COLUMN is_online INTEGER NOT NULL DEFAULT 1"),
+            ("offline_since",
+             "ALTER TABLE devices ADD COLUMN offline_since TEXT"),
+            ("presence_threshold_seconds",
+             "ALTER TABLE devices ADD COLUMN presence_threshold_seconds INTEGER NOT NULL DEFAULT 300"),
         ):
             if col_name not in dev_cols:
                 await self._conn.execute(col_sql)
@@ -803,6 +820,48 @@ ON CONFLICT(mac) DO UPDATE SET
                 )
             await self._conn.commit()
         return len(macs)
+
+    # Phase A.4 — presence heartbeat helpers ------------------------------
+
+    async def set_device_offline(self, mac: str) -> None:
+        """Mark a device offline. Preserves any existing ``offline_since`` value."""
+        assert self._conn is not None
+        now_iso = datetime.now(timezone.utc).isoformat()
+        async with self._mu:
+            await self._conn.execute(
+                "UPDATE devices SET is_online = 0, "
+                "offline_since = COALESCE(offline_since, ?) WHERE mac = ?",
+                (now_iso, mac),
+            )
+            await self._conn.commit()
+
+    async def set_device_online(self, mac: str) -> None:
+        assert self._conn is not None
+        async with self._mu:
+            await self._conn.execute(
+                "UPDATE devices SET is_online = 1, offline_since = NULL WHERE mac = ?",
+                (mac,),
+            )
+            await self._conn.commit()
+
+    async def get_presence_threshold(self, mac: str) -> int:
+        assert self._conn is not None
+        async with self._conn.execute(
+            "SELECT presence_threshold_seconds FROM devices WHERE mac = ?", (mac,),
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None or row[0] is None:
+            return 300
+        return int(row[0])
+
+    async def set_presence_threshold(self, mac: str, seconds: int) -> None:
+        assert self._conn is not None
+        async with self._mu:
+            await self._conn.execute(
+                "UPDATE devices SET presence_threshold_seconds = ? WHERE mac = ?",
+                (seconds, mac),
+            )
+            await self._conn.commit()
 
     async def baseline_status(self) -> dict:
         """Return per-state counts + last baseline timestamp."""

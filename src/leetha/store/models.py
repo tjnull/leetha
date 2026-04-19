@@ -59,6 +59,10 @@ class Device:
     # Importer-sourced devices start with False; the pipeline flips to True
     # once a real observation arrives.
     passively_observed: bool = True
+    # Phase A.4 — presence heartbeat
+    is_online: bool = True
+    offline_since: datetime | None = None
+    presence_threshold_seconds: int = 300
 
     def to_dict(self) -> dict:
         import re
@@ -179,6 +183,9 @@ class Device:
             authorized_at=_dt_opt("authorized_at", 23),
             authorized_by=_get("authorized_by", 24),
             passively_observed=bool(_get("passively_observed", 25, 1) or 0),
+            is_online=bool(_get("is_online", 26, 1) if _get("is_online", 26, 1) is not None else 1),
+            offline_since=_dt_opt("offline_since", 27),
+            presence_threshold_seconds=int(_get("presence_threshold_seconds", 28, 300) or 300),
         )
 
 
