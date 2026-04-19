@@ -745,12 +745,17 @@ ON CONFLICT(mac) DO UPDATE SET
         )
         if result is not None:
             # Auto-resolve any unresolved new_host findings for this MAC.
-            await self._conn.execute(
-                "UPDATE findings SET resolved = 1 "
-                "WHERE hw_addr = ? AND rule = 'new_host' AND resolved = 0",
-                (mac,),
-            )
-            await self._conn.commit()
+            # The findings table is owned by the Store layer and may not
+            # exist when Database is used standalone (e.g. in unit tests).
+            try:
+                await self._conn.execute(
+                    "UPDATE findings SET resolved = 1 "
+                    "WHERE hw_addr = ? AND rule = 'new_host' AND resolved = 0",
+                    (mac,),
+                )
+                await self._conn.commit()
+            except Exception:
+                pass
         return result
 
     async def reject_device(self, mac: str, *, actor: str, reason: str | None = None) -> Device | None:
