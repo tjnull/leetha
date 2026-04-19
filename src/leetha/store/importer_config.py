@@ -114,6 +114,16 @@ class ImporterConfigRepository:
         )
         await self._conn.commit()
 
+    async def set_secret(self, name: str, plaintext: str, *, data_dir=None) -> None:
+        """Persist a secret for this importer via the AES-GCM credential store."""
+        from leetha.inventory.credentials import store_secret
+        store_secret(name, plaintext, data_dir=data_dir)
+
+    async def get_secret(self, name: str, *, data_dir=None) -> str | None:
+        """Return the plaintext secret (env-var override wins)."""
+        from leetha.inventory.credentials import get_secret as _g
+        return _g(name, data_dir=data_dir)
+
     async def schedule_next_sync(self, name: str, delay_seconds: int | None = None) -> None:
         cfg = await self.get(name)
         if cfg is None:
