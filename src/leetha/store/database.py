@@ -51,7 +51,23 @@ CREATE TABLE IF NOT EXISTS devices (
     location           TEXT,
     criticality        TEXT CHECK (criticality IN ('low','medium','high','critical') OR criticality IS NULL),
     tags               TEXT,
-    notes              TEXT
+    notes              TEXT,
+    authorization      TEXT NOT NULL DEFAULT 'unapproved',
+    authorized_at      TEXT,
+    authorized_by      TEXT
+);
+"""
+
+_TABLE_AUTHORIZATION_HISTORY = """\
+CREATE TABLE IF NOT EXISTS authorization_history (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    mac            TEXT NOT NULL,
+    previous_state TEXT NOT NULL,
+    new_state      TEXT NOT NULL,
+    actor          TEXT NOT NULL,
+    reason         TEXT,
+    timestamp      TEXT NOT NULL,
+    FOREIGN KEY (mac) REFERENCES devices(mac)
 );
 """
 
@@ -190,6 +206,7 @@ _ALL_TABLES = (
     + _TABLE_ARP_HISTORY
     + _TABLE_SUPPRESSION_RULES
     + _TABLE_AUTH_TOKENS
+    + _TABLE_AUTHORIZATION_HISTORY
 )
 
 
@@ -392,6 +409,8 @@ class Database:
             "CREATE INDEX IF NOT EXISTS idx_dev_identity ON devices(identity_id)",
             "CREATE INDEX IF NOT EXISTS idx_devices_criticality ON devices(criticality)",
             "CREATE INDEX IF NOT EXISTS idx_devices_location ON devices(location)",
+            "CREATE INDEX IF NOT EXISTS idx_devices_authorization ON devices(authorization)",
+            "CREATE INDEX IF NOT EXISTS idx_auth_hist_mac ON authorization_history(mac)",
             "CREATE INDEX IF NOT EXISTS idx_probe_status ON probe_targets(status)",
             "CREATE INDEX IF NOT EXISTS idx_fp_hist_mac ON fingerprint_history(mac)",
             "CREATE INDEX IF NOT EXISTS idx_fp_hist_ts ON fingerprint_history(timestamp)",
@@ -437,6 +456,11 @@ class Database:
             ("criticality", "ALTER TABLE devices ADD COLUMN criticality TEXT"),
             ("tags", "ALTER TABLE devices ADD COLUMN tags TEXT"),
             ("notes", "ALTER TABLE devices ADD COLUMN notes TEXT"),
+            # Phase A.2 — tri-state authorization
+            ("authorization",
+             "ALTER TABLE devices ADD COLUMN authorization TEXT NOT NULL DEFAULT 'unapproved'"),
+            ("authorized_at", "ALTER TABLE devices ADD COLUMN authorized_at TEXT"),
+            ("authorized_by", "ALTER TABLE devices ADD COLUMN authorized_by TEXT"),
         ):
             if col_name not in dev_cols:
                 await self._conn.execute(col_sql)
