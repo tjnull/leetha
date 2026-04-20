@@ -14,8 +14,14 @@ import {
 import { fetchDevices, fetchFilterOptions, type Device } from "@/lib/api";
 import { DeviceDrawer } from "@/components/shared/DeviceDrawer";
 import { BaselineBanner } from "@/components/BaselineBanner";
+import { CriticalityPill } from "@/components/CriticalityPill";
+import { AuthorizationBadge } from "@/components/AuthorizationBadge";
+import { PresenceDot } from "@/components/PresenceDot";
+import { Badge } from "@/components/ui/badge";
 import { getDeviceTypeColor } from "@/lib/constants";
 import { cn } from "@/lib/utils";
+import { authHeaders } from "@/lib/api";
+import { toast } from "sonner";
 import {
   ArrowUp,
   ArrowDown,
@@ -25,6 +31,9 @@ import {
   ChevronRight,
   ChevronLeft,
   X,
+  CheckCircle,
+  XCircle,
+  RotateCcw,
 } from "lucide-react";
 import type { WsStatus, WsMessage } from "@/hooks/use-websocket";
 
@@ -81,12 +90,28 @@ function getPaginationRange(
   return pages;
 }
 
+async function bulkAuthorize(
+  action: "approve" | "reject" | "revoke",
+  macs: string[],
+  reason?: string,
+): Promise<{ updated: number; missing: string[] }> {
+  const res = await fetch("/api/devices/bulk/authorization", {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ action, macs, ...(reason ? { reason } : {}) }),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
 export default function Devices({ subscribe }: DevicesProps) {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const [drawerMac, setDrawerMac] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState(searchParams.get("q") ?? "");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [selectedMacs, setSelectedMacs] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   // --- Read URL state ---
   const page = Number(searchParams.get("page")) || 1;
@@ -278,6 +303,83 @@ export default function Devices({ subscribe }: DevicesProps) {
 
       <BaselineBanner />
 
+      {/* Bulk action toolbar (Phase A.2 follow-up) */}
+      {selectedMacs.size > 0 && (
+        <div className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-2 flex items-center justify-between">
+          <span className="text-sm">
+            <span className="font-semibold">{selectedMacs.size}</span> device(s) selected
+          </span>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="default"
+              disabled={bulkBusy}
+              onClick={async () => {
+                setBulkBusy(true);
+                try {
+                  const result = await bulkAuthorize("approve", Array.from(selectedMacs));
+                  toast.success(`Approved ${result.updated} device(s)`);
+                  setSelectedMacs(new Set());
+                  queryClient.invalidateQueries({ queryKey: ["devices"] });
+                  queryClient.invalidateQueries({ queryKey: ["baseline-status"] });
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : "Bulk approve failed");
+                } finally { setBulkBusy(false); }
+              }}
+              className="gap-1"
+            >
+              <CheckCircle size={14} /> Approve
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={bulkBusy}
+              onClick={async () => {
+                setBulkBusy(true);
+                try {
+                  const result = await bulkAuthorize("reject", Array.from(selectedMacs));
+                  toast.success(`Rejected ${result.updated} device(s)`);
+                  setSelectedMacs(new Set());
+                  queryClient.invalidateQueries({ queryKey: ["devices"] });
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : "Bulk reject failed");
+                } finally { setBulkBusy(false); }
+              }}
+              className="gap-1"
+            >
+              <XCircle size={14} /> Reject
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={bulkBusy}
+              onClick={async () => {
+                setBulkBusy(true);
+                try {
+                  const result = await bulkAuthorize("revoke", Array.from(selectedMacs));
+                  toast.success(`Revoked ${result.updated} device(s)`);
+                  setSelectedMacs(new Set());
+                  queryClient.invalidateQueries({ queryKey: ["devices"] });
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : "Bulk revoke failed");
+                } finally { setBulkBusy(false); }
+              }}
+              className="gap-1"
+            >
+              <RotateCcw size={14} /> Revoke
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setSelectedMacs(new Set())}
+              className="text-muted-foreground gap-1"
+            >
+              <X size={14} /> Clear
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Filter bar */}
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -441,6 +543,26 @@ export default function Devices({ subscribe }: DevicesProps) {
           <table className="w-full">
             <thead>
               <tr className="bg-card border-b border-border">
+                <th className="w-10 px-3 py-3 text-left">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all on page"
+                    checked={
+                      devices.length > 0 &&
+                      devices.every((d: Device) => selectedMacs.has(d.primary_mac || d.mac))
+                    }
+                    onChange={(e) => {
+                      const next = new Set(selectedMacs);
+                      if (e.target.checked) {
+                        devices.forEach((d: Device) => next.add(d.primary_mac || d.mac));
+                      } else {
+                        devices.forEach((d: Device) => next.delete(d.primary_mac || d.mac));
+                      }
+                      setSelectedMacs(next);
+                    }}
+                    className="accent-primary cursor-pointer"
+                  />
+                </th>
                 {[
                   { key: "mac", label: "Hardware Address" },
                   { key: "ip_v4", label: "Network Address" },
@@ -450,6 +572,11 @@ export default function Devices({ subscribe }: DevicesProps) {
                   { key: "hostname", label: "Hostname" },
                   { key: "confidence", label: "Certainty" },
                   { key: "alert_status", label: "Disposition" },
+                  { key: "authorization", label: "Auth" },
+                  { key: "criticality", label: "Crit." },
+                  { key: "owner", label: "Owner" },
+                  { key: "location", label: "Location" },
+                  { key: "tags", label: "Tags" },
                   { key: "first_seen", label: "Discovered" },
                   { key: "last_seen", label: "Last Active" },
                 ].map((col) => (
@@ -495,16 +622,38 @@ export default function Devices({ subscribe }: DevicesProps) {
                   } else {
                     liveStatus = { label: "Offline", dotClass: "bg-gray-500", textClass: "text-muted-foreground" };
                   }
+                  const isSelected = selectedMacs.has(mac);
                   return (
                     <tr
                       key={mac}
-                      onClick={() => setDrawerMac(mac)}
+                      onClick={(e) => {
+                        // Checkbox clicks shouldn't open the drawer
+                        const target = e.target as HTMLElement;
+                        if (target.tagName === "INPUT" && target.getAttribute("type") === "checkbox") return;
+                        setDrawerMac(mac);
+                      }}
                       className={cn(
                         "cursor-pointer transition-colors group",
                         i % 2 === 0 ? "bg-background" : "bg-card/50",
+                        isSelected && "bg-primary/[0.08]",
                         "hover:bg-primary/[0.04]"
                       )}
                     >
+                      <td className="px-3 py-3.5 border-b border-border/50">
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${mac}`}
+                          checked={isSelected}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => {
+                            const next = new Set(selectedMacs);
+                            if (e.target.checked) next.add(mac);
+                            else next.delete(mac);
+                            setSelectedMacs(next);
+                          }}
+                          className="accent-primary cursor-pointer"
+                        />
+                      </td>
                       <td className="px-4 py-3.5 text-sm whitespace-nowrap border-b border-border/50">
                         <div className="flex items-center gap-2">
                           <span className="font-data text-[13px] text-foreground">
@@ -596,9 +745,47 @@ export default function Devices({ subscribe }: DevicesProps) {
                       </td>
                       <td className="px-4 py-3.5 text-sm whitespace-nowrap border-b border-border/50">
                         <div className="flex items-center gap-2">
+                          <PresenceDot
+                            isOnline={d.is_online ?? true}
+                            offlineSince={d.offline_since ?? null}
+                          />
                           <span className={cn("w-2 h-2 rounded-full shrink-0", liveStatus.dotClass)} />
                           <span className={cn("text-[11px] font-semibold", liveStatus.textClass)}>{liveStatus.label}</span>
                         </div>
+                      </td>
+                      <td className="px-4 py-3.5 text-sm whitespace-nowrap border-b border-border/50">
+                        <AuthorizationBadge value={d.authorization ?? "unapproved"} />
+                      </td>
+                      <td className="px-4 py-3.5 text-sm whitespace-nowrap border-b border-border/50">
+                        {d.criticality ? (
+                          <CriticalityPill value={d.criticality} />
+                        ) : (
+                          <span className="text-muted-foreground/40">--</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3.5 text-sm whitespace-nowrap border-b border-border/50">
+                        <span className={d.owner ? "text-foreground" : "text-muted-foreground/40"}>
+                          {d.owner || "--"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 text-sm whitespace-nowrap border-b border-border/50">
+                        <span className={d.location ? "text-foreground" : "text-muted-foreground/40"}>
+                          {d.location || "--"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 text-sm border-b border-border/50">
+                        {(d.tags && d.tags.length > 0) ? (
+                          <div className="flex flex-wrap gap-1 max-w-[160px]">
+                            {d.tags.slice(0, 3).map((t) => (
+                              <Badge key={t} variant="secondary" className="text-[10px] px-1.5 py-0">{t}</Badge>
+                            ))}
+                            {d.tags.length > 3 && (
+                              <span className="text-[10px] text-muted-foreground">+{d.tags.length - 3}</span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground/40">--</span>
+                        )}
                       </td>
                       <td className="px-4 py-3.5 text-sm whitespace-nowrap border-b border-border/50">
                         <span className="text-[12px] text-muted-foreground font-data">
@@ -622,7 +809,7 @@ export default function Devices({ subscribe }: DevicesProps) {
               ) : (
                 <tr>
                   <td
-                    colSpan={11}
+                    colSpan={17}
                     className="px-4 py-16 text-center text-muted-foreground"
                   >
                     <Monitor size={32} className="mx-auto mb-3 opacity-20" />

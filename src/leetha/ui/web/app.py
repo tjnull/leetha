@@ -420,6 +420,9 @@ fastapi_app.include_router(_devices_router)
 from leetha.ui.web.routers.inventory import router as _inventory_router
 fastapi_app.include_router(_inventory_router)
 
+from leetha.ui.web.routers.authorization_bulk import router as _auth_bulk_router
+fastapi_app.include_router(_auth_bulk_router)
+
 
 @fastapi_app.get("/api/trust")
 async def api_trust_list():

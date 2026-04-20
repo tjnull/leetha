@@ -16,6 +16,7 @@ import { CriticalityPill, type Criticality } from "@/components/CriticalityPill"
 import { AuthorizationBadge, type AuthorizationState } from "@/components/AuthorizationBadge";
 import { AuthorizationPanel } from "@/components/shared/AuthorizationPanel";
 import { PresenceDot } from "@/components/PresenceDot";
+import { PresencePanel } from "@/components/shared/PresencePanel";
 
 // --- API ---
 
@@ -270,6 +271,20 @@ export function DeviceDrawer({ mac, open, onClose }: DeviceDrawerProps) {
                     queryClient.invalidateQueries({ queryKey: ["device-detail", mac] });
                     queryClient.invalidateQueries({ queryKey: ["devices"] });
                     queryClient.invalidateQueries({ queryKey: ["baseline-status"] });
+                  }}
+                />
+              )}
+
+              {/* ── Presence (Phase A.4) ── */}
+              {mac && (
+                <PresencePanel
+                  mac={mac}
+                  isOnline={device.is_online ?? true}
+                  offlineSince={device.offline_since ?? null}
+                  thresholdSeconds={device.presence_threshold_seconds ?? 300}
+                  onChanged={() => {
+                    queryClient.invalidateQueries({ queryKey: ["device-detail", mac] });
+                    queryClient.invalidateQueries({ queryKey: ["devices"] });
                   }}
                 />
               )}

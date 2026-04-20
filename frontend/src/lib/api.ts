@@ -65,6 +65,20 @@ export interface Device {
   alert_status: string | null;
   manual_override: Record<string, string> | null;
   raw_evidence?: Array<Record<string, unknown>>;
+  // Phase A.1 custom properties
+  owner?: string | null;
+  location?: string | null;
+  criticality?: "low" | "medium" | "high" | "critical" | null;
+  tags?: string[];
+  notes?: string | null;
+  // Phase A.2 authorization
+  authorization?: "approved" | "unapproved" | "rejected" | null;
+  authorized_at?: string | null;
+  authorized_by?: string | null;
+  // Phase A.4 presence
+  is_online?: boolean;
+  offline_since?: string | null;
+  presence_threshold_seconds?: number;
 }
 
 export interface DeviceListResponse {
