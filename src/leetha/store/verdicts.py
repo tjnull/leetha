@@ -115,7 +115,9 @@ class VerdictRepository:
         )
         select = f"""
             SELECT h.hw_addr, v.category, v.vendor, v.platform,
-                   v.platform_version, v.model, v.hostname, v.certainty,
+                   v.platform_version, v.model,
+                   COALESCE(v.hostname, d.hostname) AS hostname,
+                   v.certainty,
                    v.evidence_chain,
                    h.ip_addr, h.ip_v6, h.discovered_at, h.last_active,
                    h.mac_randomized, h.real_hw_addr, h.disposition,
@@ -146,10 +148,11 @@ class VerdictRepository:
 
         if q:
             conditions.append(
-                "(h.hw_addr LIKE ? OR v.hostname LIKE ? OR v.vendor LIKE ? OR h.ip_addr LIKE ?)"
+                "(h.hw_addr LIKE ? OR v.hostname LIKE ? OR d.hostname LIKE ?"
+                " OR v.vendor LIKE ? OR h.ip_addr LIKE ?)"
             )
             like = f"%{q}%"
-            params.extend([like, like, like, like])
+            params.extend([like, like, like, like, like])
         if manufacturer:
             conditions.append("v.vendor = ?")
             params.append(manufacturer)
