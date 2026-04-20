@@ -15,6 +15,7 @@ import { CustomProperties, type CustomPropsValues } from "@/components/shared/Cu
 import { CriticalityPill, type Criticality } from "@/components/CriticalityPill";
 import { AuthorizationBadge, type AuthorizationState } from "@/components/AuthorizationBadge";
 import { AuthorizationPanel } from "@/components/shared/AuthorizationPanel";
+import { PresenceDot } from "@/components/PresenceDot";
 
 // --- API ---
 
@@ -41,6 +42,10 @@ interface DeviceInfo {
   authorization?: AuthorizationState | null;
   authorized_at?: string | null;
   authorized_by?: string | null;
+  // Phase A.4 presence
+  is_online?: boolean;
+  offline_since?: string | null;
+  presence_threshold_seconds?: number;
 }
 interface DeviceDetailResponse { device: DeviceInfo; evidence: Array<Record<string, unknown>>; }
 interface Observation { id: number; timestamp: string; source_type: string; confidence: number | null; }
@@ -239,6 +244,17 @@ export function DeviceDrawer({ mac, open, onClose }: DeviceDrawerProps) {
                   )}
                   <LabelValue label="Authorization">
                     <AuthorizationBadge value={device.authorization ?? "unapproved"} />
+                  </LabelValue>
+                  <LabelValue label="Presence">
+                    <span className="inline-flex items-center gap-2">
+                      <PresenceDot
+                        isOnline={device.is_online ?? true}
+                        offlineSince={device.offline_since ?? null}
+                      />
+                      <span className="text-xs">
+                        {(device.is_online ?? true) ? "Online" : "Offline"}
+                      </span>
+                    </span>
                   </LabelValue>
                 </div>
               </Section>
