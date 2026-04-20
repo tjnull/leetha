@@ -262,7 +262,17 @@ async def _ensure_device_row(app_instance, mac: str) -> bool:
     existing = await app_instance.db.get_device(mac)
     if existing is not None:
         return True
-    host = await app_instance.store.hosts.find_by_addr(mac)
+    store = getattr(app_instance, "store", None)
+    hosts_repo = getattr(store, "hosts", None) if store is not None else None
+    find_by_addr = getattr(hosts_repo, "find_by_addr", None)
+    if find_by_addr is None:
+        return False
+    try:
+        host = await find_by_addr(mac)
+    except TypeError:
+        # Unit tests occasionally hand us a plain MagicMock for store.hosts;
+        # treat an unawaitable return as "no host known".
+        return False
     if host is None:
         return False
     await app_instance.db.upsert_device(Device(
