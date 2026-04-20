@@ -10,7 +10,8 @@ from leetha.config import get_config
 from leetha.inventory.importers.dhcp_leases import DHCPLeaseImporter, parse_lease_file
 from leetha.store.database import Database
 from leetha.store.importer_config import ImporterConfig, ImporterConfigRepository
-from leetha.store.models import Device
+from leetha.store.models import Device, Host
+from leetha.store.store import Store
 
 
 async def handle_dhcp_command(parsed_args) -> int:
@@ -37,6 +38,8 @@ async def _cmd_import(args) -> int:
     cfg = get_config()
     db = Database(cfg.db_path)
     await db.initialize()
+    store = Store(str(cfg.db_path))
+    await store.initialize()
     try:
         ts = datetime.now(timezone.utc)
         for d in devices:
@@ -45,9 +48,16 @@ async def _cmd_import(args) -> int:
                 first_seen=ts, last_seen=ts,
                 passively_observed=False,
             ))
+            # Also upsert into hosts so the device shows up in the UI list.
+            await store.hosts.upsert(Host(
+                hw_addr=d.mac, ip_addr=d.ip,
+                discovered_at=ts, last_active=ts,
+                disposition="new",
+            ))
         print(f"Imported {len(devices)} device(s) from {path}")
         return 0
     finally:
+        await store.close()
         await db.close()
 
 
