@@ -604,7 +604,7 @@ INSERT INTO devices (
     raw_evidence, is_randomized_mac, correlated_mac,
     identity_id, manual_override,
     owner, location, criticality, tags, notes,
-    passively_observed
+    passively_observed, presence_threshold_seconds
 ) VALUES (
     ?1, ?2, ?3, ?4,
     ?5, ?6, ?7, ?8,
@@ -612,7 +612,7 @@ INSERT INTO devices (
     ?13, ?14, ?15,
     ?16, ?17,
     ?18, ?19, ?20, ?21, ?22,
-    ?23
+    ?23, ?24
 )
 ON CONFLICT(mac) DO UPDATE SET
     hostname       = COALESCE(excluded.hostname, devices.hostname),
@@ -644,7 +644,12 @@ ON CONFLICT(mac) DO UPDATE SET
     tags           = COALESCE(excluded.tags, devices.tags),
     notes          = COALESCE(excluded.notes, devices.notes),
     -- passively_observed: flip to True once we see any live packet; never flip back
-    passively_observed = MAX(devices.passively_observed, excluded.passively_observed)
+    passively_observed = MAX(devices.passively_observed, excluded.passively_observed),
+    -- presence_threshold_seconds: upserts without a value should not stomp a user's override
+    presence_threshold_seconds = COALESCE(
+        NULLIF(excluded.presence_threshold_seconds, 300),
+        devices.presence_threshold_seconds
+    )
 """
 
     @staticmethod
@@ -693,6 +698,7 @@ ON CONFLICT(mac) DO UPDATE SET
             tags_json,
             dev.notes,
             int(dev.passively_observed),
+            int(dev.presence_threshold_seconds),
         )
 
     async def upsert_device(self, device: Device) -> None:
