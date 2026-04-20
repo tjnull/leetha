@@ -192,6 +192,22 @@ class LeethaApp:
         # Start periodic analysis loop (stale source checks, etc.)
         self._tasks.append(asyncio.create_task(self._analysis_loop()))
 
+        # Phase A.4 — presence sweeper: flip devices online/offline and fire
+        # presence rules when transitions happen.
+        from leetha.presence.sweeper import PresenceSweeper
+        from leetha.rules.presence import handle_presence_transition as _presence_cb
+
+        async def _on_presence(t):
+            try:
+                await _presence_cb(self.store, t)
+            except Exception:
+                logger.exception("presence callback failed for %s", t.mac)
+
+        self.presence_sweeper = PresenceSweeper(
+            self.db, period_seconds=60.0, on_transition=_on_presence,
+        )
+        self.presence_sweeper.start()
+
         # Watchdog: monitor the process loop and restart it if it dies
         self._tasks.append(asyncio.create_task(self._watchdog()))
 
@@ -645,6 +661,14 @@ class LeethaApp:
         # 2. Cancel all async tasks immediately
         for task in self._tasks:
             task.cancel()
+
+        # 2b. Stop the presence sweeper (Phase A.4)
+        sweeper = getattr(self, "presence_sweeper", None)
+        if sweeper is not None:
+            try:
+                await asyncio.wait_for(sweeper.stop(), timeout=1.0)
+            except (asyncio.TimeoutError, Exception):
+                pass
 
         # 3. Stop remote sensor listener
         try:
