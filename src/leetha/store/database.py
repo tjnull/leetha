@@ -731,6 +731,7 @@ ON CONFLICT(mac) DO UPDATE SET
 
     _UPDATABLE_DEVICE_PROPS = frozenset({
         "owner", "location", "criticality", "tags", "notes",
+        "presence_threshold_seconds",
     })
 
     _AUTH_STATES = frozenset({"unapproved", "approved", "rejected"})

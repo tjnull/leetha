@@ -13,13 +13,14 @@ router = APIRouter()
 
 
 class DevicePatch(BaseModel):
-    """Partial update of device custom-property fields (Phase A.1)."""
+    """Partial update of device custom-property fields (Phase A.1 + A.4)."""
 
     owner: str | None = Field(default=None, max_length=200)
     location: str | None = Field(default=None, max_length=200)
     criticality: Literal["low", "medium", "high", "critical"] | None = None
     tags: list[str] | None = Field(default=None, max_length=20)
     notes: str | None = Field(default=None, max_length=2000)
+    presence_threshold_seconds: int | None = Field(default=None, ge=30, le=86400)
 
     @field_validator("tags")
     @classmethod
@@ -247,24 +248,34 @@ async def bulk_device_action(request: Request):
 
 
 def _merge_custom_props(device_dict: dict, row) -> dict:
-    """Merge Phase A.1 custom-property fields from a devices-row into the API dict."""
+    """Merge Phase A.1 custom-property + A.2 auth + A.4 presence fields into the API dict."""
     if row is None:
         device_dict.setdefault("owner", None)
         device_dict.setdefault("location", None)
         device_dict.setdefault("criticality", None)
         device_dict.setdefault("tags", [])
-        # 'notes' already used by overrides; keep only if not already set
         device_dict.setdefault("notes", None)
+        device_dict.setdefault("authorization", "unapproved")
+        device_dict.setdefault("authorized_at", None)
+        device_dict.setdefault("authorized_by", None)
+        device_dict.setdefault("is_online", True)
+        device_dict.setdefault("offline_since", None)
+        device_dict.setdefault("presence_threshold_seconds", 300)
         return device_dict
     device_dict["owner"] = row.owner
     device_dict["location"] = row.location
     device_dict["criticality"] = row.criticality
     device_dict["tags"] = list(row.tags) if row.tags else []
-    # Custom notes override the override-style notes only if non-null
     if row.notes is not None:
         device_dict["notes"] = row.notes
     else:
         device_dict.setdefault("notes", None)
+    device_dict["authorization"] = row.authorization or "unapproved"
+    device_dict["authorized_at"] = row.authorized_at.isoformat() if row.authorized_at else None
+    device_dict["authorized_by"] = row.authorized_by
+    device_dict["is_online"] = bool(row.is_online)
+    device_dict["offline_since"] = row.offline_since.isoformat() if row.offline_since else None
+    device_dict["presence_threshold_seconds"] = int(row.presence_threshold_seconds)
     return device_dict
 
 
