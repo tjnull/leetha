@@ -295,6 +295,9 @@ class FindingRule(StrEnum):
     BEHAVIORAL_DRIFT = "behavioral_drift"
     SENSOR_CONNECT = "sensor_connect"
     SENSOR_DISCONNECT = "sensor_disconnect"
+    # Phase A.4 — presence rules
+    DEVICE_WENT_OFFLINE = "device_went_offline"
+    DEVICE_CAME_ONLINE = "device_came_online"
 
 
 @dataclass
