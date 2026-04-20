@@ -347,6 +347,14 @@ async def baseline_set_endpoint(body: AuthorizationBody, request: Request):
     return {"touched": touched}
 
 
+@router.post("/api/baseline/reset")
+async def baseline_reset_endpoint(body: AuthorizationBody, request: Request):
+    """Return every device to 'unapproved' (audit-logged)."""
+    app_instance = _get_app()
+    touched = await app_instance.db.baseline_reset(actor="baseline-reset")
+    return {"touched": touched}
+
+
 @router.get("/api/baseline/status")
 async def baseline_status_endpoint():
     app_instance = _get_app()

@@ -802,6 +802,37 @@ ON CONFLICT(mac) DO UPDATE SET
             mac, new_state="unapproved", actor=actor, reason=reason,
         )
 
+    async def baseline_reset(self, *, actor: str = "baseline") -> int:
+        """Revert every device back to 'unapproved' and record history rows.
+
+        Returns the number of devices that were transitioned (i.e. had any
+        state other than 'unapproved' before the call).
+        """
+        assert self._conn is not None
+        now_iso = datetime.now(timezone.utc).isoformat()
+        async with self._mu:
+            async with self._conn.execute(
+                "SELECT mac, authorization FROM devices "
+                "WHERE authorization != 'unapproved'"
+            ) as cur:
+                rows = [(r[0], r[1]) for r in await cur.fetchall()]
+            if not rows:
+                return 0
+            for mac, previous in rows:
+                await self._conn.execute(
+                    "UPDATE devices SET authorization = 'unapproved', "
+                    "authorized_at = NULL, authorized_by = NULL WHERE mac = ?",
+                    (mac,),
+                )
+                await self._conn.execute(
+                    "INSERT INTO authorization_history "
+                    "(mac, previous_state, new_state, actor, reason, timestamp) "
+                    "VALUES (?, ?, 'unapproved', ?, 'baseline-reset', ?)",
+                    (mac, previous, actor, now_iso),
+                )
+            await self._conn.commit()
+        return len(rows)
+
     async def baseline_set(self, *, actor: str = "baseline") -> int:
         """Approve every currently-unapproved device. Returns count touched."""
         assert self._conn is not None

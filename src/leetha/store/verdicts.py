@@ -123,6 +123,12 @@ class VerdictRepository:
                    d.owner AS d_owner, d.location AS d_location,
                    d.criticality AS d_criticality, d.tags AS d_tags,
                    d.notes AS d_notes,
+                   d.authorization AS d_authorization,
+                   d.authorized_at AS d_authorized_at,
+                   d.authorized_by AS d_authorized_by,
+                   d.is_online AS d_is_online,
+                   d.offline_since AS d_offline_since,
+                   d.presence_threshold_seconds AS d_threshold,
                    {_IP_SORT_EXPR} AS ip_sort_key
             FROM hosts h
             LEFT JOIN verdicts v ON h.hw_addr = v.hw_addr
@@ -244,6 +250,14 @@ class VerdictRepository:
                 "criticality": row["d_criticality"] if "d_criticality" in row.keys() else None,
                 "tags": tags_val,
                 "notes": row["d_notes"] if "d_notes" in row.keys() else None,
+                # Phase A.2 authorization
+                "authorization": (row["d_authorization"] if "d_authorization" in row.keys() else None) or "unapproved",
+                "authorized_at": row["d_authorized_at"] if "d_authorized_at" in row.keys() else None,
+                "authorized_by": row["d_authorized_by"] if "d_authorized_by" in row.keys() else None,
+                # Phase A.4 presence
+                "is_online": bool(row["d_is_online"]) if ("d_is_online" in row.keys() and row["d_is_online"] is not None) else True,
+                "offline_since": row["d_offline_since"] if "d_offline_since" in row.keys() else None,
+                "presence_threshold_seconds": int(row["d_threshold"]) if ("d_threshold" in row.keys() and row["d_threshold"] is not None) else 300,
             })
             chain_raw = row["evidence_chain"]
             if chain_raw:

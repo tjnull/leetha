@@ -45,6 +45,10 @@ async def handle_baseline_command(parsed_args) -> int:
             touched = await db.baseline_set(actor="baseline")
             print(f"Baseline set: approved {touched} previously-unapproved device(s).")
             return 0
+        if action == "reset":
+            touched = await db.baseline_reset(actor="baseline-reset")
+            print(f"Baseline reset: returned {touched} device(s) to unapproved.")
+            return 0
         if action == "status":
             status = await db.baseline_status()
             print(
@@ -55,7 +59,7 @@ async def handle_baseline_command(parsed_args) -> int:
             if status["last_baseline_at"]:
                 print(f"last_baseline_at={status['last_baseline_at']}")
             return 0
-        print("Usage: leetha baseline {set|status}")
+        print("Usage: leetha baseline {set|reset|status}")
         return 2
     finally:
         await db.close()

@@ -247,6 +247,7 @@ console commands:
     baseline_parser = sub.add_parser("baseline", help="Manage authorization baseline")
     baseline_sub = baseline_parser.add_subparsers(dest="baseline_action")
     baseline_sub.add_parser("set", help="Approve all currently unapproved devices")
+    baseline_sub.add_parser("reset", help="Return every device to 'unapproved'")
     baseline_sub.add_parser("status", help="Show authorization counts")
 
     # Phase A.3 — DHCP lease importer CLI
