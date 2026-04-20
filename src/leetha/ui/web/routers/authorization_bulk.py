@@ -45,9 +45,16 @@ async def bulk_authorization(body: BulkAuthorizationBody, request: Request):
     }
     fn = mutators[body.action]
 
+    # Share the ensure-row helper with the per-device endpoints — live-capture
+    # hosts may not have a ``devices`` row yet.
+    from leetha.ui.web.routers.devices import _ensure_device_row
+
     updated = 0
     missing: list[str] = []
     for mac in body.macs:
+        if not await _ensure_device_row(app_instance, mac):
+            missing.append(mac)
+            continue
         result = await fn(mac, actor=actor, reason=body.reason)
         if result is None:
             missing.append(mac)

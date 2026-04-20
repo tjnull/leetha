@@ -247,6 +247,37 @@ async def bulk_device_action(request: Request):
     return {"status": "ok", "updated": updated}
 
 
+async def _ensure_device_row(app_instance, mac: str) -> bool:
+    """Guarantee that a devices-table row exists for ``mac`` before mutating it.
+
+    Live capture only populates ``hosts`` (and ``verdicts``). Phase A columns
+    live on ``devices``, so if someone tries to edit a host that has never been
+    upserted into ``devices`` yet, we lazily create the row from whatever we
+    know via ``hosts``. Returns False only if the MAC is unknown in both
+    tables — the caller should then raise 404.
+    """
+    from datetime import datetime, timezone
+    from leetha.store.models import Device
+
+    existing = await app_instance.db.get_device(mac)
+    if existing is not None:
+        return True
+    host = await app_instance.store.hosts.find_by_addr(mac)
+    if host is None:
+        return False
+    await app_instance.db.upsert_device(Device(
+        mac=mac,
+        ip_v4=host.ip_addr,
+        ip_v6=host.ip_v6,
+        first_seen=host.discovered_at or datetime.now(timezone.utc),
+        last_seen=host.last_active or datetime.now(timezone.utc),
+        is_randomized_mac=bool(host.mac_randomized),
+        correlated_mac=host.real_hw_addr,
+        identity_id=host.identity_id,
+    ))
+    return True
+
+
 def _merge_custom_props(device_dict: dict, row) -> dict:
     """Merge Phase A.1 custom-property + A.2 auth + A.4 presence fields into the API dict."""
     if row is None:
@@ -284,11 +315,10 @@ async def patch_device(mac: str, patch: DevicePatch):
     """Apply a partial update to a device's custom-property fields."""
     app_instance = _get_app()
     updates = patch.model_dump(exclude_unset=True)
-    existing = await app_instance.db.get_device(mac)
-    if existing is None:
+    if not await _ensure_device_row(app_instance, mac):
         raise HTTPException(status_code=404, detail="Device not found")
     updated = await app_instance.db.update_device_props(mac, **updates)
-    assert updated is not None  # existing confirmed above
+    assert updated is not None
     return updated.to_dict()
 
 
@@ -306,37 +336,34 @@ def _actor_from_request(request: Request) -> str:
 @router.post("/api/devices/{mac}/approve")
 async def approve_device_endpoint(mac: str, body: AuthorizationBody, request: Request):
     app_instance = _get_app()
-    existing = await app_instance.db.get_device(mac)
-    if existing is None:
+    if not await _ensure_device_row(app_instance, mac):
         raise HTTPException(status_code=404, detail="Device not found")
     updated = await app_instance.db.approve_device(
         mac, actor=_actor_from_request(request), reason=body.reason,
     )
-    return (updated or existing).to_dict()
+    return updated.to_dict() if updated else (await app_instance.db.get_device(mac)).to_dict()
 
 
 @router.post("/api/devices/{mac}/reject")
 async def reject_device_endpoint(mac: str, body: AuthorizationBody, request: Request):
     app_instance = _get_app()
-    existing = await app_instance.db.get_device(mac)
-    if existing is None:
+    if not await _ensure_device_row(app_instance, mac):
         raise HTTPException(status_code=404, detail="Device not found")
     updated = await app_instance.db.reject_device(
         mac, actor=_actor_from_request(request), reason=body.reason,
     )
-    return (updated or existing).to_dict()
+    return updated.to_dict() if updated else (await app_instance.db.get_device(mac)).to_dict()
 
 
 @router.post("/api/devices/{mac}/revoke")
 async def revoke_device_endpoint(mac: str, body: AuthorizationBody, request: Request):
     app_instance = _get_app()
-    existing = await app_instance.db.get_device(mac)
-    if existing is None:
+    if not await _ensure_device_row(app_instance, mac):
         raise HTTPException(status_code=404, detail="Device not found")
     updated = await app_instance.db.revoke_device(
         mac, actor=_actor_from_request(request), reason=body.reason,
     )
-    return (updated or existing).to_dict()
+    return updated.to_dict() if updated else (await app_instance.db.get_device(mac)).to_dict()
 
 
 @router.post("/api/baseline/set")
