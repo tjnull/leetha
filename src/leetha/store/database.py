@@ -802,6 +802,28 @@ ON CONFLICT(mac) DO UPDATE SET
             mac, new_state="unapproved", actor=actor, reason=reason,
         )
 
+    async def get_authorization_history(
+        self, mac: str, *, limit: int = 100,
+    ) -> list[dict]:
+        """Return the authorization_history rows for ``mac``, newest first."""
+        assert self._conn is not None
+        limit = max(1, min(limit, 1000))
+        async with self._conn.execute(
+            "SELECT id, mac, previous_state, new_state, actor, reason, timestamp "
+            "FROM authorization_history WHERE mac = ? "
+            "ORDER BY id DESC LIMIT ?",
+            (mac, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [
+            {
+                "id": r[0], "mac": r[1],
+                "previous_state": r[2], "new_state": r[3],
+                "actor": r[4], "reason": r[5], "timestamp": r[6],
+            }
+            for r in rows
+        ]
+
     async def baseline_reset(self, *, actor: str = "baseline") -> int:
         """Revert every device back to 'unapproved' and record history rows.
 

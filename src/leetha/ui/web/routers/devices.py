@@ -376,6 +376,17 @@ async def revoke_device_endpoint(mac: str, body: AuthorizationBody, request: Req
     return updated.to_dict() if updated else (await app_instance.db.get_device(mac)).to_dict()
 
 
+@router.get("/api/devices/{mac}/authorization/history")
+async def get_device_authorization_history(mac: str, limit: int = 100):
+    """Return the authorization audit trail for a single device, newest first."""
+    app_instance = _get_app()
+    history = await app_instance.db.get_authorization_history(mac, limit=limit)
+    # 404 only if the MAC is unknown in BOTH hosts AND devices AND has no history.
+    if not history and not await _ensure_device_row(app_instance, mac):
+        raise HTTPException(status_code=404, detail="Device not found")
+    return {"mac": mac, "history": history}
+
+
 @router.post("/api/baseline/set")
 async def baseline_set_endpoint(body: AuthorizationBody, request: Request):
     """Bulk-approve every currently unapproved device."""
