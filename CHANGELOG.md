@@ -5,6 +5,72 @@ All notable changes to Leetha will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-04-19 — Phase A Foundation
+
+**Breaking behavior change:** newly discovered devices now default to
+`authorization=unapproved`. Findings on unapproved devices fire at WARNING
+severity (rejected → CRITICAL). To silence this for an existing network,
+run `leetha baseline set` once or click "Set baseline" in the Devices page.
+
+### Added — A.1 Custom Properties
+- **Custom-property columns on devices** — `owner`, `location`, `criticality`
+  (low/medium/high/critical), `tags` (JSON list), `notes`
+- **`PATCH /api/devices/{mac}`** — pydantic-validated partial update endpoint
+- **`leetha device set <mac>`** and **`leetha device tags add|remove`** CLI commands
+- **CustomProperties panel** in the device drawer; **CriticalityPill** component
+- **Devices list filters** by criticality / owner / location / tag (query params
+  flow through to the store)
+
+### Added — A.2 Tri-state Authorization
+- **`authorization` + `authorized_at` + `authorized_by`** columns + `authorization_history` audit table
+- **Store mutators** `approve_device` / `reject_device` / `revoke_device` with
+  full audit trail; same-state transitions are no-ops
+- **`baseline_set`** atomically approves all unapproved devices; **`baseline_status`**
+  returns per-state counts and last-baseline timestamp
+- **`new_host` rule severity grades by authorization** — approved → INFO,
+  unapproved → WARNING, rejected → CRITICAL; approving a device auto-resolves
+  pending `new_host` findings for that MAC
+- **`POST /api/devices/{mac}/{approve,reject,revoke}`**, **`POST /api/baseline/set`**,
+  **`GET /api/baseline/status`**
+- **`leetha device {approve,reject,revoke}`** and **`leetha baseline {set,status}`** CLI
+- **`AuthorizationBadge`**, **`AuthorizationPanel`**, **`BaselineBanner`** frontend components
+
+### Added — A.3 Inventory Subsystem + DHCP Importer
+- **`leetha.inventory` scaffold** — `BaseImporter`, `ImportedDevice`, `TestResult`,
+  and a module-level `register_importer("name")` decorator registry
+- **`importer_config` table + `ImporterConfigRepository`** — per-importer persistence
+  with `get`, `upsert`, `list_all`, `set_status`, `mark_synced`, `schedule_next_sync`
+- **AES-GCM credential store** (`leetha/inventory/credentials.py`) with
+  `LEETHA_<NAME>_SECRET` environment-variable override; key file chmod 0600;
+  random 96-bit nonces
+- **`ConfigField` typed config schema** with `string`, `int`, `bool`, `secret`,
+  and `select` field types; per-field validators
+- **Per-importer scheduler** (`InventoryScheduler`) with ±20% jitter and exponential
+  backoff ladder (60s → 120s → 240s → 480s → 960s → 1920s → 3600s cap)
+- **Secret-scrubbing log filter** — redacts `Bearer …`, `token=`, `password=`,
+  `JSESSIONID=`, `Cookie: …`, HTTP Digest `response="…"`, and `api[_-]?key` patterns
+- **`passively_observed` flag** — importer-sourced devices start `False`; flips
+  to `True` on first live packet; `new_host` rule is suppressed while `False`
+- **DHCP lease file importer** — parses ISC dhcpd.leases and dnsmasq.leases with
+  auto-detection; malformed lines logged as warnings instead of aborting
+- **`POST /api/inventory/dhcp-leases/upload`** endpoint for in-memory lease-file parsing
+- **`leetha dhcp-leases import <path>`** and **`leetha dhcp-leases set-path <path>`** CLI
+- **Inventory Sources panel** on the Sync page with DHCP upload button
+
+### Added — A.4 Presence Heartbeat
+- **`is_online`, `offline_since`, `presence_threshold_seconds`** columns on devices
+- **`PresenceSweeper`** — 60-second async loop; per-device threshold; idempotent
+- **`device_went_offline`** (severity grades with criticality) and
+  **`device_came_online`** (INFO) rules; coming back online auto-resolves
+  the corresponding offline finding
+- **PATCH supports `presence_threshold_seconds`** (30–86400s) for per-device override
+- **`PresenceDot`** frontend component shown on the device drawer
+- **Sweeper wired into `LeethaApp.start()`** and stopped cleanly on shutdown
+
+### Changed
+- Version bump `1.0.0` → `1.1.0` (stale baseline correction) → `1.2.0`
+  (Phase A release)
+
 ## [1.0.0] - 2026-04-10
 
 ### Added
