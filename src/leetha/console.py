@@ -371,7 +371,9 @@ class LeethaConsole:
             # (stuck DB close, uvicorn draining, scapy sniff socket
             # blocked on recv), force-exit from a daemon thread. This
             # matches the pattern in cli.py's --web-only path.
-            import threading as _threading, time as _time
+            import threading as _threading
+            import time as _time
+
             def _force_exit():
                 _time.sleep(5.0)
                 try:
