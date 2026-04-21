@@ -107,6 +107,8 @@ async def api_devices(
     owner: str | None = None,
     location: str | None = None,
     tag: str | None = None,
+    authorization: str | None = None,
+    is_online: bool | None = None,
     raw: bool = False,
 ):
     """Paginated, filtered, sorted device list."""
@@ -120,6 +122,7 @@ async def api_devices(
         os_family=os_family, alert_status=alert_status,
         interface=interface, confidence_min=confidence_min,
         criticality=criticality, owner=owner, location=location, tag=tag,
+        authorization=authorization, is_online=is_online,
     )
 
     # Sanitize hostnames and reject vendor-mismatched forwarded mDNS names

@@ -85,6 +85,8 @@ class VerdictRepository:
         owner: str | None = None,
         location: str | None = None,
         tag: str | None = None,
+        authorization: str | None = None,
+        is_online: bool | None = None,
     ) -> tuple[list[dict], int]:
         """Return paginated, filtered device list with total count.
 
@@ -188,6 +190,22 @@ class VerdictRepository:
                 "SELECT 1 FROM json_each(d.tags) WHERE value = ?)"
             )
             params.append(tag)
+        if authorization:
+            # Match on devices.authorization; devices row absent ⇒ unapproved.
+            if authorization == "unapproved":
+                conditions.append(
+                    "(d.authorization IS NULL OR d.authorization = 'unapproved')"
+                )
+            else:
+                conditions.append("d.authorization = ?")
+                params.append(authorization)
+        if is_online is not None:
+            # NULL is_online means no devices row ⇒ treated as online=True by
+            # the API's _merge_custom_props default.
+            if is_online:
+                conditions.append("(d.is_online IS NULL OR d.is_online = 1)")
+            else:
+                conditions.append("d.is_online = 0")
 
         where = ""
         if conditions:
