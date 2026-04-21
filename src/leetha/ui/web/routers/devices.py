@@ -573,6 +573,9 @@ async def get_device_detail(mac: str):
     override = await app_instance.store.overrides.find_by_addr(mac)
     device = _build_device_dict(verdict, host, override)
     device["hostname"] = _sanitize_hostname(device.get("hostname"))
+    # Phase A — merge custom-prop / authorization / presence from devices row.
+    dev_row = await app_instance.db.get_device(mac)
+    _merge_custom_props(device, dev_row)
     evidence = device.get("raw_evidence", {})
 
     return {
