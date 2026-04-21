@@ -46,33 +46,67 @@ class PresenceSweeper:
         self._task: asyncio.Task | None = None
 
     async def sweep_once(self) -> list[PresenceTransition]:
-        """Single pass. Returns transitions triggered this pass."""
+        """Single pass. Returns transitions triggered this pass.
+
+        Drives off the UNION of ``hosts`` (populated by live capture — the
+        authoritative freshness source) and ``devices`` (where is_online,
+        offline_since, and per-device threshold live). A device that only
+        exists in ``hosts`` gets a minimal ``devices`` row inserted on
+        demand so that subsequent sweeps and API lookups see consistent
+        state.
+        """
         assert self._db._conn is not None
         now = self._now_fn()
         async with self._db._conn.execute(
-            "SELECT mac, last_seen, is_online, offline_since, "
-            "presence_threshold_seconds, criticality "
-            "FROM devices"
+            """
+            SELECT COALESCE(h.hw_addr, d.mac) AS mac,
+                   COALESCE(h.last_active, d.last_seen) AS effective_last_seen,
+                   COALESCE(d.is_online, 1) AS is_online,
+                   d.offline_since AS offline_since,
+                   COALESCE(d.presence_threshold_seconds, 300) AS threshold,
+                   d.criticality AS criticality,
+                   (d.mac IS NULL) AS missing_device_row
+            FROM hosts h
+            FULL OUTER JOIN devices d ON h.hw_addr = d.mac
+            """
         ) as cur:
             rows = await cur.fetchall()
+
+        # SQLite doesn't support FULL OUTER JOIN until 3.39. Fall back to a
+        # UNION of two LEFT JOINs when that query fails at driver time. The
+        # try/except in ``run()`` catches genuine errors; here we just make
+        # the sweep resilient on older SQLite builds.
+        if not rows:
+            rows = await self._sweep_rows_via_union()
 
         transitions: list[PresenceTransition] = []
         for row in rows:
             mac = row["mac"]
-            last_seen_raw = row["last_seen"]
-            if not last_seen_raw:
+            last_seen_raw = row["effective_last_seen"]
+            if not mac or not last_seen_raw:
                 continue
             try:
                 last_seen = datetime.fromisoformat(last_seen_raw)
             except (ValueError, TypeError):
                 continue
-            # Normalize both to aware UTC for comparison
             if last_seen.tzinfo is None:
                 last_seen = last_seen.replace(tzinfo=timezone.utc)
-            threshold = int(row["presence_threshold_seconds"] or 300)
+            threshold = int(row["threshold"] or 300)
             age = (now - last_seen).total_seconds()
             currently_online = bool(row["is_online"])
             should_be_online = age < threshold
+            missing_row = bool(row["missing_device_row"])
+
+            if currently_online == should_be_online and not missing_row:
+                continue
+
+            # Ensure a devices row exists before we mutate state on it
+            if missing_row:
+                from leetha.store.models import Device
+                await self._db.upsert_device(Device(
+                    mac=mac,
+                    first_seen=last_seen, last_seen=last_seen,
+                ))
 
             if currently_online and not should_be_online:
                 await self._db.set_device_offline(mac)
@@ -96,6 +130,34 @@ class PresenceSweeper:
                 except Exception:
                     log.exception("presence transition callback failed for %s", t.mac)
         return transitions
+
+    async def _sweep_rows_via_union(self):
+        """FULL OUTER JOIN fallback for older SQLite — build the same shape
+        from two LEFT JOINs unioned together."""
+        assert self._db._conn is not None
+        async with self._db._conn.execute(
+            """
+            SELECT h.hw_addr AS mac,
+                   COALESCE(h.last_active, d.last_seen) AS effective_last_seen,
+                   COALESCE(d.is_online, 1) AS is_online,
+                   d.offline_since AS offline_since,
+                   COALESCE(d.presence_threshold_seconds, 300) AS threshold,
+                   d.criticality AS criticality,
+                   (d.mac IS NULL) AS missing_device_row
+            FROM hosts h LEFT JOIN devices d ON h.hw_addr = d.mac
+            UNION
+            SELECT d.mac AS mac,
+                   COALESCE(h.last_active, d.last_seen) AS effective_last_seen,
+                   d.is_online,
+                   d.offline_since,
+                   COALESCE(d.presence_threshold_seconds, 300) AS threshold,
+                   d.criticality,
+                   0 AS missing_device_row
+            FROM devices d LEFT JOIN hosts h ON h.hw_addr = d.mac
+            WHERE h.hw_addr IS NULL
+            """
+        ) as cur:
+            return await cur.fetchall()
 
     async def run(self) -> None:
         while not self._stop.is_set():
