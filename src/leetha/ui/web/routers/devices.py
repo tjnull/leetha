@@ -338,8 +338,17 @@ class AuthorizationBody(BaseModel):
 
 
 def _actor_from_request(request: Request) -> str:
-    """Pull the actor identity from request.state.token_id (auth middleware)."""
-    token_id = getattr(request.state, "token_id", None)
+    """Pull the actor identity from the auth middleware.
+
+    ``leetha.auth.middleware`` publishes the authenticated token id to
+    ``request.scope["auth_token_id"]`` (Starlette scope, not the derived
+    ``request.state``). We prefer the scope value, fall back to any direct
+    ``request.state.token_id`` a future caller might set, and finally
+    ``"anonymous"`` when the request wasn't authenticated at all.
+    """
+    token_id = request.scope.get("auth_token_id") if hasattr(request, "scope") else None
+    if token_id is None:
+        token_id = getattr(request.state, "token_id", None)
     return str(token_id) if token_id else "anonymous"
 
 

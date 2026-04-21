@@ -22,7 +22,10 @@ def _get_app():
 
 
 def _actor(request: Request) -> str:
-    token_id = getattr(request.state, "token_id", None)
+    """Read the token id from scope (set by leetha.auth.middleware)."""
+    token_id = request.scope.get("auth_token_id") if hasattr(request, "scope") else None
+    if token_id is None:
+        token_id = getattr(request.state, "token_id", None)
     return str(token_id) if token_id else "bulk-anonymous"
 
 
