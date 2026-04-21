@@ -163,7 +163,11 @@ async def export_devices(
     for h in hosts:
         v = await app_instance.store.verdicts.find_by_addr(h.hw_addr)
         ovr = await app_instance.store.overrides.find_by_addr(h.hw_addr)
-        all_devices.append(_build_device_dict(v, h, ovr))
+        d = _build_device_dict(v, h, ovr)
+        # Merge Phase A custom-prop / authorization / presence columns.
+        dev_row = await app_instance.db.get_device(h.hw_addr)
+        _merge_custom_props(d, dev_row)
+        all_devices.append(d)
 
     # Apply filters
     if q:
@@ -188,6 +192,12 @@ async def export_devices(
         "mac", "ip_v4", "ip_v6", "manufacturer", "device_type",
         "os_family", "os_version", "hostname", "confidence",
         "first_seen", "last_seen", "alert_status",
+        # Phase A custom properties
+        "owner", "location", "criticality", "tags", "notes",
+        # Phase A authorization
+        "authorization", "authorized_at", "authorized_by",
+        # Phase A presence
+        "is_online", "offline_since", "presence_threshold_seconds",
     ]
 
     if format == "csv":
@@ -195,7 +205,11 @@ async def export_devices(
         writer = csv.DictWriter(output, fieldnames=csv_fields)
         writer.writeheader()
         for d in all_devices:
-            writer.writerow({k: d.get(k) for k in csv_fields})
+            row = {k: d.get(k) for k in csv_fields}
+            # Tags are a list; CSV needs a string representation
+            if isinstance(row.get("tags"), list):
+                row["tags"] = ",".join(row["tags"])
+            writer.writerow(row)
 
         return Response(
             content=output.getvalue(),
