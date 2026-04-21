@@ -1893,6 +1893,9 @@ async def api_incident_detail(incident_id: str):
 
     override = await app_instance.store.overrides.find_by_addr(mac)
     device_dict = _build_device_dict(verdict, host, override)
+    # Phase A — merge custom-prop / authorization / presence fields
+    from leetha.ui.web.routers.devices import _merge_custom_props
+    _merge_custom_props(device_dict, await app_instance.db.get_device(mac))
 
     # Evidence from verdict
     evidence = device_dict.get("raw_evidence", {})
@@ -2851,11 +2854,15 @@ async def api_topology():
         # 1. Devices — from ALL hosts (including those without verdicts)
         topo_host_count = await app_instance.store.hosts.count()
         all_hosts = await app_instance.store.hosts.find_all(limit=max(topo_host_count, 1000))
+        # Phase A — topology view needs criticality/authorization/presence to style nodes
+        from leetha.ui.web.routers.devices import _merge_custom_props
         devices = []
         for h in all_hosts:
             v = await app_instance.store.verdicts.find_by_addr(h.hw_addr)
             ovr = await app_instance.store.overrides.find_by_addr(h.hw_addr)
             d = _build_device_dict(v, h, ovr)
+            dev_row = await app_instance.db.get_device(h.hw_addr)
+            _merge_custom_props(d, dev_row)
             devices.append(d)
 
         # 1a. Enrich devices with all known IPs from ARP history

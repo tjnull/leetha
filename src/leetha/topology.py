@@ -1916,6 +1916,14 @@ def build_topology_graph(
             "connection_type": d.get("connection_type", "unknown"),
             "is_self": d.get("alert_status") == "self",
             "all_ips": d.get("all_ips"),
+            # Phase A — custom properties, authorization, and convenience fields
+            # let the UI style nodes (criticality → color, auth badge, owner tag).
+            "mac": mac,
+            "owner": d.get("owner"),
+            "location": d.get("location"),
+            "criticality": d.get("criticality"),
+            "tags": list(d.get("tags") or []),
+            "authorization": d.get("authorization") or "unapproved",
         }
         device_nodes.append(node)
         device_by_mac[mac] = node
