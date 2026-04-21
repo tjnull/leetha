@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 # Line editing for input(): stdlib readline on Unix; on Windows, the
 # pyreadline3 package installs a `readline` shim on import so this same
 # import works there too. If neither is present, input() still works —
@@ -365,14 +366,43 @@ class LeethaConsole:
                 if hasattr(readline, "set_completion_display_matches_hook"):
                     readline.set_completion_display_matches_hook(None)
             self.console.print("\n  [dim]Goodbye.[/dim]\n")
+
+            # Safety net: if graceful shutdown hangs for any reason
+            # (stuck DB close, uvicorn draining, scapy sniff socket
+            # blocked on recv), force-exit from a daemon thread. This
+            # matches the pattern in cli.py's --web-only path.
+            import threading as _threading, time as _time
+            def _force_exit():
+                _time.sleep(5.0)
+                try:
+                    sys.stdout.write("\n[!] Forced exit (graceful shutdown exceeded 5s)\n")
+                    sys.stdout.flush()
+                except Exception:
+                    pass
+                os._exit(1)
+            _threading.Thread(target=_force_exit, daemon=True).start()
+
+            # Bound each cleanup await so one hung subsystem can't block the
+            # whole process. app.stop() already applies internal timeouts,
+            # but its total budget (~3-4s) plus aiosqlite close can exceed
+            # expectations when the event loop is busy.
             try:
                 if self.app is not None:
-                    await self.app.stop()
+                    try:
+                        await asyncio.wait_for(self.app.stop(), timeout=2.0)
+                    except (asyncio.TimeoutError, Exception):
+                        pass
                     self.app = None
                 if self.db is not None:
-                    await self.db.close()
+                    try:
+                        await asyncio.wait_for(self.db.close(), timeout=1.0)
+                    except (asyncio.TimeoutError, Exception):
+                        pass
                 if self._store is not None:
-                    await self._store.close()
+                    try:
+                        await asyncio.wait_for(self._store.close(), timeout=1.0)
+                    except (asyncio.TimeoutError, Exception):
+                        pass
                     self._store = None
             except Exception:
                 pass
