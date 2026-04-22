@@ -598,6 +598,30 @@ UBIQUITI_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
     (r"UNVR-Pro", "UniFi Protect UNVR Pro", "nvr", "UniFi Protect"),
     (r"UNVR", "UniFi Protect UNVR", "nvr", "UniFi Protect"),
 
+    # AmpliFi (Ubiquiti's consumer mesh line)
+    # The Alien is the flagship: tri-band, 8 antennas, full router.
+    # HD / Instant are mesh units. MeshPoints are the wired/wireless
+    # extender "P" pucks.
+    (r"AFi[-_ ]?Alien|AmpliFi[\s_-]*Alien|AFi-ALN-R|AmpliFi-ALN-R",
+     "AmpliFi Alien", "router", "AmpliFi OS"),
+    (r"AFi[-_ ]?R[-_ ]?HD|AmpliFi[\s_-]*HD[\s_-]*Router|AmpliFi-R-HD",
+     "AmpliFi HD Router", "mesh_router", "AmpliFi OS"),
+    (r"AFi[-_ ]?Instant|AmpliFi[\s_-]*Instant",
+     "AmpliFi Instant", "mesh_router", "AmpliFi OS"),
+    (r"AFi[-_ ]?Teleport|AmpliFi[\s_-]*Teleport",
+     "AmpliFi Teleport", "router", "AmpliFi OS"),
+    (r"AFi[-_ ]?P[-_ ]?HD|AmpliFi[\s_-]*HD[\s_-]*MeshPoint|AmpliFi-P-HD",
+     "AmpliFi HD MeshPoint", "access_point", "AmpliFi OS"),
+    (r"AFi[-_ ]?G|AmpliFi[\s_-]*Gamer",
+     "AmpliFi Gamer", "router", "AmpliFi OS"),
+    (r"AFi[-_ ]?R|AmpliFi[\s_-]*Router|amplifi[-_]r",
+     "AmpliFi Router", "mesh_router", "AmpliFi OS"),
+    # Generic fallback — catches any AmpliFi model identifier we haven't
+    # enumerated. Placed last so the specific Alien/HD/etc rules above
+    # can take precedence. Mesh is the common case for AmpliFi devices.
+    (r"AmpliFi|AFi-",
+     "AmpliFi", "mesh_router", "AmpliFi OS"),
+
     # EdgeRouter series
     (r"EdgeRouter-X-SFP", "EdgeRouter X SFP", "router", "EdgeOS"),
     (r"EdgeRouter-X", "EdgeRouter X", "router", "EdgeOS"),

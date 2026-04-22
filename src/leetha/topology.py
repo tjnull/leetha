@@ -1346,7 +1346,18 @@ _HOSTNAME_DEVICE_HINTS: list[tuple[str, str]] = [
     ("orbi", "mesh_router"),
     ("velop", "mesh_router"),
     ("deco", "mesh_router"),
+    # AmpliFi — the Alien/Gamer/Teleport are proper routers; HD/Instant
+    # are mesh. These more-specific matches run before the generic
+    # "amplifi" fallback.
+    ("afi-alien", "router"),
+    ("amplifi-alien", "router"),
+    ("afi-g", "router"),
+    ("amplifi-gamer", "router"),
+    ("afi-teleport", "router"),
+    ("amplifi-teleport", "router"),
     ("amplifi", "mesh_router"),
+    ("afi-r", "mesh_router"),
+    ("afi-p", "access_point"),
     # --- TP-Link Omada ---
     ("eap", "access_point"),   # Omada EAP APs
     ("archer", "router"),      # TP-Link consumer routers
