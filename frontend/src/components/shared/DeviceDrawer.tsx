@@ -17,6 +17,7 @@ import { AuthorizationBadge, type AuthorizationState } from "@/components/Author
 import { AuthorizationPanel } from "@/components/shared/AuthorizationPanel";
 import { PresenceDot } from "@/components/PresenceDot";
 import { PresencePanel } from "@/components/shared/PresencePanel";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 // --- API ---
 
@@ -195,10 +196,10 @@ export function DeviceDrawer({ mac, open, onClose }: DeviceDrawerProps) {
       <div className="fixed top-0 right-0 h-full w-full max-w-[50vw] min-w-[500px] bg-background border-l border-border z-50 flex flex-col shadow-2xl animate-in slide-in-from-right duration-200">
         {/* Header */}
         <div className="shrink-0 px-8 py-5 border-b border-border bg-card flex items-start justify-between">
-          <div>
-            <h2 className="text-xl font-semibold font-data">{device?.hostname || device?.mac || mac}</h2>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-xl font-semibold font-data truncate">{device?.hostname || device?.mac || mac}</h2>
             {device && (
-              <div className="flex items-center gap-3 mt-2">
+              <div className="flex items-center flex-wrap gap-3 mt-2">
                 <span className={cn("text-[11px] font-semibold uppercase px-2 py-0.5 rounded border", statusCls(device.alert_status ?? "new"))}>
                   {device.alert_status ?? "new"}
                 </span>
@@ -210,10 +211,22 @@ export function DeviceDrawer({ mac, open, onClose }: DeviceDrawerProps) {
                 )}
                 {device.manufacturer && <span className="text-sm text-muted-foreground">{device.manufacturer}</span>}
                 <span className="text-sm font-bold" style={{ color: confColor(device.confidence) }}>{device.confidence}% certainty</span>
+                {/* Phase A at-a-glance badges — visible regardless of active tab */}
+                <AuthorizationBadge value={device.authorization ?? "unapproved"} />
+                {device.criticality && <CriticalityPill value={device.criticality} />}
+                <span className="inline-flex items-center gap-1.5">
+                  <PresenceDot
+                    isOnline={device.is_online ?? true}
+                    offlineSince={device.offline_since ?? null}
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    {(device.is_online ?? true) ? "Online" : "Offline"}
+                  </span>
+                </span>
               </div>
             )}
           </div>
-          <button onClick={() => { onClose(); setShowOvrForm(false); }} className="p-2 rounded-lg hover:bg-secondary transition-colors">
+          <button onClick={() => { onClose(); setShowOvrForm(false); }} className="p-2 rounded-lg hover:bg-secondary transition-colors shrink-0">
             <X size={20} />
           </button>
         </div>
@@ -226,9 +239,17 @@ export function DeviceDrawer({ mac, open, onClose }: DeviceDrawerProps) {
               <Skeleton className="h-40 w-full" /><Skeleton className="h-6 w-2/3" />
             </div>
           ) : device ? (
-            <div className="p-8 space-y-8">
+            <Tabs defaultValue="summary" className="flex flex-col">
+              <TabsList className="sticky top-0 z-10 bg-card/95 backdrop-blur mx-8 mt-4 self-start">
+                <TabsTrigger value="summary">Summary</TabsTrigger>
+                <TabsTrigger value="labels">Labels</TabsTrigger>
+                <TabsTrigger value="activity">Activity</TabsTrigger>
+                <TabsTrigger value="evidence">Evidence</TabsTrigger>
+              </TabsList>
+              <div className="px-8 py-6 space-y-8">
 
-              {/* ── Identity ── */}
+              {/* ── Identity (Summary tab) ── */}
+              <TabsContent value="summary" className="mt-0 space-y-8">
               <Section title="Identity">
                 <div className="grid grid-cols-2 lg:grid-cols-3 gap-x-10 gap-y-5">
                   <LabelValue label="Hardware Address" mono>
@@ -240,26 +261,12 @@ export function DeviceDrawer({ mac, open, onClose }: DeviceDrawerProps) {
                   <LabelValue label="IPv4" mono>{device.ip_v4 || "-"}</LabelValue>
                   <LabelValue label="IPv6" mono><span className="break-all">{device.ip_v6 || "-"}</span></LabelValue>
                   {device.correlated_mac && <LabelValue label="Correlated MAC" mono>{device.correlated_mac}</LabelValue>}
-                  {device.criticality && (
-                    <LabelValue label="Criticality"><CriticalityPill value={device.criticality} /></LabelValue>
-                  )}
-                  <LabelValue label="Authorization">
-                    <AuthorizationBadge value={device.authorization ?? "unapproved"} />
-                  </LabelValue>
-                  <LabelValue label="Presence">
-                    <span className="inline-flex items-center gap-2">
-                      <PresenceDot
-                        isOnline={device.is_online ?? true}
-                        offlineSince={device.offline_since ?? null}
-                      />
-                      <span className="text-xs">
-                        {(device.is_online ?? true) ? "Online" : "Offline"}
-                      </span>
-                    </span>
-                  </LabelValue>
                 </div>
               </Section>
+              </TabsContent>
 
+              {/* ── Auth + Presence + Custom Props (Labels tab) ── */}
+              <TabsContent value="labels" className="mt-0 space-y-8">
               {/* ── Authorization (Phase A.2) ── */}
               {mac && (
                 <AuthorizationPanel
@@ -307,8 +314,10 @@ export function DeviceDrawer({ mac, open, onClose }: DeviceDrawerProps) {
                   }}
                 />
               )}
+              </TabsContent>
 
-              {/* ── Classification ── */}
+              {/* ── Classification (Summary tab) ── */}
+              <TabsContent value="summary" className="mt-0 space-y-8">
               <Section title="Classification">
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-10 gap-y-5">
                   <LabelValue label="Host Category">
@@ -329,8 +338,10 @@ export function DeviceDrawer({ mac, open, onClose }: DeviceDrawerProps) {
                   </LabelValue>
                 </div>
               </Section>
+              </TabsContent>
 
-              {/* ── Manual Override ── */}
+              {/* ── Manual Override (Labels tab) ── */}
+              <TabsContent value="labels" className="mt-0 space-y-8">
               <Section title="Manual Override" badge={device.manual_override ? <Badge className="text-[9px] bg-primary/20 text-primary border-primary/30">ACTIVE</Badge> : undefined}>
                 {device.manual_override && !showOvrForm && (
                   <div className="mb-4">
@@ -457,15 +468,20 @@ export function DeviceDrawer({ mac, open, onClose }: DeviceDrawerProps) {
                   <Button variant="outline" size="sm" onClick={openOvrForm}>Edit Override</Button>
                 )}
               </Section>
+              </TabsContent>
 
-              {/* ── Timestamps ── */}
+              {/* ── Timestamps (Summary tab) ── */}
+              <TabsContent value="summary" className="mt-0 space-y-8">
               <Section title="Timestamps">
                 <div className="grid grid-cols-2 gap-x-10 gap-y-5">
                   <LabelValue label="Discovered" mono>{formatTs(device.first_seen)}</LabelValue>
                   <LabelValue label="Last Active" mono>{formatTs(device.last_seen)}</LabelValue>
                 </div>
               </Section>
+              </TabsContent>
 
+              {/* ── Services + 24h Activity + Observations (Activity tab) ── */}
+              <TabsContent value="activity" className="mt-0 space-y-8">
               {/* ── Services ── */}
               {services.length > 0 && (
                 <Section title={`Detected Services (${services.length})`}>
@@ -570,7 +586,10 @@ export function DeviceDrawer({ mac, open, onClose }: DeviceDrawerProps) {
                   </div>
                 )}
               </Section>
+              </TabsContent>
 
+              {/* ── Coverage + Fingerprint Evidence (Evidence tab) ── */}
+              <TabsContent value="evidence" className="mt-0 space-y-8">
               {/* ── Coverage Diagnostics ── */}
               {coverage && (
                 <Section title={`Source Coverage (${coverage.source_count} sources — ${coverage.quality})`}>
@@ -676,8 +695,10 @@ export function DeviceDrawer({ mac, open, onClose }: DeviceDrawerProps) {
                   </div>
                 </Section>
               )}
+              </TabsContent>
 
-              {/* ── Timeline ── */}
+              {/* ── Timeline (Activity tab) ── */}
+              <TabsContent value="activity" className="mt-0 space-y-8">
               <Section title={`Timeline (${timelineData?.events.length ?? 0} events)`}>
                 <div className="relative space-y-0">
                   {(timelineData?.events ?? []).slice(0, 50).map((event, i) => {
@@ -719,8 +740,10 @@ export function DeviceDrawer({ mac, open, onClose }: DeviceDrawerProps) {
                   )}
                 </div>
               </Section>
+              </TabsContent>
 
-            </div>
+              </div>
+            </Tabs>
           ) : (
             <div className="flex items-center justify-center h-32 text-muted-foreground">Device not found</div>
           )}

@@ -14,7 +14,6 @@ import {
 import { fetchDevices, fetchFilterOptions, type Device } from "@/lib/api";
 import { DeviceDrawer } from "@/components/shared/DeviceDrawer";
 import { BaselineBanner } from "@/components/BaselineBanner";
-import { AuthorizationBadge } from "@/components/AuthorizationBadge";
 import { PresenceDot } from "@/components/PresenceDot";
 import { getDeviceTypeColor } from "@/lib/constants";
 import { cn } from "@/lib/utils";
@@ -570,7 +569,6 @@ export default function Devices({ subscribe }: DevicesProps) {
                   { key: "hostname", label: "Hostname" },
                   { key: "confidence", label: "Certainty" },
                   { key: "alert_status", label: "Disposition" },
-                  { key: "authorization", label: "Auth" },
                   { key: "first_seen", label: "Discovered" },
                   { key: "last_seen", label: "Last Active" },
                 ].map((col) => (
@@ -748,9 +746,6 @@ export default function Devices({ subscribe }: DevicesProps) {
                         </div>
                       </td>
                       <td className="px-4 py-3.5 text-sm whitespace-nowrap border-b border-border/50">
-                        <AuthorizationBadge value={d.authorization ?? "unapproved"} />
-                      </td>
-                      <td className="px-4 py-3.5 text-sm whitespace-nowrap border-b border-border/50">
                         <span className="text-[12px] text-muted-foreground font-data">
                           {formatDateTime(d.first_seen)}
                         </span>
@@ -772,7 +767,7 @@ export default function Devices({ subscribe }: DevicesProps) {
               ) : (
                 <tr>
                   <td
-                    colSpan={13}
+                    colSpan={12}
                     className="px-4 py-16 text-center text-muted-foreground"
                   >
                     <Monitor size={32} className="mx-auto mb-3 opacity-20" />
