@@ -283,10 +283,34 @@ class LeethaConsole:
 
         loop = asyncio.get_event_loop()
 
-        # Ctrl+C raises KeyboardInterrupt; the REPL loop or sub-mode
-        # handler decides what to do with it.
+        # Ctrl+C → immediate os._exit(0).
+        #
+        # The previous design raised KeyboardInterrupt, which unwound
+        # through a ``finally`` block that awaited cleanup with
+        # multi-second timeouts (up to 4s total: 2s for app.stop + 1s
+        # each for db/store close). Users perceived that as "the
+        # program is really hard to close".
+        #
+        # Instant exit is safe here because:
+        #   * SQLite is in WAL journal mode and auto-recovers on next
+        #     open — any uncommitted transactions roll back cleanly.
+        #   * Capture workers and background tasks are daemon threads
+        #     and die with the process.
+        #   * Sensor TLS clients auto-reconnect on next startup; a
+        #     dropped connection just produces a TCP RST.
+        #   * In-flight aiosqlite writes (batched, typically <100 ms)
+        #     are discarded — the tool is a continuous capture
+        #     pipeline, not a transactional service.
+        #
+        # Users who want graceful shutdown can type ``exit`` (or hit
+        # Ctrl+D) at the REPL — those paths still run the ``finally``
+        # block cleanup below.
         def _sigint_handler(sig, frame):
-            raise KeyboardInterrupt
+            try:
+                os.write(1, b"\n\033[33m[*] Leetha stopped\033[0m\n")
+            except Exception:
+                pass
+            os._exit(0)
 
         signal.signal(signal.SIGINT, _sigint_handler)
 
