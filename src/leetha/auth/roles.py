@@ -10,10 +10,22 @@ ADMIN_ONLY_PREFIXES = (
     "/api/settings/query",
 )
 
+# Phase A authorization endpoints — device approval state is a security
+# decision and must not be delegated to analyst tokens.
+_AUTHORIZATION_SUFFIXES = ("/approve", "/reject", "/revoke")
+
 ADMIN_ONLY_METHODS: dict[str, tuple[str, ...]] = {
     "PUT": ("/api/settings",),
     "DELETE": ("/api/alerts", "/api/trust", "/api/suppressions", "/api/patterns"),
-    "POST": ("/api/settings/apply", "/api/settings/reset"),
+    "POST": (
+        "/api/settings/apply",
+        "/api/settings/reset",
+        # Phase A — baseline operations flip every device; admin-only.
+        "/api/baseline/set",
+        "/api/baseline/reset",
+        # Phase A — bulk authorization (can approve/reject the whole fleet).
+        "/api/devices/bulk/authorization",
+    ),
 }
 
 
@@ -26,4 +38,10 @@ def requires_admin(method: str, path: str) -> bool:
     for prefix in method_prefixes:
         if path.startswith(prefix):
             return True
+    # Phase A per-device authorization mutations follow the pattern
+    # POST /api/devices/{mac}/(approve|reject|revoke) — admin only.
+    if method.upper() == "POST" and path.startswith("/api/devices/"):
+        for suffix in _AUTHORIZATION_SUFFIXES:
+            if path.endswith(suffix):
+                return True
     return False
