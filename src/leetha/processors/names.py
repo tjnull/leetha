@@ -129,6 +129,16 @@ class NameResolutionProcessor(Processor):
 
     # Vendor-exclusive mDNS services that DEFINITIVELY identify the vendor.
     # If a device advertises one of these, no OUI guess can override it.
+    #
+    # The ``physical_only`` flag means the service is only advertised by
+    # dedicated consumer-electronics hardware (Chromecasts, Rokus, Sonos
+    # speakers, LG/Samsung TVs, Fire TVs) — *not* by phones/tablets. Real
+    # hardware ships with a real vendor OUI, so the same service arriving
+    # from a locally-administered MAC is almost certainly reflected /
+    # proxied traffic (mesh routers, guest-VLAN bridges, mDNS reflectors).
+    # Services that *are* routinely advertised by phones (Apple AirPlay
+    # /HomeKit / companion-link, etc.) must leave ``physical_only`` unset
+    # because iOS randomizes MACs per SSID.
     _EXCLUSIVE_SERVICES: dict[str, dict] = {
         # Apple-exclusive services — only Apple devices advertise these
         "_apple-mobdev2._tcp": {"vendor": "Apple", "category": "phone", "platform": "iOS", "certainty": 0.97},
@@ -140,22 +150,24 @@ class NameResolutionProcessor(Processor):
         "_rdlink._tcp": {"vendor": "Apple", "certainty": 0.85},
         "_touch-able._tcp": {"vendor": "Apple", "category": "phone", "platform": "iOS", "certainty": 0.90},
         "_apple-pairable._tcp": {"vendor": "Apple", "certainty": 0.90},
-        # Google-exclusive services
-        "_googlecast._tcp": {"vendor": "Google", "category": "smart_speaker", "platform": "Cast OS", "certainty": 0.95},
-        "_googlerpc._tcp": {"vendor": "Google", "certainty": 0.85},
-        "_googlehomedevice._tcp": {"vendor": "Google", "category": "smart_speaker", "certainty": 0.90},
-        # Amazon-exclusive
-        "_amzn-wplay._tcp": {"vendor": "Amazon", "category": "smart_speaker", "platform": "Fire OS", "certainty": 0.90},
-        # Samsung
-        "_samsung-osp._tcp": {"vendor": "Samsung", "certainty": 0.90},
-        "_samsungtvrc._tcp": {"vendor": "Samsung", "category": "smart_tv", "platform": "Tizen", "certainty": 0.95},
-        "_samsung-msn._tcp": {"vendor": "Samsung", "category": "smart_tv", "platform": "Tizen", "certainty": 0.90},
-        # Roku
-        "_roku-rsp._tcp": {"vendor": "Roku", "category": "streaming_device", "platform": "RokuOS", "certainty": 0.95},
-        # Sonos
-        "_sonos._tcp": {"vendor": "Sonos", "category": "smart_speaker", "certainty": 0.95},
+        # Google-exclusive services — Cast receivers are all dedicated
+        # hardware with real Google OUIs, so random-MAC sources are
+        # almost certainly mDNS reflections by a mesh router.
+        "_googlecast._tcp": {"vendor": "Google", "category": "smart_speaker", "platform": "Cast OS", "certainty": 0.95, "physical_only": True},
+        "_googlerpc._tcp": {"vendor": "Google", "certainty": 0.85, "physical_only": True},
+        "_googlehomedevice._tcp": {"vendor": "Google", "category": "smart_speaker", "certainty": 0.90, "physical_only": True},
+        # Amazon-exclusive — Fire TV hardware only
+        "_amzn-wplay._tcp": {"vendor": "Amazon", "category": "smart_speaker", "platform": "Fire OS", "certainty": 0.90, "physical_only": True},
+        # Samsung TVs
+        "_samsung-osp._tcp": {"vendor": "Samsung", "certainty": 0.90, "physical_only": True},
+        "_samsungtvrc._tcp": {"vendor": "Samsung", "category": "smart_tv", "platform": "Tizen", "certainty": 0.95, "physical_only": True},
+        "_samsung-msn._tcp": {"vendor": "Samsung", "category": "smart_tv", "platform": "Tizen", "certainty": 0.90, "physical_only": True},
+        # Roku hardware
+        "_roku-rsp._tcp": {"vendor": "Roku", "category": "streaming_device", "platform": "RokuOS", "certainty": 0.95, "physical_only": True},
+        # Sonos speakers
+        "_sonos._tcp": {"vendor": "Sonos", "category": "smart_speaker", "certainty": 0.95, "physical_only": True},
         # LG TV
-        "_lgtvremote._tcp": {"vendor": "LG", "category": "smart_tv", "platform": "webOS", "certainty": 0.95},
+        "_lgtvremote._tcp": {"vendor": "LG", "category": "smart_tv", "platform": "webOS", "certainty": 0.95, "physical_only": True},
     }
 
     # Regex for AirPlay/RAOP instance names: "<hex_id>@<friendly_name>"
@@ -164,6 +176,16 @@ class NameResolutionProcessor(Processor):
     _AIRPLAY_NAME_RE = __import__("re").compile(
         r"^([0-9A-Fa-f]{6,12})@(.+)$"
     )
+
+    # Known vendor MAC prefixes whose locally-administered bit is set
+    # because the vendor holds a CID (not because the address was
+    # randomized). These must be exempted from the reflected-traffic
+    # check so that genuine Chromecasts on FA:8F:CA don't get treated
+    # as mesh-router reflections.
+    _LOCALLY_ADMIN_VENDOR_CIDS: frozenset[str] = frozenset({
+        # Google Chromecast / Nest CID
+        "FA:8F:CA",
+    })
 
     def _analyze_mdns(self, packet: CapturedPacket) -> list[Evidence]:
         from leetha.evidence.hostname import is_valid_hostname
@@ -190,6 +212,18 @@ class NameResolutionProcessor(Processor):
             # Check for vendor-exclusive services FIRST — these are definitive
             exclusive = self._EXCLUSIVE_SERVICES.get(service_type)
             if exclusive:
+                # Physical-device-only services from locally-administered
+                # MACs are almost certainly reflected traffic (mesh
+                # routers with mDNS reflection, guest-VLAN bridges). Real
+                # Chromecasts/Rokus/Sonos/TVs ship with real vendor OUIs.
+                if exclusive.get("physical_only") and not belongs_to_other_device:
+                    from leetha.fingerprint.mac_intel import is_randomized_mac
+                    hw_prefix = (packet.hw_addr or "")[:8].upper().replace("-", ":")
+                    if (
+                        is_randomized_mac(packet.hw_addr)
+                        and hw_prefix not in self._LOCALLY_ADMIN_VENDOR_CIDS
+                    ):
+                        belongs_to_other_device = True
                 # If this mDNS name contains another device's ID, only keep
                 # vendor (still useful for vendor identification) but strip
                 # category/platform which belong to the other device.
