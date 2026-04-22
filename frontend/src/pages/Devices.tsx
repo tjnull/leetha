@@ -14,10 +14,8 @@ import {
 import { fetchDevices, fetchFilterOptions, type Device } from "@/lib/api";
 import { DeviceDrawer } from "@/components/shared/DeviceDrawer";
 import { BaselineBanner } from "@/components/BaselineBanner";
-import { CriticalityPill } from "@/components/CriticalityPill";
 import { AuthorizationBadge } from "@/components/AuthorizationBadge";
 import { PresenceDot } from "@/components/PresenceDot";
-import { Badge } from "@/components/ui/badge";
 import { getDeviceTypeColor } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { authHeaders } from "@/lib/api";
@@ -573,10 +571,6 @@ export default function Devices({ subscribe }: DevicesProps) {
                   { key: "confidence", label: "Certainty" },
                   { key: "alert_status", label: "Disposition" },
                   { key: "authorization", label: "Auth" },
-                  { key: "criticality", label: "Crit." },
-                  { key: "owner", label: "Owner" },
-                  { key: "location", label: "Location" },
-                  { key: "tags", label: "Tags" },
                   { key: "first_seen", label: "Discovered" },
                   { key: "last_seen", label: "Last Active" },
                 ].map((col) => (
@@ -757,37 +751,6 @@ export default function Devices({ subscribe }: DevicesProps) {
                         <AuthorizationBadge value={d.authorization ?? "unapproved"} />
                       </td>
                       <td className="px-4 py-3.5 text-sm whitespace-nowrap border-b border-border/50">
-                        {d.criticality ? (
-                          <CriticalityPill value={d.criticality} />
-                        ) : (
-                          <span className="text-muted-foreground/40">--</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3.5 text-sm whitespace-nowrap border-b border-border/50">
-                        <span className={d.owner ? "text-foreground" : "text-muted-foreground/40"}>
-                          {d.owner || "--"}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3.5 text-sm whitespace-nowrap border-b border-border/50">
-                        <span className={d.location ? "text-foreground" : "text-muted-foreground/40"}>
-                          {d.location || "--"}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3.5 text-sm border-b border-border/50">
-                        {(d.tags && d.tags.length > 0) ? (
-                          <div className="flex flex-wrap gap-1 max-w-[160px]">
-                            {d.tags.slice(0, 3).map((t) => (
-                              <Badge key={t} variant="secondary" className="text-[10px] px-1.5 py-0">{t}</Badge>
-                            ))}
-                            {d.tags.length > 3 && (
-                              <span className="text-[10px] text-muted-foreground">+{d.tags.length - 3}</span>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-muted-foreground/40">--</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3.5 text-sm whitespace-nowrap border-b border-border/50">
                         <span className="text-[12px] text-muted-foreground font-data">
                           {formatDateTime(d.first_seen)}
                         </span>
@@ -809,7 +772,7 @@ export default function Devices({ subscribe }: DevicesProps) {
               ) : (
                 <tr>
                   <td
-                    colSpan={17}
+                    colSpan={13}
                     className="px-4 py-16 text-center text-muted-foreground"
                   >
                     <Monitor size={32} className="mx-auto mb-3 opacity-20" />
