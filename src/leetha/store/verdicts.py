@@ -225,6 +225,24 @@ class VerdictRepository:
             # only parses the first octet, so we compute a full 32-bit
             # integer from the four octets for correct ordering.
             "ip_v4": "ip_sort_key",
+            # Phase A — custom property / authorization / presence columns.
+            # Criticality uses a CASE expression so 'critical' sorts above
+            # 'high' sorts above 'medium' etc., instead of alphabetic order
+            # which would put 'critical' > 'low' > 'medium' > 'high'.
+            "criticality": (
+                "CASE d.criticality "
+                "WHEN 'critical' THEN 4 "
+                "WHEN 'high' THEN 3 "
+                "WHEN 'medium' THEN 2 "
+                "WHEN 'low' THEN 1 "
+                "ELSE 0 END"
+            ),
+            "owner": "d.owner",
+            "location": "d.location",
+            "authorization": "d.authorization",
+            "is_online": "COALESCE(d.is_online, 1)",
+            "offline_since": "d.offline_since",
+            "presence_threshold_seconds": "COALESCE(d.presence_threshold_seconds, 300)",
         }
         sort_col = sort_col_map.get(sort, "h.discovered_at")
         sort_dir = "DESC" if order == "desc" else "ASC"
