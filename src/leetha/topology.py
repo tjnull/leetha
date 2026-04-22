@@ -1192,6 +1192,13 @@ _HOSTNAME_DEVICE_HINTS: list[tuple[str, str]] = [
     ("unraid", "nas"),
     ("synology", "nas"),
     ("plex", "media_server"),
+    # Home Assistant Yellow / SkyConnect ship with a Zigbee / Thread
+    # radio and are coordinators, so match them BEFORE the generic
+    # "hass" smart_home fallback.
+    ("homeassistant-yellow", "iot_hub"),
+    ("hass-yellow", "iot_hub"),
+    ("hassio-yellow", "iot_hub"),
+    ("ha-yellow", "iot_hub"),
     ("home-assistant", "smart_home"),
     ("homeassistant", "smart_home"),
     ("hass", "smart_home"),
@@ -1396,6 +1403,53 @@ _HOSTNAME_DEVICE_HINTS: list[tuple[str, str]] = [
     ("mercusys-", "router"),
     # Xiaomi home routers (R-AX, AX3600, etc.)
     ("xiaomi-router", "router"),
+    # --- LoRa / LoRaWAN gateways ---
+    # Common brand prefixes in DHCP hostnames (Dragino ships the LPS8 and
+    # LG308 with `dragino-lps8-...` etc; RAK sells WisGates as `rak72xx-`).
+    ("dragino", "lora_gateway"),
+    ("rak72", "lora_gateway"),
+    ("wisgate", "lora_gateway"),
+    ("ttig", "lora_gateway"),
+    ("lorawan-gw", "lora_gateway"),
+    ("lora-gw", "lora_gateway"),
+    ("kerlink", "lora_gateway"),
+    ("tektelic", "lora_gateway"),
+    ("multitech-conduit", "lora_gateway"),
+    ("mtcdt", "lora_gateway"),
+    ("laird-sentrius", "lora_gateway"),
+    ("sentrius-rg", "lora_gateway"),
+    ("pygate", "lora_gateway"),
+    ("chirpstack", "lora_gateway"),
+    # --- Zigbee / Thread / Z-Wave / Matter hubs ---
+    # ConBee/RaspBee coordinators (often USB sticks exposed via serial-
+    # over-IP bridges like SLZB or ZBBridge), and the Home Assistant
+    # family (Yellow, SkyConnect, ZBT-1).
+    ("conbee", "iot_hub"),
+    ("raspbee", "iot_hub"),
+    ("phoscon", "iot_hub"),
+    ("skyconnect", "iot_hub"),
+    ("zbt-1", "iot_hub"),
+    ("hassio-yellow", "iot_hub"),
+    ("ha-yellow", "iot_hub"),
+    ("homeassistant-yellow", "iot_hub"),
+    ("slzb-", "iot_hub"),
+    ("zbbridge", "iot_hub"),
+    # Aqara / IKEA smart-home hubs
+    ("aqara-hub", "iot_hub"),
+    ("aqara-gateway", "iot_hub"),
+    ("tradfri-gateway", "iot_hub"),
+    ("tradfri", "iot_hub"),
+    ("dirigera", "iot_hub"),
+    # Philips Hue (also has a dedicated vendor match; hostname pin is
+    # useful when the OUI has been renewed for a new SKU).
+    ("hue-bridge", "iot_hub"),
+    ("philips-hue-bridge", "iot_hub"),
+    # Z-Wave sticks / controllers
+    ("zwave-", "iot_hub"),
+    ("z-wave-", "iot_hub"),
+    ("aeotec-", "iot_hub"),
+    ("zooz-", "iot_hub"),
+    ("homeseer", "iot_hub"),
     ("ruckus", "access_point"),
     ("icx-", "switch"),        # Ruckus ICX switches
     ("aruba", "access_point"),

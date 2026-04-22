@@ -3139,6 +3139,135 @@ CLEAROS_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
 ]
 
 
+# LORAWAN GATEWAY PATTERNS
+#
+# LoRa / LoRaWAN gateways bridge 868/915 MHz long-range radio traffic to
+# IP uplinks (The Things Network, ChirpStack, AWS IoT Core, etc.). They
+# show up on the LAN as Ethernet or Wi-Fi endpoints but are functionally
+# distinct from generic routers because their forwarding target is
+# Semtech packet-forwarder / BasicStation, not L3 IP routing.
+
+LORA_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
+    # Dragino — the most common open-source LoRa gateway line
+    (r"Dragino\s*LPS8\w*", "Dragino LPS8 LoRa Gateway", "lora_gateway", "Dragino OpenWrt"),
+    (r"Dragino\s*LG308\w*", "Dragino LG308 LoRa Gateway", "lora_gateway", "Dragino OpenWrt"),
+    (r"Dragino\s*OLG01\w*", "Dragino OLG01 Outdoor LoRa Gateway", "lora_gateway", "Dragino OpenWrt"),
+    (r"Dragino\s*DLOS8\w*", "Dragino DLOS8 Outdoor LoRa Gateway", "lora_gateway", "Dragino OpenWrt"),
+    (r"Dragino\s*MS14\w*", "Dragino MS14 LoRa Module", "lora_gateway", "Dragino OpenWrt"),
+    (r"Dragino", "Dragino LoRa Device", "lora_gateway", "Dragino OpenWrt"),
+
+    # RAK Wireless WisGate line
+    (r"RAK72(40|44|58|71|89)", "RAK WisGate LoRa Gateway", "lora_gateway", "WisGate OS"),
+    (r"RAK\d{4}", "RAK WisGate LoRa Gateway", "lora_gateway", "WisGate OS"),
+    (r"WisGate\s*Edge", "RAK WisGate Edge", "lora_gateway", "WisGate OS"),
+    (r"WisGate\s*Developer", "RAK WisGate Developer", "lora_gateway", "WisGate OS"),
+    (r"WisGate", "RAK WisGate", "lora_gateway", "WisGate OS"),
+
+    # The Things Industries
+    (r"The\s*Things\s*Indoor\s*Gateway", "The Things Indoor Gateway", "lora_gateway", "BasicStation"),
+    (r"TTIG", "The Things Indoor Gateway", "lora_gateway", "BasicStation"),
+    (r"The\s*Things\s*Outdoor\s*Gateway", "The Things Outdoor Gateway", "lora_gateway", "BasicStation"),
+
+    # MultiTech Conduit
+    (r"MultiTech\s*MTCDT[\w\-]*", "MultiTech Conduit", "lora_gateway", "mLinux"),
+    (r"MTCDT-[\w\-]+", "MultiTech Conduit", "lora_gateway", "mLinux"),
+    (r"Conduit\s*AEP", "MultiTech Conduit AEP", "lora_gateway", "mLinux"),
+    (r"Conduit\s*IP6\d+", "MultiTech Conduit IP67", "lora_gateway", "mLinux"),
+    (r"MultiTech\s*Conduit", "MultiTech Conduit", "lora_gateway", "mLinux"),
+
+    # Kerlink
+    (r"Kerlink\s*Wirnet\s*iFemtoCell", "Kerlink Wirnet iFemtoCell", "lora_gateway", "Kerlink OS"),
+    (r"Wirnet\s*iFemtoCell", "Kerlink Wirnet iFemtoCell", "lora_gateway", "Kerlink OS"),
+    (r"Wirnet\s*iStation", "Kerlink Wirnet iStation", "lora_gateway", "Kerlink OS"),
+    (r"Wirnet\s*iBTS", "Kerlink Wirnet iBTS", "lora_gateway", "Kerlink OS"),
+    (r"Kerlink", "Kerlink LoRa Gateway", "lora_gateway", "Kerlink OS"),
+
+    # Tektelic Kona
+    (r"Kona\s*Micro(\s*Lite)?", "Tektelic Kona Micro", "lora_gateway", "Kona OS"),
+    (r"Kona\s*Mega", "Tektelic Kona Mega", "lora_gateway", "Kona OS"),
+    (r"Kona\s*Enterprise", "Tektelic Kona Enterprise", "lora_gateway", "Kona OS"),
+    (r"Tektelic", "Tektelic Kona", "lora_gateway", "Kona OS"),
+
+    # Laird Sentrius
+    (r"Sentrius\s*RG1\d+", "Laird Sentrius RG1xx LoRa Gateway", "lora_gateway", "Sentrius OS"),
+    (r"Sentrius\s*RG", "Laird Sentrius LoRa Gateway", "lora_gateway", "Sentrius OS"),
+
+    # Heltec
+    (r"Heltec\s*HT-M0\d", "Heltec HT-M LoRa Gateway", "lora_gateway", "Heltec"),
+    (r"Heltec.*LoRa", "Heltec LoRa Gateway", "lora_gateway", "Heltec"),
+
+    # Seeed / SenseCAP
+    (r"SenseCAP\s*M[12]", "Seeed SenseCAP LoRa Gateway", "lora_gateway", "SenseCAP"),
+    (r"Seeed(studio)?\s*LoRa\s*Gateway", "Seeed LoRa Gateway", "lora_gateway", None),
+
+    # Pycom Pygate
+    (r"Pygate", "Pycom Pygate LoRa", "lora_gateway", "MicroPython"),
+    (r"Pycom.*LoRa", "Pycom LoRa Gateway", "lora_gateway", "MicroPython"),
+
+    # Generic fallback — something explicitly identifies as a LoRa gateway
+    (r"LoRaWAN\s*Gateway", "LoRaWAN Gateway", "lora_gateway", None),
+    (r"LoRa\s*Gateway", "LoRa Gateway", "lora_gateway", None),
+    (r"Semtech\s*packet-forwarder", "Semtech Packet Forwarder", "lora_gateway", None),
+    (r"BasicStation", "LNS BasicStation Gateway", "lora_gateway", "BasicStation"),
+]
+
+
+# ZIGBEE / THREAD / Z-WAVE / MATTER IOT HUB PATTERNS
+#
+# These devices are coordinators / border routers for sub-GHz and 2.4 GHz
+# mesh protocols and act as the Ethernet/Wi-Fi edge for a local smart-
+# home mesh. The existing SmartThings / Hue / Sonoff rules already emit
+# ``iot_hub``; this table covers the rest.
+
+IOT_HUB_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
+    # Aqara (Lumi United Technology)
+    (r"Aqara\s*Hub\s*M1S", "Aqara Hub M1S", "iot_hub", "Aqara"),
+    (r"Aqara\s*Hub\s*M2", "Aqara Hub M2", "iot_hub", "Aqara"),
+    (r"Aqara\s*Hub\s*E1", "Aqara Hub E1", "iot_hub", "Aqara"),
+    (r"Aqara\s*G3\s*Camera\s*Hub", "Aqara G3 Camera Hub", "iot_hub", "Aqara"),
+    (r"Aqara\s*(Hub|Gateway)", "Aqara Hub", "iot_hub", "Aqara"),
+    (r"Aqara", "Aqara Device", "iot_hub", "Aqara"),
+
+    # Dresden Elektronik ConBee / RaspBee (deCONZ / Phoscon)
+    (r"ConBee\s*II+", "dresden elektronik ConBee II", "iot_hub", "deCONZ"),
+    (r"ConBee\s*III", "dresden elektronik ConBee III", "iot_hub", "deCONZ"),
+    (r"ConBee", "dresden elektronik ConBee", "iot_hub", "deCONZ"),
+    (r"RaspBee\s*II", "dresden elektronik RaspBee II", "iot_hub", "deCONZ"),
+    (r"RaspBee", "dresden elektronik RaspBee", "iot_hub", "deCONZ"),
+    (r"Phoscon", "Phoscon Zigbee Gateway", "iot_hub", "deCONZ"),
+    (r"deCONZ", "deCONZ Zigbee Gateway", "iot_hub", "deCONZ"),
+
+    # Home Assistant Yellow / SkyConnect / Connect ZBT-1
+    (r"Home\s*Assistant\s*Yellow", "Home Assistant Yellow", "iot_hub", "Home Assistant"),
+    (r"Home\s*Assistant\s*SkyConnect", "Home Assistant SkyConnect", "iot_hub", "Home Assistant"),
+    (r"SkyConnect", "Home Assistant SkyConnect", "iot_hub", "Home Assistant"),
+    (r"Connect\s*ZBT-1", "Home Assistant Connect ZBT-1", "iot_hub", "Home Assistant"),
+
+    # IKEA Tradfri / Dirigera
+    (r"IKEA\s*Tradfri\s*Gateway", "IKEA Tradfri Gateway", "iot_hub", "Tradfri"),
+    (r"Tradfri\s*Gateway", "IKEA Tradfri Gateway", "iot_hub", "Tradfri"),
+    (r"IKEA\s*Dirigera", "IKEA Dirigera", "iot_hub", "Dirigera"),
+    (r"Dirigera", "IKEA Dirigera", "iot_hub", "Dirigera"),
+    (r"Tradfri", "IKEA Tradfri", "iot_hub", "Tradfri"),
+
+    # Aeotec Z-Wave (plus new SmartThings-style hubs)
+    (r"Aeotec\s*Smart\s*Home\s*Hub", "Aeotec Smart Home Hub", "iot_hub", "SmartThings"),
+    (r"Aeotec\s*Z-Stick\s*\d+", "Aeotec Z-Stick Z-Wave Controller", "iot_hub", "Z-Wave"),
+    (r"Aeotec", "Aeotec Z-Wave Device", "iot_hub", "Z-Wave"),
+
+    # Zooz Z-Wave sticks (Zooz Z-Stick 700/800 series)
+    (r"Zooz\s*ZST\d+", "Zooz Z-Wave Stick", "iot_hub", "Z-Wave"),
+
+    # HomeSeer
+    (r"HomeSeer\s*Smart\s*Stick\+?", "HomeSeer SmartStick", "iot_hub", "Z-Wave"),
+    (r"HomeSeer\s*HS\d+", "HomeSeer Hub", "iot_hub", None),
+
+    # Silicon Labs reference Zigbee sticks commonly used in DIY setups
+    (r"Silicon\s*Labs\s*UZB-\d", "Silicon Labs UZB Z-Wave Stick", "iot_hub", "Z-Wave"),
+    (r"Silicon\s*Labs\s*EFR32", "Silicon Labs EFR32 Zigbee Coordinator", "iot_hub", "Zigbee"),
+]
+
+
 # VMWARE VIRTUALIZATION PATTERNS (Comprehensive)
 
 VMWARE_MAC_PREFIXES: Dict[str, Tuple[str, str, Optional[str]]] = {
