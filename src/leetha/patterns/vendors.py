@@ -723,20 +723,63 @@ MIKROTIK_MAC_PREFIXES: Dict[str, Tuple[str, str, Optional[str]]] = {
 }
 
 MIKROTIK_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
+    # --- 60 GHz PtP / PtMP wireless bridges (must come before "wAP" / "cAP"
+    # catch-alls that would grab the "wAP" prefix). ---
+    (r"wAP\s*60G(x\d)?", "MikroTik wAP 60G", "wireless_bridge", "RouterOS"),
+    (r"Cube\s*60(Pro)?\s*ac", "MikroTik Cube 60Pro ac", "wireless_bridge", "RouterOS"),
+    (r"Cube\s*60G", "MikroTik Cube 60G", "wireless_bridge", "RouterOS"),
+
+    # --- WiFi 6 (ax) indoor APs / routers: hAP ax / cAP ax / wAP ax.
+    # Ordered before the matching ac rules so they're not swallowed. ---
+    (r"hAP\s*ax\s*lite", "hAP ax lite", "router", "RouterOS"),
+    (r"hAP\s*ax\s*\d+", "hAP ax", "router", "RouterOS"),
+    (r"hAP\s*ax", "hAP ax", "router", "RouterOS"),
+    (r"cAP\s*ax", "cAP ax", "access_point", "RouterOS"),
+    (r"wAP\s*ax", "wAP ax", "access_point", "RouterOS"),
+
+    # --- WiFi 5 (ac) indoor APs / routers ---
+    (r"hAP\s*ac\s*\d*\s*lite", "hAP ac lite", "router", "RouterOS"),
     (r"hAP\s*ac", "hAP ac", "router", "RouterOS"),
     (r"hAP\s*lite", "hAP lite", "router", "RouterOS"),
     (r"hAP\s*mini", "hAP mini", "router", "RouterOS"),
     (r"hAP", "hAP", "router", "RouterOS"),
+    (r"hEX\s*refresh", "hEX refresh", "router", "RouterOS"),
     (r"hEX\s*S", "hEX S", "router", "RouterOS"),
     (r"hEX\s*lite", "hEX lite", "router", "RouterOS"),
     (r"hEX\s*PoE", "hEX PoE", "router", "RouterOS"),
     (r"hEX", "hEX", "router", "RouterOS"),
+
+    # --- Cellular / LTE / 5G routers ---
+    (r"Chateau\s*5G\s*ax", "MikroTik Chateau 5G ax", "router", "RouterOS"),
+    (r"Chateau\s*5G", "MikroTik Chateau 5G", "router", "RouterOS"),
+    (r"Chateau\s*LTE\s*\d+", "MikroTik Chateau LTE", "router", "RouterOS"),
+    (r"Chateau", "MikroTik Chateau", "router", "RouterOS"),
+    (r"KNOT\s*LR\d+", "MikroTik KNOT LoRa Gateway", "router", "RouterOS"),
+    (r"KNOT", "MikroTik KNOT", "router", "RouterOS"),
+
+    # --- Cloud Hosted Router (virtual / x86) ---
+    (r"CHR\s*\d+\.\d+", "MikroTik CHR", "router", "RouterOS"),
+    (r"\bCHR\b", "MikroTik CHR", "router", "RouterOS"),
+
+    # --- RouterBOARD models ---
+    # RB5009 is the 10G flagship; declare before the RB750/RB951 prefixes
+    # so its explicit model string wins.
+    (r"RB5009", "RB5009", "router", "RouterOS"),
+    (r"RB760iGS", "RB760iGS (hEX S refresh)", "router", "RouterOS"),
+    (r"RB750Gr3", "RB750Gr3 (hEX)", "router", "RouterOS"),
     (r"RB750", "RB750", "router", "RouterOS"),
     (r"RB951", "RB951", "router", "RouterOS"),
+    (r"RB1100AH?x\d", "RB1100AHx series", "router", "RouterOS"),
     (r"RB1100", "RB1100", "router", "RouterOS"),
     (r"RB2011", "RB2011", "router", "RouterOS"),
     (r"RB3011", "RB3011", "router", "RouterOS"),
     (r"RB4011", "RB4011", "router", "RouterOS"),
+    # L009 / L11 / L41G — newer compact routers
+    (r"L009[A-Za-z+\-]*", "MikroTik L009", "router", "RouterOS"),
+    (r"L11U[A-Za-z+\-]*", "MikroTik L11", "router", "RouterOS"),
+    (r"L41G[A-Za-z+\-]*", "MikroTik L41G", "router", "RouterOS"),
+
+    # --- Cloud Core Routers ---
     (r"CCR1009", "CCR1009", "router", "RouterOS"),
     (r"CCR1016", "CCR1016", "router", "RouterOS"),
     (r"CCR1036", "CCR1036", "router", "RouterOS"),
@@ -744,6 +787,14 @@ MIKROTIK_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
     (r"CCR2004", "CCR2004", "router", "RouterOS"),
     (r"CCR2116", "CCR2116", "router", "RouterOS"),
     (r"CCR2216", "CCR2216", "router", "RouterOS"),
+
+    # --- CRS / CSS / netPower switches ---
+    # netPower PoE series (netPower 16P, netPower Lite 7R, netPower 48P)
+    (r"netPower\s*Lite\s*\d+[A-Z]?", "MikroTik netPower Lite", "switch", "SwOS"),
+    (r"netPower\s*\d+[A-Z]?", "MikroTik netPower", "switch", "SwOS"),
+    (r"CRS106", "CRS106", "switch", "RouterOS"),
+    (r"CRS212", "CRS212", "switch", "RouterOS"),
+    (r"CRS305", "CRS305", "switch", "RouterOS"),
     (r"CRS309", "CRS309", "switch", "RouterOS"),
     (r"CRS312", "CRS312", "switch", "RouterOS"),
     (r"CRS317", "CRS317", "switch", "RouterOS"),
@@ -752,19 +803,36 @@ MIKROTIK_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
     (r"CRS354", "CRS354", "switch", "RouterOS"),
     (r"CRS504", "CRS504", "switch", "RouterOS"),
     (r"CRS518", "CRS518", "switch", "RouterOS"),
+    (r"CRS610", "CRS610", "switch", "RouterOS"),
+    # CRS catch-all for models we haven't enumerated
+    (r"CRS\d{3}", "MikroTik CRS Switch", "switch", "RouterOS"),
     (r"CSS610", "CSS610", "switch", "SwOS"),
     (r"CSS326", "CSS326", "switch", "SwOS"),
-    (r"wAP\s*ac", "wAP ac", "access_point", "RouterOS"),
-    (r"wAP", "wAP", "access_point", "RouterOS"),
-    (r"cAP\s*ac", "cAP ac", "access_point", "RouterOS"),
-    (r"cAP", "cAP", "access_point", "RouterOS"),
+    (r"CSS\d{3}", "MikroTik CSS Switch", "switch", "SwOS"),
+
+    # --- Outdoor / long-range wireless bridges ---
+    (r"Audience\s*LTE\d*", "MikroTik Audience LTE", "router", "RouterOS"),
     (r"Audience", "Audience", "access_point", "RouterOS"),
     (r"SXTsq", "SXTsq", "wireless_bridge", "RouterOS"),
+    (r"LHGG\s*LTE\d*", "MikroTik LHGG LTE", "wireless_bridge", "RouterOS"),
+    (r"LHG\s*XL\s*\d*", "MikroTik LHG XL", "wireless_bridge", "RouterOS"),
     (r"LHG", "LHG", "wireless_bridge", "RouterOS"),
+    (r"LDF\s*\d+", "MikroTik LDF", "wireless_bridge", "RouterOS"),
+    (r"DISC\s*Lite\s*5?\s*(ac)?", "MikroTik DISC Lite5 ac", "wireless_bridge", "RouterOS"),
+    (r"DISC\s*\d*(ac)?", "MikroTik DISC", "wireless_bridge", "RouterOS"),
     (r"SXT", "SXT", "wireless_bridge", "RouterOS"),
     (r"mANTBox", "mANTBox", "wireless_bridge", "RouterOS"),
     (r"NetMetal", "NetMetal", "wireless_bridge", "RouterOS"),
     (r"NetBox", "NetBox", "wireless_bridge", "RouterOS"),
+
+    # --- Indoor ac APs (generic — keep near the end so the ax/60G
+    # more-specific rules above can win first) ---
+    (r"wAP\s*ac", "wAP ac", "access_point", "RouterOS"),
+    (r"wAP", "wAP", "access_point", "RouterOS"),
+    (r"cAP\s*ac", "cAP ac", "access_point", "RouterOS"),
+    (r"cAP", "cAP", "access_point", "RouterOS"),
+
+    # Generic RouterOS / SwOS fallbacks
     (r"RouterOS\s*([\d.]+)?", "MikroTik Router", "router", "RouterOS"),
     (r"SwOS\s*([\d.]+)?", "MikroTik Switch", "switch", "SwOS"),
 ]
@@ -1834,7 +1902,32 @@ NETGEAR_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
     (r"RBE\d+", "Netgear Orbi Outdoor", "mesh_router", None),
     (r"Orbi\s*[A-Z]*\d*", "Netgear Orbi", "mesh_router", None),
 
+    # Nighthawk M / MR mobile routers (4G LTE / 5G hotspots). Must run
+    # BEFORE the generic "MR" matches used by other vendors and before
+    # the WAX/WAC generic rules.
+    (r"Nighthawk\s*M\d+(\s*Pro)?", "Netgear Nighthawk M Mobile Router", "router", None),
+    (r"MR6\d{3}", "Netgear Nighthawk MR6000 5G", "router", None),
+    (r"MR5200", "Netgear Nighthawk MR5200 5G", "router", None),
+    (r"MR1100", "Netgear Nighthawk MR1100", "router", None),
+    (r"MR\d{4}", "Netgear Nighthawk MR Mobile Router", "router", None),
+    # Fixed-location LTE / 5G routers
+    (r"LM\d+", "Netgear LM LTE Modem", "router", None),
+    (r"LAX\d+", "Netgear LAX LTE Router", "router", None),
+
+    # Business Orbi (CBK — commercial kits, including the 752B/CBK40)
+    (r"CBK\d+[A-Z]?", "Netgear Orbi Pro Business Mesh", "mesh_router", None),
+
+    # RAXE (WiFi 6E) must come before the generic RAX rule above. Note:
+    # the RAX rules earlier in the list will have already matched by the
+    # time we reach here for pure-numeric RAX models, so repeat RAXE here
+    # to make sure it classifies as router.
+    (r"RAXE\d+", "Netgear Nighthawk RAXE WiFi 6E", "router", None),
+
     # Switches
+    # XS — 10G/Multi-Gig ProSafe switches (XS505, XS508M, XS508T, XS712T, XS728T)
+    (r"XS\d{3}[A-Z]?", "Netgear XS 10G Switch", "switch", None),
+    # GSM — Insight Managed / Smart Managed (GSM4230P, GSM4352 etc.)
+    (r"GSM\d{3,4}[A-Z]?", "Netgear GSM Managed Switch", "switch", None),
     (r"GS\d{3}", "Netgear Smart Switch", "switch", None),
     (r"GS108", "Netgear GS108", "switch", None),
     (r"GS116", "Netgear GS116", "switch", None),
@@ -1853,11 +1946,15 @@ NETGEAR_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
     (r"RN424", "Netgear ReadyNAS 424", "nas", "ReadyNAS OS"),
     (r"RN426", "Netgear ReadyNAS 426", "nas", "ReadyNAS OS"),
 
-    # WAX APs
-    (r"WAX\d+", "Netgear WAX", "access_point", None),
-    (r"WAX610", "Netgear WAX610", "access_point", None),
-    (r"WAX620", "Netgear WAX620", "access_point", None),
+    # WAX APs — specific models before the generic WAX\d+ fallback.
+    # WAX630E / WAX638E are WiFi 6E / 7; WAX204 / WAX214 are WiFi 6.
+    (r"WAX6[38]8E", "Netgear WAX638E/WAX630E WiFi 6E AP", "access_point", None),
+    (r"WAX630E", "Netgear WAX630E WiFi 6E AP", "access_point", None),
     (r"WAX630", "Netgear WAX630", "access_point", None),
+    (r"WAX620", "Netgear WAX620", "access_point", None),
+    (r"WAX610", "Netgear WAX610", "access_point", None),
+    (r"WAX2\d{2}", "Netgear WAX2xx Essentials AP", "access_point", None),
+    (r"WAX\d+", "Netgear WAX", "access_point", None),
 
     # Generic
     (r"NETGEAR", "Netgear Device", "router", None),
