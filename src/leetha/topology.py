@@ -641,10 +641,28 @@ _VENDOR_DEVICE_TYPE_HINTS: dict[str, str] = {
     "orbi": "mesh_router",
     "deco": "mesh_router",
     "amplifi": "mesh_router",
+    # Plume Design (OpenSync-based SuperPod) — ISPs rebrand heavily
+    "plume": "mesh_router",
+    "vilo": "mesh_router",
     "tplink": "router",
     "netgear": "router",
     "asus router": "router",
     "ubiquiti": "network_device",
+    # Open-source / consumer / SMB routers that were missing
+    "turris": "router",
+    "cz.nic": "router",          # Turris is made by CZ.NIC
+    "gl technologies": "router", # GL.iNet manufacturer string
+    "gl.inet": "router",
+    "tenda": "router",
+    "mercusys": "router",
+    "cudy": "router",
+    # Appliance-style firewalls
+    "firewalla": "firewall",
+    "vyos": "firewall",
+    "untangle": "firewall",
+    "clearos": "firewall",
+    "check point": "firewall",
+    "checkpoint": "firewall",
     # --- VoIP ---
     "polycom": "voip_phone",
     "poly": "voip_phone",
@@ -1337,6 +1355,47 @@ _HOSTNAME_DEVICE_HINTS: list[tuple[str, str]] = [
     ("opnsense", "firewall"),
     ("netgate", "firewall"),
     ("sg-", "firewall"),       # Netgate SG-xxxx
+    # Firewalla inline firewalls
+    ("firewalla", "firewall"),
+    # WatchGuard Firebox
+    ("firebox", "firewall"),
+    # Sophos XGS hostnames (leading token, to avoid matching unrelated "xgs")
+    ("sophos-", "firewall"),
+    # SonicWall model prefixes as DHCP hostnames
+    ("sonicwall", "firewall"),
+    # Check Point Quantum
+    ("checkpoint", "firewall"),
+    ("quantum-", "firewall"),
+    # Open-source firewalls
+    ("vyos", "firewall"),
+    ("untangle", "firewall"),
+    ("clearos", "firewall"),
+    # ASUS router hostnames — ROG Rapture gaming + RT-AX / RT-BE / RT-AC
+    # lines; listed before the generic "asus" workstation fallback so that
+    # they classify as routers first.
+    ("gt-be", "router"),
+    ("gt-ax", "router"),
+    ("gt-ac", "router"),
+    ("rt-be", "router"),
+    ("rt-ax", "router"),
+    ("rt-ac", "router"),
+    ("tuf-ax", "router"),
+    ("tuf-be", "router"),
+    # QNAP SD-WAN router (NOT a NAS)
+    ("qhora", "router"),
+    # Turris open-source routers
+    ("turris", "router"),
+    # GL.iNet travel routers
+    ("glinet", "router"),
+    ("gl-mt", "router"),
+    ("gl-ar", "router"),
+    ("gl-mv", "router"),
+    # Chinese consumer routers (Cudy / Tenda / Mercusys) — cheap but common
+    ("cudy-", "router"),
+    ("tenda-", "router"),
+    ("mercusys-", "router"),
+    # Xiaomi home routers (R-AX, AX3600, etc.)
+    ("xiaomi-router", "router"),
     ("ruckus", "access_point"),
     ("icx-", "switch"),        # Ruckus ICX switches
     ("aruba", "access_point"),
@@ -1346,6 +1405,29 @@ _HOSTNAME_DEVICE_HINTS: list[tuple[str, str]] = [
     ("orbi", "mesh_router"),
     ("velop", "mesh_router"),
     ("deco", "mesh_router"),
+    # Plume SuperPod — listed before the generic "pod" catch-alls below
+    # because many ISPs rebrand Plume hardware.
+    ("plume-", "mesh_router"),
+    ("superpod", "mesh_router"),
+    ("vilo-", "mesh_router"),
+    # ASUS mesh systems (ZenWiFi XT/XD/ET/BT, legacy Lyra)
+    ("zenwifi", "mesh_router"),
+    ("asus-xt", "mesh_router"),
+    ("asus-bt", "mesh_router"),
+    ("lyra-", "mesh_router"),
+    # D-Link COVR whole-home mesh
+    ("covr-", "mesh_router"),
+    # Netgear Orbi hostname prefixes. Devices ship model numbers as DHCP
+    # hostnames either as `rbr750` or `rbr-750`, so match both by using
+    # just the 3-letter line prefix.
+    ("rbk", "mesh_router"),
+    ("rbr", "mesh_router"),
+    ("rbe9", "mesh_router"),
+    # Netgear Orbi satellites stay as mesh_router for topology purposes;
+    # they're the edge node of a mesh, not a real extender.
+    ("rbs", "mesh_router"),
+    # Synology MR-series mesh, TP-Link M4R mesh travel kit
+    ("mr2200", "mesh_router"),
     # AmpliFi — the Alien/Gamer/Teleport are proper routers; HD/Instant
     # are mesh. These more-specific matches run before the generic
     # "amplifi" fallback.

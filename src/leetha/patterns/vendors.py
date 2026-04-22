@@ -158,7 +158,9 @@ DLINK_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
     (r"DIR-\d+", "D-Link DIR Router", "router", "Firmware"),
     (r"DSR-\d+", "D-Link DSR Router", "router", "Firmware"),
     (r"DWR-\d+", "D-Link DWR Mobile Router", "router", "Firmware"),
-    (r"COVR-\d+", "D-Link COVR Mesh", "router", "Firmware"),
+    # COVR is a whole-home mesh system (multi-node kits like COVR-2202,
+    # COVR-X1870, COVR-1103), not a single-unit router.
+    (r"COVR-[A-Z]?\d+", "D-Link COVR Mesh", "mesh_router", "Firmware"),
     # Switches
     (r"DGS-\d+", "D-Link DGS Switch", "switch", "Firmware"),
     (r"DES-\d+", "D-Link DES Switch", "switch", "Firmware"),
@@ -229,10 +231,15 @@ LINKSYS_MAC_PREFIXES: Dict[str, Tuple[str, str, Optional[str]]] = {
 }
 
 LINKSYS_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
-    # Velop Mesh
-    (r"Velop\s*MX\d+", "Linksys Velop MX", "router", "Firmware"),
-    (r"Velop\s*MBE\d+", "Linksys Velop MBE", "router", "Firmware"),
-    (r"Velop", "Linksys Velop Mesh", "router", "Firmware"),
+    # Velop Mesh — multi-node whole-home kits; MBE = WiFi 7, MX = WiFi 6/6E
+    (r"Velop\s*MX\d+", "Linksys Velop MX", "mesh_router", "Firmware"),
+    (r"Velop\s*MBE\d+", "Linksys Velop MBE WiFi 7", "mesh_router", "Firmware"),
+    (r"Velop\s*Pro", "Linksys Velop Pro", "mesh_router", "Firmware"),
+    (r"Velop", "Linksys Velop Mesh", "mesh_router", "Firmware"),
+    # Atlas / Hydra Pro (also mesh-capable, but typically sold as single-node)
+    (r"Atlas\s*Pro", "Linksys Atlas Pro", "mesh_router", "Firmware"),
+    (r"Atlas\s*6", "Linksys Atlas 6", "mesh_router", "Firmware"),
+    (r"Hydra\s*Pro", "Linksys Hydra Pro", "router", "Firmware"),
     # WiFi 6/6E Routers
     (r"MR\d{4}", "Linksys MR Router", "router", "Firmware"),
     (r"MX\d{4}", "Linksys MX Router", "router", "Firmware"),
@@ -1182,10 +1189,14 @@ SYNOLOGY_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
     (r"FS3410", "Synology FS3410", "nas", "DSM"),
     (r"FS6400", "Synology FS6400", "nas", "DSM"),
 
-    # Synology Router
-    (r"RT\d{4}", "Synology Router", "router", "SRM"),
+    # Synology Router / Mesh
+    # MR2200ac is Synology's mesh router (sold in multi-unit kits); RT and
+    # WRX lines are single-unit routers.
+    (r"MR2200ac", "Synology MR2200ac Mesh", "mesh_router", "SRM"),
+    (r"WRX\d+", "Synology WRX Router", "router", "SRM"),
     (r"RT2600ac", "Synology RT2600ac", "router", "SRM"),
     (r"RT6600ax", "Synology RT6600ax", "router", "SRM"),
+    (r"RT\d{4}", "Synology Router", "router", "SRM"),
 
     # Generic
     (r"DSM\s*([\d.]+)?", "Synology NAS", "nas", "DSM"),
@@ -1203,6 +1214,10 @@ QNAP_MAC_PREFIXES: Dict[str, Tuple[str, str, Optional[str]]] = {
 }
 
 QNAP_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
+    # QHora SD-WAN / WiFi routers (NOT NAS — must come before TS-/TVS- rules
+    # so the "Q" prefix can't fall through to a NAS match later).
+    (r"QHora-\d+[A-Z]*", "QNAP QHora SD-WAN Router", "router", "QuRouter"),
+    (r"QHora", "QNAP QHora Router", "router", "QuRouter"),
     # TS Series
     (r"TS-\d{3,4}[A-Z]*", "QNAP TS Series", "nas", "QTS"),
     (r"TS-253D", "QNAP TS-253D", "nas", "QTS"),
@@ -1774,21 +1789,50 @@ NETGEAR_MAC_PREFIXES: Dict[str, Tuple[str, str, Optional[str]]] = {
 
 NETGEAR_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
     # Nighthawk Routers
-    (r"Nighthawk\s*[A-Z]*\d*", "Netgear Nighthawk", "router", None),
-    (r"RAX\d+", "Netgear Nighthawk AX", "router", None),
+    # WiFi 7 Nighthawk RS series (RS700S, RS600, RS300)
+    (r"RS700S?", "Netgear Nighthawk RS700", "router", None),
+    (r"RS600", "Netgear Nighthawk RS600", "router", None),
+    (r"RS300", "Netgear Nighthawk RS300", "router", None),
+    (r"Nighthawk\s*RS\d+S?", "Netgear Nighthawk RS WiFi 7", "router", None),
+    # Nighthawk Pro Gaming (XR1000/XR500/XR700)
+    (r"XR1000", "Netgear Nighthawk XR1000 Pro Gaming", "router", "DumaOS"),
+    (r"XR700", "Netgear Nighthawk XR700 Pro Gaming", "router", "DumaOS"),
+    (r"XR500", "Netgear Nighthawk XR500 Pro Gaming", "router", "DumaOS"),
+    (r"Nighthawk\s*Pro\s*Gaming", "Netgear Nighthawk Pro Gaming", "router", "DumaOS"),
+    # Nighthawk AX (WiFi 6) — specific before generic
     (r"RAX200", "Netgear Nighthawk RAX200", "router", None),
     (r"RAX120", "Netgear Nighthawk RAX120", "router", None),
     (r"RAX80", "Netgear Nighthawk RAX80", "router", None),
     (r"RAX50", "Netgear Nighthawk RAX50", "router", None),
+    (r"RAX\d+", "Netgear Nighthawk AX", "router", None),
     (r"R8000", "Netgear Nighthawk R8000", "router", None),
     (r"R7000", "Netgear Nighthawk R7000", "router", None),
+    # Generic Nighthawk fallback (must run AFTER the specific RS/RAX/etc.
+    # prefixes above so it doesn't swallow them)
+    (r"Nighthawk\s*[A-Z]*\d*", "Netgear Nighthawk", "router", None),
+
+    # Cable / DSL modem-gateways (CAX, CBR, C-series)
+    (r"CAX\d+", "Netgear Nighthawk Cable Modem Router", "router", None),
+    (r"CBR\d+", "Netgear Nighthawk Cable Modem Router", "router", None),
+    (r"C7800", "Netgear Nighthawk C7800 Cable Modem Router", "router", None),
+    (r"C7500", "Netgear Nighthawk C7500 Cable Modem Router", "router", None),
 
     # Orbi Mesh WiFi System
-    (r"Orbi\s*[A-Z]*\d*", "Netgear Orbi", "mesh_router", None),
+    # WiFi 7 Orbi (RBE9xx kits)
+    (r"RBE97[03]Q?", "Netgear Orbi RBE970 WiFi 7", "mesh_router", None),
+    (r"RBE9\d{2}", "Netgear Orbi WiFi 7", "mesh_router", None),
+    # WiFi 6E Orbi (RBKE960 / RBRE960 / RBSE960)
+    (r"RBKE9\d{2}", "Netgear Orbi Kit WiFi 6E", "mesh_router", None),
+    (r"RBRE\d+", "Netgear Orbi Router WiFi 6E", "mesh_router", None),
+    (r"RBSE\d+", "Netgear Orbi Satellite WiFi 6E", "range_extender", None),
+    # Satellite (range-extender) models — keep BEFORE the generic RBS/RBE
+    # catch-alls below.
+    (r"RBS\d+", "Netgear Orbi Satellite", "range_extender", None),
+    # Kits / routers / outdoor
     (r"RBK\d+", "Netgear Orbi Kit", "mesh_router", None),
     (r"RBR\d+", "Netgear Orbi Router", "mesh_router", None),
-    (r"RBS\d+", "Netgear Orbi Satellite", "range_extender", None),
     (r"RBE\d+", "Netgear Orbi Outdoor", "mesh_router", None),
+    (r"Orbi\s*[A-Z]*\d*", "Netgear Orbi", "mesh_router", None),
 
     # Switches
     (r"GS\d{3}", "Netgear Smart Switch", "switch", None),
@@ -2924,6 +2968,77 @@ SONICWALL_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
     (r"SMA\s*\d+", "SonicWall SMA", "vpn_gateway", "SMA"),
     # Generic
     (r"SonicWall", "SonicWall", "firewall", "SonicOS"),
+]
+
+
+# PLUME / VILO MESH WIFI PATTERNS
+
+# Plume Design makes OpenSync-based "SuperPod" mesh nodes that many ISPs
+# rebrand (Comcast xFi Pod, Bell Home Hub, etc). The hardware reports
+# itself as a Plume SuperPod on its local management plane.
+PLUME_MAC_PREFIXES: Dict[str, Tuple[str, str, Optional[str]]] = {
+    # Plume Design Inc. (IEEE MA-L assignments)
+    "6C:29:90": ("mesh_router", "Network Equipment", "Plume SuperPod"),
+    "9C:3D:CF": ("mesh_router", "Network Equipment", "Plume SuperPod"),
+    "A8:DB:03": ("mesh_router", "Network Equipment", "Plume SuperPod"),
+}
+
+PLUME_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
+    (r"Plume\s*SuperPod", "Plume SuperPod", "mesh_router", "OpenSync"),
+    (r"SuperPod", "Plume SuperPod", "mesh_router", "OpenSync"),
+    (r"Plume\s*Pod", "Plume Pod", "mesh_router", "OpenSync"),
+    (r"Plume", "Plume Device", "mesh_router", "OpenSync"),
+    (r"OpenSync", "OpenSync Mesh Node", "mesh_router", "OpenSync"),
+]
+
+# Vilo Living Inc. — budget tri-band mesh kits.
+VILO_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
+    (r"Vilo\s*6\s*Plus", "Vilo 6 Plus Mesh", "mesh_router", None),
+    (r"Vilo\s*6", "Vilo 6 Mesh", "mesh_router", None),
+    (r"Vilo\s*Mesh", "Vilo Mesh", "mesh_router", None),
+    (r"Vilo", "Vilo Device", "mesh_router", None),
+]
+
+
+# FIREWALLA FIREWALL PATTERNS
+
+# Firewalla Inc. ships the Gold/Purple/Blue/Red inline-firewall boxes; they
+# appear on the LAN as appliances with distinctive banners.
+FIREWALLA_MAC_PREFIXES: Dict[str, Tuple[str, str, Optional[str]]] = {
+    # Firewalla Inc. (IEEE MA-L)
+    "20:6D:31": ("firewall", "Network Security", "Firewalla"),
+}
+
+FIREWALLA_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
+    (r"Firewalla\s*Gold\s*(Plus|SE|Pro)?", "Firewalla Gold", "firewall", "Firewalla OS"),
+    (r"Firewalla\s*Purple\s*(SE)?", "Firewalla Purple", "firewall", "Firewalla OS"),
+    (r"Firewalla\s*Blue\s*(Plus)?", "Firewalla Blue", "firewall", "Firewalla OS"),
+    (r"Firewalla\s*Red", "Firewalla Red", "firewall", "Firewalla OS"),
+    (r"Firewalla", "Firewalla", "firewall", "Firewalla OS"),
+]
+
+
+# VYOS / UNTANGLE / CLEAROS OPEN-SOURCE FIREWALL PATTERNS
+
+VYOS_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
+    (r"VyOS\s*\d+\.\d+(\.\d+)?", "VyOS", "firewall", "VyOS"),
+    (r"VyOS\s*rolling", "VyOS rolling", "firewall", "VyOS"),
+    (r"VyOS", "VyOS", "firewall", "VyOS"),
+    # VyOS descends from Vyatta — match the legacy banner too
+    (r"Vyatta", "Vyatta", "firewall", "Vyatta"),
+]
+
+UNTANGLE_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
+    (r"Untangle\s*NG\s*Firewall", "Untangle NG Firewall", "firewall", "Untangle"),
+    (r"Untangle\s*\d+", "Untangle", "firewall", "Untangle"),
+    (r"Untangle", "Untangle", "firewall", "Untangle"),
+    # Arista acquired Untangle and sells it as ETM; match both names.
+    (r"Arista\s*ETM", "Arista ETM (Untangle)", "firewall", "Untangle"),
+]
+
+CLEAROS_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
+    (r"ClearOS\s*\d+(\.\d+)?", "ClearOS", "firewall", "ClearOS"),
+    (r"ClearOS", "ClearOS", "firewall", "ClearOS"),
 ]
 
 
@@ -5978,10 +6093,10 @@ GOOGLE_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
     (r"Chromecast\s*Ultra", "Chromecast Ultra", "media_player", "Cast OS"),
     (r"Chromecast", "Chromecast", "media_player", "Cast OS"),
 
-    # Nest WiFi / Google WiFi
-    (r"Nest\s*Wifi\s*Pro", "Google Nest Wifi Pro", "router", "Google WiFi"),
-    (r"Nest\s*Wifi", "Google Nest Wifi", "router", "Google WiFi"),
-    (r"Google\s*Wifi", "Google Wifi", "router", "Google WiFi"),
+    # Nest WiFi / Google WiFi — multi-puck whole-home mesh systems.
+    (r"Nest\s*Wifi\s*Pro", "Google Nest Wifi Pro", "mesh_router", "Google WiFi"),
+    (r"Nest\s*Wifi", "Google Nest Wifi", "mesh_router", "Google WiFi"),
+    (r"Google\s*Wifi", "Google Wifi", "mesh_router", "Google WiFi"),
 
     # Nest cameras
     (r"Nest\s*Cam\s*Outdoor", "Google Nest Cam Outdoor", "ip_camera", "Nest OS"),
@@ -7268,7 +7383,39 @@ ASUS_MAC_PREFIXES: Dict[str, Tuple[str, str, Optional[str]]] = {
 }
 
 ASUS_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
-    # ROG (Gaming)
+    # Routers come first: the GT- (ROG Rapture) and TUF-AX model
+    # codes would otherwise be swallowed by the broader ROG / TUF
+    # laptop patterns below.
+
+    # ROG Rapture gaming routers (GT-AX / GT-AXE / GT-BE / GT-BE98 Pro, etc.)
+    (r"GT-BE\d+\s*Pro", "ASUS ROG Rapture GT-BE Pro WiFi 7", "router", "ASUSWRT"),
+    (r"GT-BE\d+", "ASUS ROG Rapture GT-BE WiFi 7", "router", "ASUSWRT"),
+    (r"GT-AXE\d+", "ASUS ROG Rapture GT-AXE WiFi 6E", "router", "ASUSWRT"),
+    (r"GT-AX\d+", "ASUS ROG Rapture GT-AX WiFi 6", "router", "ASUSWRT"),
+    (r"GT-AC\d+", "ASUS ROG Rapture GT-AC", "router", "ASUSWRT"),
+    (r"ROG\s*Rapture", "ASUS ROG Rapture Router", "router", "ASUSWRT"),
+
+    # TUF Gaming routers (TUF-AX3000, TUF-AX5400, TUF-AX6000, TUF-BE3600)
+    (r"TUF-BE\d+", "ASUS TUF Gaming BE WiFi 7 Router", "router", "ASUSWRT"),
+    (r"TUF-AX\d+", "ASUS TUF Gaming AX Router", "router", "ASUSWRT"),
+
+    # ZenWiFi mesh family (XT, XD, ET, Pro XT12, BT10 WiFi 7)
+    (r"ZenWiFi\s*Pro\s*[A-Z]+\d+", "ASUS ZenWiFi Pro Mesh", "mesh_router", "ASUSWRT"),
+    (r"ZenWiFi\s*BT\d+", "ASUS ZenWiFi BT WiFi 7 Mesh", "mesh_router", "ASUSWRT"),
+    (r"ZenWiFi\s*BD\d+", "ASUS ZenWiFi BD WiFi 7 Mesh", "mesh_router", "ASUSWRT"),
+    (r"ZenWiFi\s*XT\d+", "ASUS ZenWiFi XT Mesh", "mesh_router", "ASUSWRT"),
+    (r"ZenWiFi\s*XD\d+", "ASUS ZenWiFi XD Mesh", "mesh_router", "ASUSWRT"),
+    (r"ZenWiFi\s*ET\d+", "ASUS ZenWiFi ET Mesh", "mesh_router", "ASUSWRT"),
+    (r"ZenWiFi\s*AX", "ASUS ZenWiFi AX Mesh", "mesh_router", "ASUSWRT"),
+    (r"ZenWiFi", "ASUS ZenWiFi Mesh", "mesh_router", "ASUSWRT"),
+    # AiMesh is ASUS's whole-home mesh branding
+    (r"AiMesh", "ASUS AiMesh", "mesh_router", "ASUSWRT"),
+    # Lyra was ASUS's earlier mesh line
+    (r"Lyra\s*Trio", "ASUS Lyra Trio", "mesh_router", "ASUSWRT"),
+    (r"Lyra\s*Voice", "ASUS Lyra Voice", "mesh_router", "ASUSWRT"),
+    (r"Lyra", "ASUS Lyra Mesh", "mesh_router", "ASUSWRT"),
+
+    # ROG (Gaming laptops/phones) — after router-specific ROG prefixes above
     (r"ROG\s*Strix", "ASUS ROG Strix", "laptop", "Windows"),
     (r"ROG\s*Zephyrus", "ASUS ROG Zephyrus", "laptop", "Windows"),
     (r"ROG\s*Flow", "ASUS ROG Flow", "laptop", "Windows"),
@@ -7289,7 +7436,7 @@ ASUS_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
     (r"VivoBook\s*S\d+", "ASUS VivoBook S", "laptop", "Windows"),
     (r"VivoBook", "ASUS VivoBook", "laptop", "Windows"),
 
-    # TUF Gaming
+    # TUF Gaming laptops — non-router TUF (runs after TUF-AX above)
     (r"TUF\s*Gaming", "ASUS TUF Gaming", "laptop", "Windows"),
     (r"TUF\s*Dash", "ASUS TUF Dash", "laptop", "Windows"),
     (r"TUF", "ASUS TUF", "laptop", "Windows"),
@@ -7298,11 +7445,10 @@ ASUS_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
     (r"ProArt\s*Studiobook", "ASUS ProArt Studiobook", "workstation", "Windows"),
     (r"ProArt", "ASUS ProArt", "workstation", "Windows"),
 
-    # Routers
+    # Standalone routers (RT-BE WiFi 7, RT-AX WiFi 6, RT-AC WiFi 5)
+    (r"RT-BE\d+", "ASUS RT-BE WiFi 7 Router", "router", "ASUSWRT"),
     (r"RT-AX\d+", "ASUS RT-AX Router", "router", "ASUSWRT"),
     (r"RT-AC\d+", "ASUS RT-AC Router", "router", "ASUSWRT"),
-    (r"ZenWiFi", "ASUS ZenWiFi", "router", "ASUSWRT"),
-    (r"AiMesh", "ASUS AiMesh", "router", "ASUSWRT"),
 
     # Servers/Workstations
     (r"RS\d+", "ASUS Server", "server", "Linux"),
@@ -9009,9 +9155,9 @@ NEST_BANNER_PATTERNS: List[Tuple[str, str, str, Optional[str]]] = [
     # Protect (Smoke/CO)
     (r"Nest\s*Protect", "Nest Protect", "smoke_detector", None),
 
-    # WiFi
-    (r"Nest\s*Wifi\s*Pro", "Nest Wifi Pro", "router", None),
-    (r"Nest\s*Wifi", "Nest Wifi", "router", None),
+    # WiFi — Nest Wifi is a multi-puck mesh system
+    (r"Nest\s*Wifi\s*Pro", "Nest Wifi Pro", "mesh_router", None),
+    (r"Nest\s*Wifi", "Nest Wifi", "mesh_router", None),
 
     # Generic
     (r"Nest", "Nest Device", "iot_device", None),
