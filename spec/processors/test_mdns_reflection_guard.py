@@ -94,25 +94,49 @@ def test_physical_only_service_from_real_oui_keeps_full_evidence(service):
     "_homekit._tcp",
     "_apple-mobdev2._tcp",
 ])
-def test_apple_service_from_random_mac_stays_trusted(service):
-    """iPhones randomize MACs per SSID, so Apple services are fine."""
+def test_apple_service_from_random_mac_is_reflected(service):
+    """A router reflecting iPhone Apple services must not inherit the
+    Apple vendor tag — otherwise the router ends up classified as an
+    Apple device (and worse, pairs with reflected printer services to
+    show up as ``Apple printer``)."""
     proc = NameResolutionProcessor()
     pkt = CapturedPacket(
-        protocol="mdns", hw_addr=RANDOMIZED_MAC, ip_addr="192.168.1.60",
-        # Use a plain name — no hex_id@friendly_name prefix, so the
-        # AirPlay cross-device check can't fire for a different reason.
+        protocol="mdns", hw_addr=RANDOMIZED_MAC, ip_addr="192.168.1.1",
+        fields={"service_type": service, "name": f"Foo.{service}.local"},
+    )
+    result = proc.analyze(pkt)
+    exclusive = [e for e in result if e.source == "mdns_exclusive"]
+    assert exclusive, f"expected mdns_exclusive for {service}"
+    e = exclusive[0]
+    # Reflected traffic must not propagate vendor/category/platform.
+    assert e.vendor is None, (
+        f"{service} from random MAC should not attribute Apple vendor "
+        "to the reflecting device; got vendor={e.vendor!r}"
+    )
+    assert e.category is None
+    assert e.platform is None
+    assert e.certainty <= 0.50
+    assert e.raw.get("cross_device") is True
+
+
+@pytest.mark.parametrize("service", [
+    "_airplay._tcp",
+    "_homekit._tcp",
+    "_apple-mobdev2._tcp",
+])
+def test_apple_service_from_real_apple_oui_stays_trusted(service):
+    """Real Apple hardware OUIs (bit 0x02 = 0) keep full trust."""
+    proc = NameResolutionProcessor()
+    # Apple Inc. universally-administered OUI (bit 0x02 = 0)
+    real_apple_mac = "ac:bc:32:11:22:33"
+    pkt = CapturedPacket(
+        protocol="mdns", hw_addr=real_apple_mac, ip_addr="192.168.1.50",
         fields={"service_type": service, "name": f"iPhone.{service}.local"},
     )
     result = proc.analyze(pkt)
     exclusive = [e for e in result if e.source == "mdns_exclusive"]
-    assert exclusive, f"expected mdns_exclusive for Apple service {service}"
+    assert exclusive
     e = exclusive[0]
     assert e.vendor == "Apple"
-    # No cross-device downgrade for Apple services from random MACs.
-    assert e.raw.get("cross_device") is False, (
-        f"{service} from random MAC must NOT be flagged as cross-device "
-        "— iPhones randomize MACs per SSID"
-    )
-    assert e.certainty >= 0.85, (
-        f"Apple service certainty should not drop for random MAC, got {e.certainty}"
-    )
+    assert e.certainty >= 0.85
+    assert e.raw.get("cross_device") is False

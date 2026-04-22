@@ -127,20 +127,15 @@ class NameResolutionProcessor(Processor):
                 ))
         return evidence
 
-    # Vendor-exclusive mDNS services that DEFINITIVELY identify the vendor.
-    # If a device advertises one of these, no OUI guess can override it.
-    #
-    # The ``physical_only`` flag means the service is only advertised by
-    # dedicated consumer-electronics hardware (Chromecasts, Rokus, Sonos
-    # speakers, LG/Samsung TVs, Fire TVs) — *not* by phones/tablets. Real
-    # hardware ships with a real vendor OUI, so the same service arriving
-    # from a locally-administered MAC is almost certainly reflected /
-    # proxied traffic (mesh routers, guest-VLAN bridges, mDNS reflectors).
-    # Services that *are* routinely advertised by phones (Apple AirPlay
-    # /HomeKit / companion-link, etc.) must leave ``physical_only`` unset
-    # because iOS randomizes MACs per SSID.
+    # Vendor-exclusive mDNS services that DEFINITIVELY identify the
+    # vendor — for a packet whose source MAC is actually the advertising
+    # device. Mesh routers and guest-VLAN bridges that reflect mDNS
+    # rebroadcast these with their OWN locally-administered MAC, so the
+    # ``reflected`` guard below (based on the source MAC's U/L bit plus
+    # a known-CID allowlist) strips category/platform/vendor when the
+    # packet is likely a reflection.
     _EXCLUSIVE_SERVICES: dict[str, dict] = {
-        # Apple-exclusive services — only Apple devices advertise these
+        # Apple
         "_apple-mobdev2._tcp": {"vendor": "Apple", "category": "phone", "platform": "iOS", "certainty": 0.97},
         "_apple-mobdev._tcp": {"vendor": "Apple", "category": "phone", "platform": "iOS", "certainty": 0.97},
         "_companion-link._tcp": {"vendor": "Apple", "certainty": 0.90},
@@ -150,24 +145,22 @@ class NameResolutionProcessor(Processor):
         "_rdlink._tcp": {"vendor": "Apple", "certainty": 0.85},
         "_touch-able._tcp": {"vendor": "Apple", "category": "phone", "platform": "iOS", "certainty": 0.90},
         "_apple-pairable._tcp": {"vendor": "Apple", "certainty": 0.90},
-        # Google-exclusive services — Cast receivers are all dedicated
-        # hardware with real Google OUIs, so random-MAC sources are
-        # almost certainly mDNS reflections by a mesh router.
-        "_googlecast._tcp": {"vendor": "Google", "category": "smart_speaker", "platform": "Cast OS", "certainty": 0.95, "physical_only": True},
-        "_googlerpc._tcp": {"vendor": "Google", "certainty": 0.85, "physical_only": True},
-        "_googlehomedevice._tcp": {"vendor": "Google", "category": "smart_speaker", "certainty": 0.90, "physical_only": True},
-        # Amazon-exclusive — Fire TV hardware only
-        "_amzn-wplay._tcp": {"vendor": "Amazon", "category": "smart_speaker", "platform": "Fire OS", "certainty": 0.90, "physical_only": True},
+        # Google
+        "_googlecast._tcp": {"vendor": "Google", "category": "smart_speaker", "platform": "Cast OS", "certainty": 0.95},
+        "_googlerpc._tcp": {"vendor": "Google", "certainty": 0.85},
+        "_googlehomedevice._tcp": {"vendor": "Google", "category": "smart_speaker", "certainty": 0.90},
+        # Amazon Fire TV
+        "_amzn-wplay._tcp": {"vendor": "Amazon", "category": "smart_speaker", "platform": "Fire OS", "certainty": 0.90},
         # Samsung TVs
-        "_samsung-osp._tcp": {"vendor": "Samsung", "certainty": 0.90, "physical_only": True},
-        "_samsungtvrc._tcp": {"vendor": "Samsung", "category": "smart_tv", "platform": "Tizen", "certainty": 0.95, "physical_only": True},
-        "_samsung-msn._tcp": {"vendor": "Samsung", "category": "smart_tv", "platform": "Tizen", "certainty": 0.90, "physical_only": True},
-        # Roku hardware
-        "_roku-rsp._tcp": {"vendor": "Roku", "category": "streaming_device", "platform": "RokuOS", "certainty": 0.95, "physical_only": True},
-        # Sonos speakers
-        "_sonos._tcp": {"vendor": "Sonos", "category": "smart_speaker", "certainty": 0.95, "physical_only": True},
+        "_samsung-osp._tcp": {"vendor": "Samsung", "certainty": 0.90},
+        "_samsungtvrc._tcp": {"vendor": "Samsung", "category": "smart_tv", "platform": "Tizen", "certainty": 0.95},
+        "_samsung-msn._tcp": {"vendor": "Samsung", "category": "smart_tv", "platform": "Tizen", "certainty": 0.90},
+        # Roku
+        "_roku-rsp._tcp": {"vendor": "Roku", "category": "streaming_device", "platform": "RokuOS", "certainty": 0.95},
+        # Sonos
+        "_sonos._tcp": {"vendor": "Sonos", "category": "smart_speaker", "certainty": 0.95},
         # LG TV
-        "_lgtvremote._tcp": {"vendor": "LG", "category": "smart_tv", "platform": "webOS", "certainty": 0.95, "physical_only": True},
+        "_lgtvremote._tcp": {"vendor": "LG", "category": "smart_tv", "platform": "webOS", "certainty": 0.95},
     }
 
     # Regex for AirPlay/RAOP instance names: "<hex_id>@<friendly_name>"
@@ -212,30 +205,44 @@ class NameResolutionProcessor(Processor):
             # Check for vendor-exclusive services FIRST — these are definitive
             exclusive = self._EXCLUSIVE_SERVICES.get(service_type)
             if exclusive:
-                # Physical-device-only services from locally-administered
-                # MACs are almost certainly reflected traffic (mesh
-                # routers with mDNS reflection, guest-VLAN bridges). Real
-                # Chromecasts/Rokus/Sonos/TVs ship with real vendor OUIs.
-                if exclusive.get("physical_only") and not belongs_to_other_device:
+                # Any exclusive service arriving from a locally-
+                # administered MAC that isn't a known vendor CID is
+                # almost certainly reflected traffic — mesh routers and
+                # guest-VLAN bridges rebroadcast mDNS with their own
+                # randomized virtual source MAC. Unlike the AirPlay
+                # hex_id@name case (where vendor is still correct
+                # because a HomePod advertised via an iPhone is still
+                # Apple), a reflecting router is NOT the claimed vendor
+                # at all, so vendor must also be stripped.
+                reflected = False
+                if not belongs_to_other_device:
                     from leetha.fingerprint.mac_intel import is_randomized_mac
                     hw_prefix = (packet.hw_addr or "")[:8].upper().replace("-", ":")
                     if (
                         is_randomized_mac(packet.hw_addr)
                         and hw_prefix not in self._LOCALLY_ADMIN_VENDOR_CIDS
                     ):
+                        reflected = True
                         belongs_to_other_device = True
-                # If this mDNS name contains another device's ID, only keep
-                # vendor (still useful for vendor identification) but strip
-                # category/platform which belong to the other device.
+
                 evidence.append(Evidence(
                     source="mdns_exclusive", method="exact",
-                    certainty=exclusive["certainty"] if not belongs_to_other_device else min(exclusive["certainty"], 0.50),
-                    vendor=exclusive.get("vendor"),
+                    certainty=(
+                        exclusive["certainty"]
+                        if not belongs_to_other_device
+                        else min(exclusive["certainty"], 0.50)
+                    ),
+                    # Reflected traffic gives no reliable vendor signal
+                    # about the source MAC. The hex_id@name cross-device
+                    # case preserves vendor (both endpoints are the same
+                    # ecosystem vendor); reflection does not.
+                    vendor=None if reflected else exclusive.get("vendor"),
                     category=None if belongs_to_other_device else exclusive.get("category"),
                     platform=None if belongs_to_other_device else exclusive.get("platform"),
                     raw={"service_type": service_type, "name": name,
                          "exclusive_match": True,
-                         "cross_device": belongs_to_other_device},
+                         "cross_device": belongs_to_other_device,
+                         "reflected": reflected},
                 ))
             else:
                 evidence.append(Evidence(
