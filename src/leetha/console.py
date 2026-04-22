@@ -1073,13 +1073,30 @@ class LeethaConsole:
         scheme = "https" if use_tls else "http"
         self._info(f"Web dashboard at [bold cyan]{scheme}://{host}:{port}[/bold cyan] — [bold]Ctrl+C[/bold] to return")
 
-        # Temporarily replace SIGINT: instead of raising KeyboardInterrupt
-        # (which leaves uvicorn in a messy state), set the server's exit flag
-        # so it shuts down cleanly within its own serve loop.
+        # Temporarily replace SIGINT with a two-stage handler:
+        #   1st Ctrl+C  → flip uvicorn's should_exit + force_exit so it
+        #                 tears down its own serve loop gracefully.
+        #   2nd Ctrl+C  → hard-exit with os._exit(0). Matches uvicorn's
+        #                 own "CTRL+C to force quit" contract.
+        #
+        # Safety argument for the force-exit mirrors the main REPL
+        # handler: SQLite WAL auto-recovers, capture/background tasks
+        # are daemon threads, sensor clients auto-reconnect. Active
+        # websocket connections (live packet stream) are the typical
+        # reason uvicorn's graceful drain hangs — force-quit drops
+        # them with a TCP RST which the browser handles on reconnect.
         _web_server_ref = None
+        _web_sigint_count = [0]
 
         def _web_sigint(sig, frame):
             nonlocal _web_server_ref
+            _web_sigint_count[0] += 1
+            if _web_sigint_count[0] >= 2:
+                try:
+                    os.write(1, b"\n\033[33m[*] Force-quitting web server\033[0m\n")
+                except Exception:
+                    pass
+                os._exit(0)
             if _web_server_ref is not None:
                 _web_server_ref.should_exit = True
                 _web_server_ref.force_exit = True
