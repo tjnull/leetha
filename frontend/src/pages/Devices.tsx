@@ -123,6 +123,8 @@ export default function Devices({ subscribe }: DevicesProps) {
   const statusFilter = searchParams.get("status") ?? "all";
   const confidenceMin = searchParams.get("confidence_min") ?? "";
   const criticality = searchParams.get("criticality") ?? "";
+  const authorization = searchParams.get("authorization") ?? "";
+  const isOnlineFilter = searchParams.get("is_online") ?? "";
 
   // Helper to update URL params
   const setParam = useCallback(
@@ -162,7 +164,8 @@ export default function Devices({ subscribe }: DevicesProps) {
 
   // Has any active filter?
   const hasFilters =
-    q || deviceType || osFamily || manufacturer || statusFilter !== "all" || confidenceMin || criticality;
+    q || deviceType || osFamily || manufacturer || statusFilter !== "all" || confidenceMin
+    || criticality || authorization || isOnlineFilter;
 
   // --- Fetch filter options ---
   const { data: filterOpts } = useQuery({
@@ -186,8 +189,10 @@ export default function Devices({ subscribe }: DevicesProps) {
       ...(statusFilter !== "all" ? { alert_status: statusFilter } : {}),
       ...(confidenceMin ? { confidence_min: Number(confidenceMin) } : {}),
       ...(criticality ? { criticality } : {}),
+      ...(authorization ? { authorization } : {}),
+      ...(isOnlineFilter ? { is_online: isOnlineFilter === "true" } : {}),
     }),
-    [page, perPage, sort, order, q, deviceType, osFamily, manufacturer, statusFilter, confidenceMin, criticality]
+    [page, perPage, sort, order, q, deviceType, osFamily, manufacturer, statusFilter, confidenceMin, criticality, authorization, isOnlineFilter]
   );
 
   const { data: deviceData, isFetching, isError, error } = useQuery({
@@ -492,6 +497,41 @@ export default function Devices({ subscribe }: DevicesProps) {
               <SelectItem value="medium">medium</SelectItem>
               <SelectItem value="high">high</SelectItem>
               <SelectItem value="critical">critical</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {/* Authorization (Phase A.2) */}
+          <Select
+            value={authorization || "__any__"}
+            onValueChange={(v) =>
+              setParam({ authorization: v === "__any__" ? "" : v, page: "1" })
+            }
+          >
+            <SelectTrigger size="sm" className="w-32 text-xs">
+              <SelectValue placeholder="Auth" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__any__">Any Auth</SelectItem>
+              <SelectItem value="approved">Approved</SelectItem>
+              <SelectItem value="unapproved">Unapproved</SelectItem>
+              <SelectItem value="rejected">Rejected</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {/* Presence (Phase A.4) */}
+          <Select
+            value={isOnlineFilter || "__any__"}
+            onValueChange={(v) =>
+              setParam({ is_online: v === "__any__" ? "" : v, page: "1" })
+            }
+          >
+            <SelectTrigger size="sm" className="w-28 text-xs">
+              <SelectValue placeholder="Presence" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__any__">Any</SelectItem>
+              <SelectItem value="true">Online</SelectItem>
+              <SelectItem value="false">Offline</SelectItem>
             </SelectContent>
           </Select>
 

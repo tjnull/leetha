@@ -5,6 +5,75 @@ All notable changes to Leetha will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-04-22 — Phase A Follow-Ups
+
+Bug fixes, API completeness, and UX polish discovered during live-probe
+regression testing after v1.2.0 shipped. 850 backend tests + 40 frontend
+tests passing.
+
+### Security
+- **Admin-only role gate for all Phase A mutation endpoints.**
+  `roles.py` now requires admin role for: `POST /api/devices/{mac}/approve`,
+  `/reject`, `/revoke`; `POST /api/devices/bulk/authorization`;
+  `POST /api/baseline/set` and `/baseline/reset`; `POST /api/inventory/*`.
+  Previously analyst tokens could approve/reject the entire fleet.
+- **`authorized_by` now captures the real token id.** The endpoint was
+  reading `request.state.token_id`, but the auth middleware publishes the
+  id on `request.scope["auth_token_id"]`. Audit trail entries now record
+  the actual caller instead of `"anonymous"`.
+
+### Added
+- **`GET /api/devices/{mac}/authorization/history`** — per-device audit
+  trail newest-first, with `limit` query param (max 1000).
+- **`POST /api/baseline/reset`** and **`leetha baseline reset`** — revoke
+  every approved/rejected device back to unapproved, logging each
+  transition.
+- **`authorization` and `is_online` filter params** on `/api/devices`
+  (were previously silently ignored by FastAPI).
+- **Phase A sort keys** on `/api/devices`: `criticality`, `owner`,
+  `location`, `authorization`, `is_online`, `offline_since`,
+  `presence_threshold_seconds`. Criticality sorts by level
+  (critical > high > medium > low), not alphabetic.
+- **Tabbed DeviceDrawer** — Summary / Labels / Activity / Evidence tabs
+  with at-a-glance badges (AuthorizationBadge, CriticalityPill,
+  PresenceDot) sticky in the header on every tab.
+
+### Fixed
+- **Ctrl+C exits instantly** (<1 ms measured over 10 runs, was 2–4 s).
+  SIGINT handler calls `os._exit(0)` directly; WAL journaling makes
+  this safe. Graceful cleanup remains on the `exit` / Ctrl+D path.
+- **Mutation endpoints auto-create a devices row** from the matching
+  `hosts` record if one doesn't exist yet. Previously PATCH / approve
+  on live-capture-only devices returned 404 because the capture
+  pipeline populates `hosts` but not `devices`.
+- **`GET /api/devices/{mac}/detail`** now merges Phase A fields
+  (owner, criticality, authorization, presence) — was returning the
+  pre-Phase-A device shape.
+- **CSV + JSON exports** now include all Phase A columns. CSV
+  serializes tags as comma-joined; JSON keeps them as an array.
+- **Topology nodes** carry Phase A fields (`criticality`,
+  `authorization`, `owner`, `location`, `tags`) so the topology UI
+  can style nodes by criticality/auth state.
+- **Incident detail** device block enriched with Phase A fields.
+- **DHCP-imported hostnames are searchable + visible.** `list_devices`
+  SELECT now uses `COALESCE(v.hostname, d.hostname)`, and the `q=`
+  search LIKE matches `d.hostname` too. Also fixed a related bug where
+  DHCP-uploaded devices were invisible in the device list (upload now
+  writes to both `hosts` and `devices`).
+- **Presence sweeper no longer misses host-only devices.** The sweep
+  query now drives off `hosts` LEFT JOIN `devices` (was `devices`-only),
+  so live-capture-only hosts are considered. Auto-creates a `devices`
+  row on demand so it can record `is_online` / `offline_since` state.
+  Uses `COALESCE(h.last_active, d.last_seen)` as the authoritative
+  freshness signal (stale `devices.last_seen` no longer flips live
+  devices offline).
+
+### Removed
+- **Crit / Owner / Location / Tags / Auth columns** from the Devices
+  table — mostly empty for typical deployments, wasted horizontal
+  space. Replaced by at-a-glance badges in the drawer header; full
+  editing still lives in the drawer's Labels tab.
+
 ## [1.2.0] - 2026-04-19 — Phase A Foundation
 
 **Breaking behavior change:** newly discovered devices now default to
