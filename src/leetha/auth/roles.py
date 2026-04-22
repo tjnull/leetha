@@ -25,6 +25,9 @@ ADMIN_ONLY_METHODS: dict[str, tuple[str, ...]] = {
         "/api/baseline/reset",
         # Phase A — bulk authorization (can approve/reject the whole fleet).
         "/api/devices/bulk/authorization",
+        # Phase A — inventory imports populate devices and can flood the
+        # discovery pipeline; treat as a privileged operation.
+        "/api/inventory/",
     ),
 }
 

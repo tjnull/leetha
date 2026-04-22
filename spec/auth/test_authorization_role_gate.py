@@ -59,6 +59,17 @@ def test_existing_bulk_disposition_still_admin_by_path_convention():
     assert requires_admin("POST", "/api/devices/bulk") is False
 
 
+def test_inventory_upload_is_admin_only():
+    """DHCP lease uploads flood the device inventory — admin-only."""
+    assert requires_admin("POST", "/api/inventory/dhcp-leases/upload") is True
+
+
+def test_future_inventory_sources_also_admin():
+    """The prefix covers any future importer under /api/inventory/."""
+    assert requires_admin("POST", "/api/inventory/unifi/sync") is True
+    assert requires_admin("POST", "/api/inventory/pihole/upload") is True
+
+
 def test_authorization_suffix_match_is_precise():
     """Suffix matching must not over-match random /approve substrings."""
     # Path with /approve in the middle, not at the end — should NOT be admin.
