@@ -16,15 +16,40 @@ leetha start web --host 127.0.0.1       # restrict to loopback
 
 The landing page renders a sortable, searchable table of every host stored in `HostRepository`. Rows update in real time via WebSocket push.
 
-Columns: MAC, IPv4, IPv6, manufacturer, device type, OS, hostname, confidence (0--100%), alert badge, first-seen timestamp, last-seen timestamp. Rows are color-coded by device category.
+Columns: checkbox, MAC, IPv4, IPv6, manufacturer, device type, OS, hostname, confidence (0--100%), presence + live-status dot, disposition, first-seen timestamp, last-seen timestamp. Rows are color-coded by device category.
 
 Key interactions:
 - Free-text search spanning MAC, IP, hostname, and manufacturer
-- Drop-down filters for manufacturer, device type, OS family, alert state, and adapter
-- Column-header sorting (ascending / descending toggle)
-- Row click opens a detail drawer with the full Evidence timeline and current Verdict
-- CSV or JSON bulk export
+- Drop-down filters for manufacturer, device type, OS family, alert state, adapter,
+  criticality, authorization state, and `is_online`
+- Column-header sorting — including Phase A columns (criticality uses level order,
+  not alphabetic: critical > high > medium > low)
+- Row click opens a detail drawer with tabbed content
+- **Bulk authorization** — select rows via checkboxes to reveal an Approve / Reject /
+  Revoke / Clear toolbar that applies to the selection via
+  `POST /api/devices/bulk/authorization`
+- **"Set baseline" banner** appears at the top when `approved < 5` and no baseline
+  has been set — one click bulk-approves every discovered device
+- CSV or JSON bulk export (includes owner, location, criticality, tags, notes,
+  authorization, `is_online`, `offline_since`, `presence_threshold_seconds`)
 - Toggle between identity-grouped view (merges randomized MACs) and raw MAC view
+
+**Device drawer — tabbed layout**
+
+Clicking a row opens a right-hand drawer. A sticky header shows the device's
+hostname/MAC plus at-a-glance badges — disposition, device type, vendor,
+confidence, AuthorizationBadge, CriticalityPill, and the PresenceDot (Online /
+Offline). The body is organized into four tabs:
+
+- **Summary** — Identity (MAC, hostname, vendor, IPs, correlated MAC),
+  Classification (category, platform, certainty bar), Timestamps.
+- **Labels** — Authorization panel (approve/reject/revoke + optional reason),
+  Presence panel (offline-threshold slider with 1m/5m/15m/1h/4h/24h presets),
+  Custom Properties (owner, location, criticality dropdown, tags, notes), and
+  Manual Override.
+- **Activity** — Detected Services, 24-Hour Activity histogram, Recent
+  Observations, full Timeline.
+- **Evidence** — Source Coverage diagnostics, Fingerprint Evidence chain.
 
 ### Alert Center (`/alerts`)
 
@@ -57,6 +82,14 @@ Browser-based operational console with four tabs:
 ### Database Sync (`/sync`)
 
 Shows all 12 fingerprint sources with their record counts, last-synced timestamps, and status indicators. Trigger a full refresh or update individual sources with per-source download progress (bytes transferred, files processed, parsing stage).
+
+**Inventory Sources panel** — above the fingerprint sources list, an Inventory
+Sources card lets you upload a DHCP lease file (ISC dhcpd or dnsmasq format,
+auto-detected). Imported devices appear in the device inventory with
+`passively_observed=false` until a real packet arrives for them, suppressing
+the `new_host` rule for inventory-only hosts. See
+[Inventory Sources](Inventory-Sources.md) for the underlying importer
+framework.
 
 ### Adapter Management (`/interfaces`)
 
@@ -94,12 +127,38 @@ All alert types flow into findings: new devices, OS changes, MAC randomization, 
 
 | Verb | Path | Returns |
 |------|------|---------|
-| GET | `/api/devices` | Paginated, filterable, sortable host list |
-| GET | `/api/devices/export` | Bulk CSV or JSON export |
-| GET | `/api/devices/{mac}` | Single host detail |
+| GET | `/api/devices` | Paginated, filterable, sortable host list. Filters: `q`, `manufacturer`, `device_type`, `os_family`, `alert_status`, `interface`, `confidence_min`, `criticality`, `owner`, `location`, `tag`, `authorization`, `is_online` |
+| GET | `/api/devices/export` | Bulk CSV or JSON export (includes custom-property + authorization + presence columns) |
+| GET | `/api/devices/{mac}` | Single host detail with Phase A fields merged |
+| GET | `/api/devices/{mac}/detail` | Single host detail plus evidence chain |
 | GET | `/api/devices/{mac}/observations` | Evidence timeline for one host |
+| GET | `/api/devices/{mac}/coverage` | Source coverage diagnostics |
 | POST | `/api/devices/{mac}/acknowledge` | Mark new-host alert as seen |
 | POST | `/api/devices/{mac}/override` | Apply a manual Verdict override |
+| PATCH | `/api/devices/{mac}` | Update custom properties (owner, location, criticality, tags, notes, presence_threshold_seconds). Validates: criticality ∈ {low, medium, high, critical}, tags ≤ 20 non-empty strings, threshold 30--86400s, owner/location ≤ 200 chars, notes ≤ 2000 chars |
+
+### Authorization Endpoints *(Phase A.2)*
+
+| Verb | Path | Role | Returns |
+|------|------|------|---------|
+| POST | `/api/devices/{mac}/approve` | admin | Approve device, record audit row |
+| POST | `/api/devices/{mac}/reject` | admin | Reject device, record audit row |
+| POST | `/api/devices/{mac}/revoke` | admin | Return device to unapproved state |
+| POST | `/api/devices/bulk/authorization` | admin | Apply `approve`/`reject`/`revoke` to up to 500 MACs at once |
+| POST | `/api/baseline/set` | admin | Approve every currently-unapproved device |
+| POST | `/api/baseline/reset` | admin | Return every non-unapproved device back to unapproved |
+| GET | `/api/baseline/status` | analyst | `{approved, unapproved, rejected, last_baseline_at}` counts |
+| GET | `/api/devices/{mac}/authorization/history` | analyst | Per-device audit trail (newest first) with `limit` query param |
+
+Body schema for approve/reject/revoke (all optional): `{"reason": "..."}` — recorded in the audit row.
+
+Bulk body: `{"action": "approve"|"reject"|"revoke", "macs": [...], "reason": "..."}`. Returns `{updated: N, missing: [...], action}`.
+
+### Inventory Endpoints *(Phase A.3)*
+
+| Verb | Path | Role | Returns |
+|------|------|------|---------|
+| POST | `/api/inventory/dhcp-leases/upload` | admin | Multipart file upload; parses ISC dhcpd or dnsmasq lease file in memory and persists devices with `passively_observed=false` |
 
 ### Alert Endpoints
 

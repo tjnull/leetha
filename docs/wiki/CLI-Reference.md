@@ -96,6 +96,78 @@ leetha override clear 00:11:22:33:44:55
 
 Overrides are stored in the `Store` and take precedence over all automated verdicts.
 
+### `device` -- Custom Properties and Authorization
+
+Manage the analyst-facing annotations on a device — owner, location, criticality,
+tags, notes — plus the tri-state authorization (approved / unapproved / rejected).
+
+**Custom properties (`device set`)**
+
+```bash
+leetha device set 00:11:22:33:44:55 \
+    --owner alice \
+    --location "rack-03" \
+    --criticality high \
+    --tags "production,core" \
+    --notes "primary edge router"
+```
+
+Flags accepted: `--owner`, `--location`, `--criticality`
+(one of `low`/`medium`/`high`/`critical`), `--tags` (comma-separated), `--notes`.
+
+**Tag helpers**
+
+```bash
+leetha device tags add 00:11:22:33:44:55 dmz
+leetha device tags remove 00:11:22:33:44:55 dmz
+```
+
+Tag adds are idempotent; removes of unknown tags are silent no-ops.
+
+**Authorization transitions**
+
+```bash
+leetha device approve 00:11:22:33:44:55 --reason "onboarding"
+leetha device reject  00:11:22:33:44:55 --reason "unrecognized"
+leetha device revoke  00:11:22:33:44:55
+```
+
+All three commands write an audit row to `authorization_history`. The `--actor`
+flag records a custom actor string (defaults to `cli`). See
+[Device Authorization](Device-Authorization.md) for how these states change
+`new_host` finding severity.
+
+### `baseline` -- Bulk Authorization
+
+```bash
+leetha baseline status    # approved / unapproved / rejected counts
+leetha baseline set       # approve every currently-unapproved device
+leetha baseline reset     # revoke every non-unapproved device back to unapproved
+```
+
+`baseline set` is the primary workflow for silencing a pre-existing network:
+after deploying leetha on a network that's already running, run it once and
+future `new_host` findings only fire for genuinely new devices.
+
+### `dhcp-leases` -- DHCP Lease File Importer
+
+Ingest a DHCP server's lease file to pre-populate the device inventory. Both
+ISC dhcpd (`dhcpd.leases`) and dnsmasq (`dnsmasq.leases`) formats are
+auto-detected.
+
+```bash
+# One-shot import
+leetha dhcp-leases import /var/lib/dhcp/dhcpd.leases
+
+# Configure the scheduled importer (re-reads periodically)
+leetha dhcp-leases set-path /var/lib/dhcp/dhcpd.leases
+```
+
+Imported devices are flagged `passively_observed=False` until a real packet
+arrives for them, suppressing the `new_host` rule for devices that exist on
+paper but haven't been seen on the wire yet. See
+[Inventory Sources](Inventory-Sources.md) for the importer framework.
+
 ### `patterns` -- Manage Custom Fingerprint Patterns
 
 ```bash
@@ -168,4 +240,6 @@ After launching `leetha -i <adapter>`, the REPL accepts:
 | `clear` | `cls` | Wipe the terminal |
 | `exit` | `quit` / `q` | Shut down Leetha |
 
-The console supports readline history and tab completion. Press Ctrl+C to break out of sub-modes.
+The console supports readline history and tab completion.
+
+**Exiting:** Ctrl+C exits the console **immediately** (well under 1 ms) — SQLite WAL journaling makes abrupt exit safe, and capture/background tasks are daemon threads. If you want a graceful shutdown (close DB + drain queues), type `exit` or hit Ctrl+D at the prompt.

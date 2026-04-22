@@ -5,10 +5,10 @@
 ### Passive Network Fingerprinting and Analysis Engine
 
 [![CI](https://github.com/tjnull/leetha/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/tjnull/leetha/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/tjnull/leetha/releases)
+[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](https://github.com/tjnull/leetha/releases)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Tests](https://img.shields.io/badge/tests-551%20passing-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-850%20passing-brightgreen.svg)](#testing)
 
 </div>
 
@@ -31,6 +31,10 @@
 - **PCAP import** -- import captured traffic from Wireshark or tcpdump for offline analysis through the full fingerprinting pipeline
 - **Behavioral detection** -- DNS vendor affinity drift, identity shift alerts, MAC spoofing detection, DHCP anomaly analysis
 - **OT / ICS / SCADA support** -- passive identification of Modbus, BACnet, EtherNet/IP, CoAP, MQTT, and industrial device fingerprinting
+- **Tri-state device authorization** -- every host is approved, unapproved, or rejected; `new_host` severity grades accordingly (approved → INFO, unapproved → WARNING, rejected → CRITICAL). Bulk "set baseline" silences an established network in one click.
+- **Custom device properties** -- annotate devices with owner, location, criticality (low/medium/high/critical), free-form tags, and notes. All fields are filterable and searchable.
+- **Presence heartbeat** -- per-device offline-threshold sweeper emits `device_went_offline` / `device_came_online` findings when a host stops or resumes traffic.
+- **Inventory importers** -- extensible subsystem that ingests DHCP lease files (ISC dhcpd and dnsmasq formats) to pre-populate the device inventory; `passively_observed` flag suppresses noise until a live packet arrives. AES-GCM credential store for future importers needing secrets.
 - **Auth & notifications** -- token-based API authentication with role-based access control; alert notifications via Apprise (Slack, email, webhooks, and 80+ services)
 
 ## How It Works
@@ -300,7 +304,7 @@ Leetha passively captures service banners from observed TCP traffic without send
 
 | Rule | Severity | Description |
 |------|----------|-------------|
-| `new_host` | INFO | New device discovered on the network |
+| `new_host` | INFO / WARNING / CRITICAL | New device discovered. Severity grades by authorization: approved → INFO, unapproved → WARNING, rejected → CRITICAL. Auto-resolves when the device is approved. |
 | `identity_shift` | CRITICAL / HIGH | Device fingerprint class changed (category, vendor, or platform) |
 | `addr_conflict` | WARNING | Multiple MACs claiming the same IP address |
 | `low_certainty` | INFO | Device identification below confidence threshold |
@@ -308,6 +312,8 @@ Leetha passively captures service banners from observed TCP traffic without send
 | `randomized_addr` | INFO | MAC address randomization detected |
 | `dhcp_anomaly` | HIGH | Rogue DHCP server, starvation attack, or relay-agent injection |
 | `behavioral_drift` | WARNING | DNS vendor affinity shifted from one ecosystem to another |
+| `device_went_offline` | INFO / WARNING | Device stopped sending traffic past its per-device threshold (WARNING when criticality is high/critical) |
+| `device_came_online` | INFO | Device resumed traffic after being offline; auto-resolves the matching `device_went_offline` finding |
 
 ### Fingerprint Sources
 
@@ -346,9 +352,18 @@ src/leetha/
   evidence/              Evidence models and verdict computation engine
   fingerprint/           Device identification, OS intelligence, MAC analysis
   patterns/              JSON pattern loader, compiled regex matching, category index
-  rules/                 Finding rules (identity shift, behavioral drift, DHCP anomaly, ...)
+  rules/                 Finding rules (new_host auth-graded, identity shift, presence, ...)
   probe/                 315 active service identification plugins
   store/                 SQLite persistence with retention policies
+  inventory/             External inventory importers (scheduler, credentials, DHCP leases)
+    base.py              BaseImporter + ImportedDevice dataclass
+    registry.py          @register_importer decorator
+    scheduler.py         Per-importer jittered schedule + exponential backoff
+    credentials.py       AES-GCM credential store with LEETHA_*_SECRET env override
+    config_schema.py     Typed ConfigField validation
+    log_filter.py        Redacts tokens/passwords/cookies from logs
+    importers/           Built-in importers (DHCP leases)
+  presence/              Online/offline sweeper + transition rules
   analysis/              Attack surface analysis, spoofing detection, DHCP anomaly detection
   sync/                  Fingerprint database sync with streaming JSON parsers
   topology.py            Network topology graph (gateway, core switch, AP, VM detection)
@@ -358,6 +373,8 @@ src/leetha/
     live.py              Live packet stream viewer
   console.py             Interactive REPL console
   cli.py                 Entry point and argument parsing
+  cli_device.py          device set / tags / approve / reject / revoke / baseline commands
+  cli_dhcp.py            dhcp-leases import / set-path commands
 ```
 
 ## Performance and Resource Management
@@ -395,6 +412,10 @@ See [docs/wiki/](docs/wiki/Home.md) for detailed guides:
 - [Fingerprint Sources](docs/wiki/Fingerprint-Sources.md)
 - [CLI Reference](docs/wiki/CLI-Reference.md)
 - [Web Dashboard](docs/wiki/Web-Dashboard.md)
+- [Device Authorization](docs/wiki/Device-Authorization.md)
+- [Custom Properties](docs/wiki/Custom-Properties.md)
+- [Presence Monitoring](docs/wiki/Presence-Monitoring.md)
+- [Inventory Sources](docs/wiki/Inventory-Sources.md)
 - [Remote Sensors](docs/wiki/Remote-Sensors.md)
 - [Attack Surface Analysis](docs/wiki/Attack-Surface-Analysis.md)
 - [Spoofing Detection](docs/wiki/Spoofing-Detection.md)
