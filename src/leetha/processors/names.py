@@ -202,29 +202,33 @@ class NameResolutionProcessor(Processor):
                     belongs_to_other_device = True
 
         if service_type:
-            # Check for vendor-exclusive services FIRST — these are definitive
+            # Mesh routers and guest-VLAN bridges reflect mDNS from
+            # every device on the segment, rebroadcasting each packet
+            # with their own locally-administered virtual source MAC.
+            # The reflected announcements would otherwise poison the
+            # router's fingerprint with the identities of every
+            # Chromecast, AirPrint printer, HomePod, and NAS on the
+            # network. The U/L bit + a small CID allowlist tells us when
+            # the source is almost certainly reflected traffic; suppress
+            # every category/vendor/platform attribution in that case.
+            # Real Chromecasts / Rokus / Sonos speakers / AirPrint
+            # printers / NAS boxes / etc. all ship with real vendor OUIs
+            # (U/L bit = 0), so this is a safe rule.
+            reflected = False
+            if not belongs_to_other_device:
+                from leetha.fingerprint.mac_intel import is_randomized_mac
+                hw_prefix = (packet.hw_addr or "")[:8].upper().replace("-", ":")
+                if (
+                    is_randomized_mac(packet.hw_addr)
+                    and hw_prefix not in self._LOCALLY_ADMIN_VENDOR_CIDS
+                ):
+                    reflected = True
+                    belongs_to_other_device = True
+
+            # Check for vendor-exclusive services FIRST — these are
+            # definitive when the packet is genuine.
             exclusive = self._EXCLUSIVE_SERVICES.get(service_type)
             if exclusive:
-                # Any exclusive service arriving from a locally-
-                # administered MAC that isn't a known vendor CID is
-                # almost certainly reflected traffic — mesh routers and
-                # guest-VLAN bridges rebroadcast mDNS with their own
-                # randomized virtual source MAC. Unlike the AirPlay
-                # hex_id@name case (where vendor is still correct
-                # because a HomePod advertised via an iPhone is still
-                # Apple), a reflecting router is NOT the claimed vendor
-                # at all, so vendor must also be stripped.
-                reflected = False
-                if not belongs_to_other_device:
-                    from leetha.fingerprint.mac_intel import is_randomized_mac
-                    hw_prefix = (packet.hw_addr or "")[:8].upper().replace("-", ":")
-                    if (
-                        is_randomized_mac(packet.hw_addr)
-                        and hw_prefix not in self._LOCALLY_ADMIN_VENDOR_CIDS
-                    ):
-                        reflected = True
-                        belongs_to_other_device = True
-
                 evidence.append(Evidence(
                     source="mdns_exclusive", method="exact",
                     certainty=(
@@ -247,22 +251,28 @@ class NameResolutionProcessor(Processor):
             else:
                 evidence.append(Evidence(
                     source="mdns_service", method="pattern", certainty=0.70,
-                    raw={"service_type": service_type, "name": name},
+                    raw={"service_type": service_type, "name": name,
+                         "reflected": reflected},
                 ))
-                # General mDNS service pattern matching
-                from leetha.patterns.matching import match_mdns_service
-                mdns_match = match_mdns_service(service_type, name)
-                if mdns_match:
-                    raw_conf = mdns_match.get("confidence", 70)
-                    cert = raw_conf / 100.0 if raw_conf > 1 else raw_conf
-                    evidence.append(Evidence(
-                        source="mdns_service", method="pattern",
-                        certainty=cert,
-                        vendor=mdns_match.get("manufacturer"),
-                        category=mdns_match.get("device_type"),
-                        platform=mdns_match.get("os_family"),
-                        raw={"service_type": service_type, "match": mdns_match},
-                    ))
+                # General mDNS service pattern matching. When the packet
+                # was reflected we still record the protocol-level
+                # observation (above) but skip the identity-attribution
+                # pattern match — otherwise ``_ipp._tcp`` from a
+                # reflecting router would stamp ``category=printer``.
+                if not reflected:
+                    from leetha.patterns.matching import match_mdns_service
+                    mdns_match = match_mdns_service(service_type, name)
+                    if mdns_match:
+                        raw_conf = mdns_match.get("confidence", 70)
+                        cert = raw_conf / 100.0 if raw_conf > 1 else raw_conf
+                        evidence.append(Evidence(
+                            source="mdns_service", method="pattern",
+                            certainty=cert,
+                            vendor=mdns_match.get("manufacturer"),
+                            category=mdns_match.get("device_type"),
+                            platform=mdns_match.get("os_family"),
+                            raw={"service_type": service_type, "match": mdns_match},
+                        ))
 
         if txt_records:
             model = txt_records.get("model") or txt_records.get("md")

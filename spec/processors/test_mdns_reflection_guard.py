@@ -120,6 +120,67 @@ def test_apple_service_from_random_mac_is_reflected(service):
 
 
 @pytest.mark.parametrize("service", [
+    # Printer services — when reflected by a router with mDNS-reflection
+    # enabled, the router ended up classified as ``printer @ 100%``.
+    "_ipp._tcp",
+    "_ipps._tcp",
+    "_airprint._tcp",
+    "_printer._tcp",
+    "_pdl-datastream._tcp",
+    "_privet._tcp",
+    # Scanner / NAS / file services follow the same path and would
+    # mis-classify a router as a scanner/nas/workstation via reflection.
+    "_scanner._tcp",
+    "_uscan._tcp",
+    "_smb._tcp",
+    "_nfs._tcp",
+])
+def test_non_exclusive_service_from_random_mac_is_reflected(service):
+    """Router mDNS reflection of printer / NAS / scanner services must
+    not attribute their category to the reflecting router. Real printers
+    / NAS boxes / scanners ship with real vendor OUIs — locally-
+    administered MACs never belong to this class of hardware."""
+    proc = NameResolutionProcessor()
+    pkt = CapturedPacket(
+        protocol="mdns", hw_addr=RANDOMIZED_MAC, ip_addr="192.168.1.1",
+        fields={"service_type": service, "name": f"Foo.{service}.local"},
+    )
+    result = proc.analyze(pkt)
+    # The second mdns_service evidence (from match_mdns_service) must
+    # not carry vendor/category/platform when the source MAC is random.
+    informative = [
+        e for e in result
+        if e.source == "mdns_service" and (e.vendor or e.category or e.platform)
+    ]
+    assert not informative, (
+        f"{service} from random MAC must not attribute category/vendor "
+        f"to the reflecting device; got: {[(e.vendor, e.category, e.platform, e.certainty) for e in informative]}"
+    )
+
+
+@pytest.mark.parametrize("service", [
+    "_ipp._tcp",
+    "_printer._tcp",
+    "_airprint._tcp",
+])
+def test_non_exclusive_service_from_real_oui_keeps_category(service):
+    """Real printer OUIs (bit 0x02 = 0) must keep the printer category."""
+    proc = NameResolutionProcessor()
+    # HP Inc. universally-administered OUI
+    real_hp_mac = "3c:52:82:11:22:33"
+    pkt = CapturedPacket(
+        protocol="mdns", hw_addr=real_hp_mac, ip_addr="192.168.1.50",
+        fields={"service_type": service, "name": f"HP_LaserJet.{service}.local"},
+    )
+    result = proc.analyze(pkt)
+    printer_evs = [e for e in result if e.category == "printer"]
+    assert printer_evs, (
+        f"real-OUI printer advertising {service} must still classify as printer; "
+        f"got evidence: {[(e.source, e.vendor, e.category, e.platform, e.certainty) for e in result]}"
+    )
+
+
+@pytest.mark.parametrize("service", [
     "_airplay._tcp",
     "_homekit._tcp",
     "_apple-mobdev2._tcp",
