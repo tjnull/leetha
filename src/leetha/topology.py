@@ -656,6 +656,9 @@ _VENDOR_DEVICE_TYPE_HINTS: dict[str, str] = {
     "tenda": "router",
     "mercusys": "router",
     "cudy": "router",
+    # Hatch Baby sleep / sound devices — IoT, never routers.
+    # Matches "Hatch Baby Inc", "Hatch, Inc.", "HATCH BABY", etc.
+    "hatch": "iot_device",
     # Appliance-style firewalls
     "firewalla": "firewall",
     "vyos": "firewall",
@@ -1403,6 +1406,22 @@ _HOSTNAME_DEVICE_HINTS: list[tuple[str, str]] = [
     ("mercusys-", "router"),
     # Xiaomi home routers (R-AX, AX3600, etc.)
     ("xiaomi-router", "router"),
+    # --- Hatch Baby (noise machines / nightlights — NOT routers) ---
+    # These show up with hostnames like ``Rest2ndGen-252E42`` or
+    # ``Hatch-Rest-xxxxxx``. Without this, a misattributed OUI that
+    # returns ``MikroTik`` for the Espressif chip would promote the
+    # device to ``router`` via the ``mikrotik → router`` vendor rule.
+    ("rest2ndgen", "iot_device"),
+    ("hatchrest", "iot_device"),
+    ("hatch-rest", "iot_device"),
+    ("hatch-restore", "iot_device"),
+    ("hatchrestore", "iot_device"),
+    ("restplus", "iot_device"),
+    ("rest-plus", "iot_device"),
+    ("restmini", "iot_device"),
+    ("rest-mini", "iot_device"),
+    ("hatch-", "iot_device"),
+    ("hatchbaby", "iot_device"),
     # --- LoRa / LoRaWAN gateways ---
     # Common brand prefixes in DHCP hostnames (Dragino ships the LPS8 and
     # LG308 with `dragino-lps8-...` etc; RAK sells WisGates as `rak72xx-`).

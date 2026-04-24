@@ -180,6 +180,90 @@ def test_non_exclusive_service_from_real_oui_keeps_category(service):
     )
 
 
+def test_mdns_txt_records_from_random_mac_do_not_leak_identity():
+    """mDNS TXT records carry model/vendor/HAP-category metadata from
+    the ORIGINAL advertising device. When a mesh router reflects those
+    TXT records, the metadata must not be attributed to the router.
+
+    Reproduces the real-world bug: an AmpliFi mesh router at 192.168.1.1
+    (locally-admin MAC) showed ``iot_device @ 90%`` because a reflected
+    HAP (HomeKit) TXT record from a baby-monitor device carried
+    ``md=Hatch Rest``, ``ci=31`` (smart_speaker), etc.
+    """
+    proc = NameResolutionProcessor()
+    pkt = CapturedPacket(
+        protocol="mdns", hw_addr=RANDOMIZED_MAC, ip_addr="192.168.1.1",
+        fields={
+            "service_type": "_hap._tcp",
+            "name": "HatchRest._hap._tcp.local",
+            "txt_records": {
+                "md": "HatchRest2nd",
+                "manufacturer": "Hatch",
+                "ci": "31",  # HAP smart_speaker
+                "fn": "Baby Room",
+            },
+        },
+    )
+    result = proc.analyze(pkt)
+    txt_evs = [e for e in result if e.source == "mdns_txt"]
+    # TXT evidence may still be emitted (so the fact of the packet is
+    # recorded) but must not carry identity fields when reflected.
+    for e in txt_evs:
+        assert e.vendor is None, f"reflected TXT leaked vendor={e.vendor!r}"
+        assert e.category is None, f"reflected TXT leaked category={e.category!r}"
+        assert e.model is None, f"reflected TXT leaked model={e.model!r}"
+        assert e.hostname is None, f"reflected TXT leaked hostname={e.hostname!r}"
+
+
+def test_mdns_txt_records_from_real_oui_keep_full_identity():
+    """Universally-administered MACs are the real advertising device;
+    TXT records keep full model / vendor / hostname / HAP category."""
+    proc = NameResolutionProcessor()
+    # Arbitrary universally-administered OUI
+    real_mac = "ac:bc:32:11:22:33"
+    pkt = CapturedPacket(
+        protocol="mdns", hw_addr=real_mac, ip_addr="192.168.1.50",
+        fields={
+            "service_type": "_hap._tcp",
+            "name": "SmartBulb._hap._tcp.local",
+            "txt_records": {
+                "md": "SmartBulb v1",
+                "manufacturer": "AcmeIoT",
+                "ci": "6",  # HAP smart_lighting
+                "fn": "Living Room",
+            },
+        },
+    )
+    result = proc.analyze(pkt)
+    txt_evs = [e for e in result if e.source == "mdns_txt"]
+    assert txt_evs, "expected mdns_txt evidence from real-OUI device"
+    e = txt_evs[0]
+    assert e.vendor == "AcmeIoT"
+    assert e.model == "SmartBulb v1"
+    assert e.hostname == "Living Room"
+    assert e.category == "smart_lighting"
+
+
+def test_apple_model_code_from_random_mac_does_not_leak():
+    """The Apple ``am`` TXT field maps to device models (iPhone15,2 etc.).
+    Reflected mDNS must not attribute Apple model/category to the router."""
+    proc = NameResolutionProcessor()
+    pkt = CapturedPacket(
+        protocol="mdns", hw_addr=RANDOMIZED_MAC, ip_addr="192.168.1.1",
+        fields={
+            "service_type": "_airplay._tcp",
+            "name": "iPhone._airplay._tcp.local",
+            "apple_model": "iPhone15,2",
+        },
+    )
+    result = proc.analyze(pkt)
+    apple_evs = [e for e in result if e.source == "mdns_apple_model"]
+    for e in apple_evs:
+        assert e.vendor is None
+        assert e.category is None
+        assert e.model is None
+
+
 @pytest.mark.parametrize("service", [
     "_airplay._tcp",
     "_homekit._tcp",

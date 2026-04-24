@@ -201,29 +201,31 @@ class NameResolutionProcessor(Processor):
                 if advertised_id not in src_mac_norm and src_mac_norm not in advertised_id:
                     belongs_to_other_device = True
 
+        # Mesh routers and guest-VLAN bridges reflect mDNS from every
+        # device on the segment, rebroadcasting each packet with their
+        # own locally-administered virtual source MAC. The reflected
+        # announcements would otherwise poison the router's fingerprint
+        # with the identities of every Chromecast, AirPrint printer,
+        # HomePod, Hatch noise-machine, and NAS on the network. The U/L
+        # bit + a small CID allowlist tells us when the source is
+        # almost certainly reflected traffic; suppress every category/
+        # vendor/platform attribution in that case. Real Chromecasts/
+        # Rokus/Sonos speakers/AirPrint printers/NAS/HomeKit accessories
+        # all ship with real vendor OUIs (U/L bit = 0), so this is a
+        # safe rule across every mDNS evidence path (exclusive-service
+        # match, pattern-based service match, and TXT records).
+        reflected = False
+        if not belongs_to_other_device:
+            from leetha.fingerprint.mac_intel import is_randomized_mac
+            hw_prefix = (packet.hw_addr or "")[:8].upper().replace("-", ":")
+            if (
+                is_randomized_mac(packet.hw_addr)
+                and hw_prefix not in self._LOCALLY_ADMIN_VENDOR_CIDS
+            ):
+                reflected = True
+                belongs_to_other_device = True
+
         if service_type:
-            # Mesh routers and guest-VLAN bridges reflect mDNS from
-            # every device on the segment, rebroadcasting each packet
-            # with their own locally-administered virtual source MAC.
-            # The reflected announcements would otherwise poison the
-            # router's fingerprint with the identities of every
-            # Chromecast, AirPrint printer, HomePod, and NAS on the
-            # network. The U/L bit + a small CID allowlist tells us when
-            # the source is almost certainly reflected traffic; suppress
-            # every category/vendor/platform attribution in that case.
-            # Real Chromecasts / Rokus / Sonos speakers / AirPrint
-            # printers / NAS boxes / etc. all ship with real vendor OUIs
-            # (U/L bit = 0), so this is a safe rule.
-            reflected = False
-            if not belongs_to_other_device:
-                from leetha.fingerprint.mac_intel import is_randomized_mac
-                hw_prefix = (packet.hw_addr or "")[:8].upper().replace("-", ":")
-                if (
-                    is_randomized_mac(packet.hw_addr)
-                    and hw_prefix not in self._LOCALLY_ADMIN_VENDOR_CIDS
-                ):
-                    reflected = True
-                    belongs_to_other_device = True
 
             # Check for vendor-exclusive services FIRST — these are
             # definitive when the packet is genuine.
@@ -308,7 +310,17 @@ class NameResolutionProcessor(Processor):
                 }
                 hap_category = _HAP_CATEGORIES.get(str(hap_ci))
 
-            if model or vendor:
+            # Reflected mDNS must not leak TXT-record metadata (model,
+            # vendor, HomeKit ci category, friendly-name) to the router
+            # that rebroadcast it. Strip every identity field but keep
+            # a bare-bones protocol observation so fusion still sees
+            # the packet existed.
+            if reflected:
+                evidence.append(Evidence(
+                    source="mdns_txt", method="exact", certainty=0.40,
+                    raw={"txt_records": txt_records, "reflected": True},
+                ))
+            elif model or vendor:
                 evidence.append(Evidence(
                     source="mdns_txt", method="exact", certainty=0.80,
                     model=model,

@@ -179,13 +179,23 @@ class Pipeline:
             except Exception:
                 logger.debug("DHCP side effect failed", exc_info=True)
 
-        # Gateway learning from DHCP OFFER/ACK or ICMPv6 RA
+        # Gateway learning from DHCP OFFER/ACK or ICMPv6 RA.
+        # A MAC that serves DHCP or sends Router Advertisements IS a
+        # router — emit that as positive Evidence so the verdict engine
+        # has a strong router signal even when reflection or noisy
+        # HTTP/DHCP-fingerprint evidence wants to call the device
+        # something else (iot_device, smart_speaker, etc.).
         if packet.protocol == "dhcpv4":
             raw_opts = packet.fields.get("raw_options", {})
             msg_type = raw_opts.get("message-type")
             if msg_type in (2, 5) and packet.ip_addr:
                 self._gateway_macs.add(packet.hw_addr)
                 self._scrub_infra_mdns(packet.hw_addr)
+                self._evidence_buffer[packet.hw_addr].append(Evidence(
+                    source="dhcp_server", method="observed",
+                    certainty=0.95, category="router",
+                    raw={"dhcp_message_type": msg_type, "ip": packet.ip_addr},
+                ))
                 if self._on_gateway_hint:
                     try:
                         await self._on_gateway_hint(
@@ -197,6 +207,11 @@ class Pipeline:
             if packet.fields.get("icmpv6_type") == "router_advertisement" and packet.ip_addr:
                 self._gateway_macs.add(packet.hw_addr)
                 self._scrub_infra_mdns(packet.hw_addr)
+                self._evidence_buffer[packet.hw_addr].append(Evidence(
+                    source="icmpv6", method="observed",
+                    certainty=0.95, category="router",
+                    raw={"icmpv6_type": "router_advertisement", "ip": packet.ip_addr},
+                ))
                 if self._on_gateway_hint:
                     try:
                         await self._on_gateway_hint(
