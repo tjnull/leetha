@@ -188,3 +188,35 @@ async def test_sync_all_emits_envelope_and_no_source_index(monkeypatch):
     final = events[-1]
     assert final["succeeded"] >= 1
     assert final["failed"] == 0
+
+
+async def test_sync_all_counts_mixed_success_and_failure(monkeypatch):
+    from leetha.sync import sync_all_with_progress
+    import leetha.sync as sync_mod
+
+    # One source completes, one raises (merger converts to an error event).
+    async def fake_gen(name):
+        if "fail" in name:
+            raise RuntimeError("nope")
+            yield  # pragma: no cover
+        yield {"event": "complete", "source": name, "entries": 1, "size": 1}
+
+    # Force a known 2-source registry so counts are deterministic.
+    # SourceRegistry is not exported at the leetha.sync module level
+    # (sync_all_with_progress re-imports it locally), so patch it at its
+    # real location.
+    class _Src:
+        def __init__(self, name): self.name = name
+    monkeypatch.setattr(
+        "leetha.sync.registry.SourceRegistry.list_sources",
+        lambda self: [_Src("ok_one"), _Src("fail_two")],
+    )
+    monkeypatch.setattr(sync_mod, "sync_source_with_progress",
+                        lambda n: fake_gen(n))
+
+    events = [ev async for ev in sync_all_with_progress()]
+    final = events[-1]
+    assert final["event"] == "sync_complete"
+    assert final["succeeded"] == 1
+    assert final["failed"] == 1
+    assert final["total_sources"] == 2
