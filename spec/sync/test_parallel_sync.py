@@ -220,3 +220,23 @@ async def test_sync_all_counts_mixed_success_and_failure(monkeypatch):
     assert final["succeeded"] == 1
     assert final["failed"] == 1
     assert final["total_sources"] == 2
+
+
+def test_cli_task_router_tracks_per_source():
+    from leetha.sync import _CliSyncTracker
+
+    t = _CliSyncTracker(["a", "b"])
+    # start / downloading / parsing events return the source name (to refresh its bar)
+    assert t.on_event({"event": "start", "source": "a"}) == "a"
+    assert t.on_event({"event": "downloading", "source": "a",
+                       "downloaded": 5, "total": 10}) == "a"
+    res = t.on_event({"event": "complete", "source": "a",
+                      "entries": 7, "size": 12})
+    assert res == "a"
+    assert t.succeeded == 1
+    assert t.failed == 0
+    assert t.total_entries == 7
+    assert t.total_bytes == 12
+    t.on_event({"event": "error", "source": "b", "error": "x"})
+    assert t.failed == 1
+    assert t.done == 2  # completed + errored

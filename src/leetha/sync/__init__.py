@@ -35,6 +35,42 @@ def _order_sources_small_first(source_names: list[str]) -> list[str]:
     return sorted(source_names, key=sort_key)
 
 
+class _CliSyncTracker:
+    """Accumulates per-source sync outcomes for the CLI progress UI.
+
+    Pure bookkeeping (no rich dependency) so it's unit-testable; the
+    rich Progress object is updated alongside in run_sync via the
+    returned source name.
+    """
+
+    def __init__(self, source_names: list[str]) -> None:
+        self.source_names = list(source_names)
+        self.succeeded = 0
+        self.failed = 0
+        self.total_entries = 0
+        self.total_bytes = 0
+        self.done = 0  # completed + errored
+
+    def on_event(self, event: dict) -> str | None:
+        """Update counters from an event. Returns the source name for
+        events that should refresh that source's progress bar, else None."""
+        etype = event.get("event")
+        source = event.get("source")
+        if etype in ("start", "downloading", "parsing"):
+            return source
+        if etype == "complete":
+            self.succeeded += 1
+            self.done += 1
+            self.total_entries += event.get("entries", 0)
+            self.total_bytes += event.get("size", 0)
+            return source
+        if etype == "error":
+            self.failed += 1
+            self.done += 1
+            return source
+        return None
+
+
 async def run_sync(list_sources: bool = False, source: str | None = None):
     """CLI entry point for the sync command with progress bars."""
     from leetha.sync.registry import SourceRegistry
@@ -93,7 +129,10 @@ async def run_sync(list_sources: bool = False, source: str | None = None):
     )
     console.print()
 
-    # Overall progress bar + per-source download bar
+    # Overall progress bar + per-source download bars, driven by the
+    # concurrent merger so small feeds finish without waiting behind big
+    # ones. All source tasks are created up front (queued); interleaved
+    # events are routed to each source's bar by name.
     with Progress(
         SpinnerColumn(style="cyan"),
         TextColumn("[bold cyan]{task.description}[/bold cyan]", justify="left"),
@@ -103,83 +142,57 @@ async def run_sync(list_sources: bool = False, source: str | None = None):
         console=console,
         transient=False,
     ) as progress:
-        # Overall task
-        overall_task = progress.add_task(
-            "Overall", total=total_sources, status=""
-        )
+        overall_task = progress.add_task("Overall", total=total_sources, status="")
 
-        for idx, src_name in enumerate(source_names):
-            # Per-source task
-            src_task = progress.add_task(
+        task_by_source: dict[str, int] = {}
+        for src_name in source_names:
+            task_by_source[src_name] = progress.add_task(
                 f"  {registry.get_source(src_name).display_name}",
                 total=None,
-                status="connecting...",
+                status="queued...",
             )
 
-            source_ok = False
-            source_entries = 0
-            source_bytes = 0
+        tracker = _CliSyncTracker(source_names)
 
-            async for event in sync_source_with_progress(src_name):
-                etype = event["event"]
+        async for event in sync_sources_concurrent(source_names, concurrency=5):
+            tracker.on_event(event)
+            src_name = event.get("source")
+            task_id = task_by_source.get(src_name) if src_name else None
+            etype = event.get("event")
 
-                if etype == "downloading":
-                    dl = event.get("downloaded", 0)
-                    dl_total = event.get("total")
-                    unit = event.get("unit", "bytes")
+            if task_id is None:
+                continue
 
-                    if unit == "files":
-                        progress.update(
-                            src_task,
-                            total=dl_total,
-                            completed=dl,
-                            status=f"{dl}/{dl_total} files",
-                        )
-                    elif dl_total:
-                        progress.update(
-                            src_task,
-                            total=dl_total,
-                            completed=dl,
-                            status=_format_bytes(dl),
-                        )
-                    else:
-                        progress.update(
-                            src_task,
-                            total=None,
-                            completed=dl,
-                            status=_format_bytes(dl),
-                        )
+            if etype == "start":
+                progress.update(task_id, status="connecting...")
+            elif etype == "downloading":
+                dl = event.get("downloaded", 0)
+                dl_total = event.get("total")
+                unit = event.get("unit", "bytes")
+                if unit == "files":
+                    progress.update(task_id, total=dl_total, completed=dl,
+                                    status=f"{dl}/{dl_total} files")
+                elif dl_total:
+                    progress.update(task_id, total=dl_total, completed=dl,
+                                    status=_format_bytes(dl))
+                else:
+                    progress.update(task_id, total=None, completed=dl,
+                                    status=_format_bytes(dl))
+            elif etype == "parsing":
+                progress.update(task_id, status="parsing...")
+            elif etype == "complete":
+                progress.update(task_id, total=1, completed=1,
+                                status=f"[green]✓ {event.get('entries', 0):,} entries[/green]")
+                progress.update(overall_task, completed=tracker.done)
+            elif etype == "error":
+                progress.update(task_id, total=1, completed=1,
+                                status=f"[red]✗ {event.get('error', 'failed')}[/red]")
+                progress.update(overall_task, completed=tracker.done)
 
-                elif etype == "parsing":
-                    progress.update(src_task, status="parsing...")
-
-                elif etype == "complete":
-                    source_entries = event.get("entries", 0)
-                    source_bytes = event.get("size", 0)
-                    progress.update(
-                        src_task,
-                        total=1,
-                        completed=1,
-                        status=f"[green]✓ {source_entries:,} entries[/green]",
-                    )
-                    source_ok = True
-
-                elif etype == "error":
-                    progress.update(
-                        src_task,
-                        total=1,
-                        completed=1,
-                        status=f"[red]✗ {event.get('error', 'failed')}[/red]",
-                    )
-
-            if source_ok:
-                succeeded += 1
-                total_entries += source_entries
-                total_bytes += source_bytes
-            else:
-                failed += 1
-
-            progress.update(overall_task, completed=idx + 1)
+        succeeded = tracker.succeeded
+        failed = tracker.failed
+        total_entries = tracker.total_entries
+        total_bytes = tracker.total_bytes
 
     # Summary
     console.print()
