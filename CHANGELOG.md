@@ -5,6 +5,59 @@ All notable changes to Leetha will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-05-23 — Fingerprint Coverage, Parallel Sync & Performance
+
+Expanded device-fingerprint coverage, parallel feed syncing, and a set
+of fixes found during live use on a large capture (48 devices, 2 GB DB,
+6.5M sightings). Full offline suite: 1167 passing.
+
+### Added
+- **LoRa / Zigbee / Thread / Z-Wave gateway coverage.** New
+  `lora_gateway` device class plus banner + hostname patterns for
+  Dragino, RAK WisGate, The Things Indoor Gateway, MultiTech Conduit,
+  Kerlink, Tektelic Kona, Laird Sentrius, Heltec, Seeed, Pycom (LoRa);
+  and Aqara, ConBee/RaspBee/Phoscon, Home Assistant Yellow/SkyConnect,
+  IKEA Tradfri/Dirigera, Aeotec, Zooz, HomeSeer, Silicon Labs (Zigbee/
+  Thread/Z-Wave coordinators → `iot_hub`).
+- **Parallel source syncing.** `leetha sync` (CLI) and the web sync
+  stream now download up to 5 sources concurrently, so small feeds
+  finish without queuing behind the large `mac_vendors` feed. Bounded
+  fan-out with backpressure, per-source error isolation, and a
+  small-first submission order.
+- **Expanded router / firewall / mesh coverage.** Ubiquiti AmpliFi line
+  (Alien/Gamer/Teleport → router; HD/Instant → mesh), corrected mesh
+  classification for Linksys Velop, D-Link COVR, ASUS ZenWiFi/AiMesh,
+  Google Nest Wifi; ASUS ROG Rapture/TUF/RT-BE; Netgear Nighthawk
+  RS/XR/CAX, Orbi WiFi 6E/7, business WAX/GSM/XS; MikroTik hAP ax /
+  cAP ax / Chateau / CHR / RB5009 / L009 / netPower; Plume, Vilo,
+  Firewalla, VyOS, Untangle, Turris, GL.iNet, Hatch, and more.
+
+### Fixed
+- **mDNS reflection no longer poisons router fingerprints.** Mesh
+  routers that reflect mDNS across VLANs were inheriting the identity
+  of every Chromecast / AirPrint printer / HomePod / Hatch device on
+  the network (e.g. an AmpliFi shown as "Google smart_speaker", then
+  "Apple printer", then "iot_device"). Exclusive-service, pattern, and
+  TXT-record paths now drop attribution from locally-administered
+  (reflected) source MACs, and DHCP-server / RA observation emits a
+  positive `router` signal.
+- **Feed URLs updated for upstream restructures.** Huginn-Muninn
+  reorganized its JSON exports (DHCP signatures/vendors split into
+  parts, DHCPv6 renamed, MAC vendors renumbered); the JA4 feed source
+  ja4db.com went offline and now reads FoxIO's GitHub CSV mirror.
+- **`QueueFull` no longer spams the event loop.** WebSocket/SSE
+  broadcasts scheduled a bare `put_nowait` via `call_soon_threadsafe`;
+  when a subscriber fell behind, the deferred callback raised
+  `QueueFull` into the loop. Broadcasts now use a guarded drop-oldest
+  enqueue.
+- **Instant Ctrl+C** in web sub-mode (second press force-exits).
+
+### Performance
+- **`/api/topology` is ~17× faster on large databases** (4.5s+ → 0.26s
+  on a 6.5M-row sightings table). Replaced two temp-B-tree scans with
+  timestamp-index walks, consolidated the LLDP/CDP query, and batched
+  the per-host N+1 (144 queries → 3). No schema migration.
+
 ## [1.2.1] - 2026-04-22 — Phase A Follow-Ups
 
 Bug fixes, API completeness, and UX polish discovered during live-probe
