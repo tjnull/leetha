@@ -729,6 +729,22 @@ ON CONFLICT(mac) DO UPDATE SET
             rec = await cur.fetchone()
             return _marshal_device(rec) if rec is not None else None
 
+    async def get_all_devices(self) -> dict[str, Device]:
+        """Return every device row keyed by MAC.
+
+        Bulk fetch for callers (e.g. the topology builder) that would
+        otherwise issue one ``get_device`` per host — an N+1 that gets
+        expensive under DB lock contention with live capture.
+        """
+        assert self._conn is not None
+        out: dict[str, Device] = {}
+        async with self._conn.execute("SELECT * FROM devices") as cur:
+            async for rec in cur:
+                dev = _marshal_device(rec)
+                if dev is not None:
+                    out[dev.mac] = dev
+        return out
+
     _UPDATABLE_DEVICE_PROPS = frozenset({
         "owner", "location", "criticality", "tags", "notes",
         "presence_threshold_seconds",

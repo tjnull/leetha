@@ -2854,15 +2854,25 @@ async def api_topology():
         # 1. Devices — from ALL hosts (including those without verdicts)
         topo_host_count = await app_instance.store.hosts.count()
         all_hosts = await app_instance.store.hosts.find_all(limit=max(topo_host_count, 1000))
-        # Phase A — topology view needs criticality/authorization/presence to style nodes
+        # Phase A — topology view needs criticality/authorization/presence to style nodes.
+        # Bulk-load verdicts, overrides, and device rows once instead of
+        # issuing 3 awaited queries per host (an N+1 that stalls badly under
+        # DB lock contention with live capture).
         from leetha.ui.web.routers.devices import _merge_custom_props
+        verdicts_by_mac = {
+            v.hw_addr: v
+            for v in await app_instance.store.verdicts.find_all(limit=max(topo_host_count, 1000))
+        }
+        overrides_by_mac = {
+            o["hw_addr"]: o for o in await app_instance.store.overrides.find_all()
+        }
+        device_rows_by_mac = await app_instance.db.get_all_devices()
         devices = []
         for h in all_hosts:
-            v = await app_instance.store.verdicts.find_by_addr(h.hw_addr)
-            ovr = await app_instance.store.overrides.find_by_addr(h.hw_addr)
+            v = verdicts_by_mac.get(h.hw_addr)
+            ovr = overrides_by_mac.get(h.hw_addr)
             d = _build_device_dict(v, h, ovr)
-            dev_row = await app_instance.db.get_device(h.hw_addr)
-            _merge_custom_props(d, dev_row)
+            _merge_custom_props(d, device_rows_by_mac.get(h.hw_addr))
             devices.append(d)
 
         # 1a. Enrich devices with all known IPs from ARP history
@@ -2889,31 +2899,48 @@ async def api_topology():
         except Exception:
             pass
 
-        # 1b. Gather mDNS services and LLDP/CDP presence per device for connection type
+        # 1b. mDNS services per device (for connection-type inference).
+        # The sightings table can hold millions of mDNS rows; the planner
+        # otherwise filters by source then temp-sorts ~1M rows (~2s). Force
+        # the timestamp index so it walks newest-first and stops at LIMIT —
+        # the recent window is plenty to see each active device's services.
         device_mdns_services: dict[str, list[str]] = {}
-        device_has_lldp: set[str] = set()
-        device_has_cdp: set[str] = set()
         try:
             svc_cursor = await app_instance.store.connection.execute(
-                "SELECT hw_addr, source, payload FROM sightings "
-                "WHERE source IN ('mdns', 'lldp', 'cdp') "
-                "ORDER BY timestamp DESC LIMIT 5000"
+                "SELECT hw_addr, payload FROM sightings INDEXED BY idx_sightings_ts "
+                "WHERE source = 'mdns' ORDER BY timestamp DESC LIMIT 5000"
             )
             svc_rows = await svc_cursor.fetchall()
             for r in svc_rows:
-                dev_mac, src_type, raw = r[0], r[1], r[2]
-                if src_type == "lldp":
-                    device_has_lldp.add(dev_mac)
-                elif src_type == "cdp":
-                    device_has_cdp.add(dev_mac)
-                elif src_type == "mdns" and raw:
-                    try:
-                        svc_data = _json.loads(raw) if isinstance(raw, str) else raw
-                        svc_name = svc_data.get("service") or svc_data.get("name") or svc_data.get("service_type")
-                        if svc_name:
-                            device_mdns_services.setdefault(dev_mac, []).append(svc_name)
-                    except Exception:
-                        pass
+                dev_mac, raw = r[0], r[1]
+                if not raw:
+                    continue
+                try:
+                    svc_data = _json.loads(raw) if isinstance(raw, str) else raw
+                    svc_name = svc_data.get("service") or svc_data.get("name") or svc_data.get("service_type")
+                    if svc_name:
+                        device_mdns_services.setdefault(dev_mac, []).append(svc_name)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # 1b2. LLDP/CDP — one complete query (rare source, ~cheap) drives
+        # presence flags, neighbor edges, and model enrichment below.
+        device_has_lldp: set[str] = set()
+        device_has_cdp: set[str] = set()
+        lldp_rows = []
+        try:
+            lldp_cursor = await app_instance.store.connection.execute(
+                "SELECT hw_addr, payload, source FROM sightings "
+                "WHERE source IN ('lldp', 'cdp')"
+            )
+            lldp_rows = await lldp_cursor.fetchall()
+            for r in lldp_rows:
+                if r[2] == "cdp":
+                    device_has_cdp.add(r[0])
+                else:
+                    device_has_lldp.add(r[0])
         except Exception:
             pass
 
@@ -2982,35 +3009,29 @@ async def api_topology():
                     if any(g["ip"].startswith(prefix) for g in gateways):
                         break  # Found a gateway for this subnet
 
-        # 3. ARP entries — derived from sightings
+        # 3. ARP entries — per-MAC packet counts for ranking the core switch.
+        # build_topology_graph only uses {mac: packet_count}; the per-payload
+        # IP is unused. Grouping 400K+ arp rows by the full JSON payload took
+        # ~2.3s; instead walk the most-recent arp sightings via the timestamp
+        # index and tally counts in-app (a recent sample ranks switches fine).
         arp_entries = []
         try:
             arp_cursor = await app_instance.store.connection.execute(
-                "SELECT hw_addr, payload, COUNT(*) as cnt FROM sightings "
-                "WHERE source = 'arp' GROUP BY hw_addr, payload "
-                "ORDER BY cnt DESC LIMIT 1000"
+                "SELECT hw_addr FROM sightings INDEXED BY idx_sightings_ts "
+                "WHERE source = 'arp' ORDER BY timestamp DESC LIMIT 5000"
             )
-            arp_rows = await arp_cursor.fetchall()
-            seen_pairs = set()
-            for r in arp_rows:
-                payload = _json.loads(r[1]) if isinstance(r[1], str) else (r[1] or {})
-                ip = payload.get("src_ip") or payload.get("sender_ip") or ""
-                key = (r[0], ip)
-                if key in seen_pairs or not ip:
-                    continue
-                seen_pairs.add(key)
-                arp_entries.append({"mac": r[0], "ip": ip, "packet_count": r[2]})
+            arp_counts: dict[str, int] = {}
+            for r in await arp_cursor.fetchall():
+                arp_counts[r[0]] = arp_counts.get(r[0], 0) + 1
+            arp_entries = [
+                {"mac": m, "ip": "", "packet_count": c} for m, c in arp_counts.items()
+            ]
         except Exception:
             pass
 
-        # 4. LLDP/CDP neighbors
+        # 4. LLDP/CDP neighbors — reuse the rows fetched in step 1b2.
         lldp_neighbors = []
-        lldp_rows = []
         try:
-            lldp_cursor = await app_instance.store.connection.execute(
-                "SELECT hw_addr, payload FROM sightings WHERE source IN ('lldp', 'cdp')"
-            )
-            lldp_rows = await lldp_cursor.fetchall()
             for r in lldp_rows:
                 device_mac = r[0]
                 try:
