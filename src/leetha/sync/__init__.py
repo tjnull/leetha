@@ -186,7 +186,7 @@ PARSER_MAP = {
     "huginn_dhcp": "parse_huginn_dhcp",
     "huginn_dhcp_vendor": "parse_huginn_dhcp_vendor",
     "huginn_dhcpv6": "parse_huginn_dhcpv6",
-    "huginn_dhcpv6_enterprise": "parse_huginn_dhcpv6",
+    "huginn_dhcpv6_enterprise": "parse_huginn_dhcpv6_enterprise",
     "huginn_mac_vendors": "parse_huginn_mac_vendors",
     "iana_enterprise": "parse_iana_enterprise",
     "ja3_fingerprints": "parse_ja3_database",
@@ -206,13 +206,24 @@ CACHE_NAMES = {
     "ja4_fingerprints": "ja4",
 }
 
-# File lists for git_multifile sources
+# File lists for git_multifile sources.
+# Upstream Huginn-Muninn reorganized its JSON exports into numbered
+# ``_partNN`` shards; keep these manifests in sync with the repo tree.
 MULTIFILE_MANIFESTS: dict[str, list[str]] = {
-    "huginn_mac_vendors": [
-        f"mac_vendor_p{p:02d}_c{c}.json"
-        for p in range(1, 12)
-        for c in range(1, 4)
-        if not (p == 11 and c > 1)  # p11 only has c1
+    # MAC_Vendors: 34 sequential parts plus one trailing p35_c1 shard.
+    "huginn_mac_vendors": (
+        [f"mac_vendor_part{n:02d}.json" for n in range(1, 35)]
+        + ["mac_vendor_p35_c1.json"]
+    ),
+    # DHCP_Signatures: dhcp_signature.json was split into 2 fingerprint parts.
+    "huginn_dhcp": [
+        "dhcp_fingerprint_part01.json",
+        "dhcp_fingerprint_part02.json",
+    ],
+    # DHCP_Vendors: dhcp_vendor.json was split into 2 parts.
+    "huginn_dhcp_vendor": [
+        "dhcp_vendor_part01.json",
+        "dhcp_vendor_part02.json",
     ],
 }
 

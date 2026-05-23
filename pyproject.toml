@@ -41,6 +41,9 @@ packages = ["src/leetha"]
 [tool.pytest.ini_options]
 testpaths = ["spec"]
 asyncio_mode = "auto"
+markers = [
+    "network: tests that require live network access (deselected by default)",
+]
 
 [tool.ruff]
 target-version = "py311"

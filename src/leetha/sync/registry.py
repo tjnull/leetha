@@ -99,27 +99,30 @@ def _build_default_feeds() -> list[FeedSource]:
         FeedSource(
             key="huginn_dhcp",
             title="Huginn-Muninn DHCP Signatures",
-            endpoint="https://raw.githubusercontent.com/Ringmast4r/Huginn-Muninn/main/DHCP_Signatures/json/dhcp_signature.json",
-            kind="json",
+            # Upstream renamed dhcp_signature.json -> split dhcp_fingerprint_partNN.json
+            endpoint="https://raw.githubusercontent.com/Ringmast4r/Huginn-Muninn/main/DHCP_Signatures/json/",
+            kind="git_multifile",
             summary=(
                 "Huginn-Muninn DHCP Option 55 fingerprints -- 368K"
-                " signatures"
+                " signatures (2-part split)"
             ),
         ),
         FeedSource(
             key="huginn_dhcp_vendor",
             title="Huginn-Muninn DHCP Vendors",
-            endpoint="https://raw.githubusercontent.com/Ringmast4r/Huginn-Muninn/main/DHCP_Vendors/json/dhcp_vendor.json",
-            kind="json",
+            # Upstream renamed dhcp_vendor.json -> split dhcp_vendor_partNN.json
+            endpoint="https://raw.githubusercontent.com/Ringmast4r/Huginn-Muninn/main/DHCP_Vendors/json/",
+            kind="git_multifile",
             summary=(
                 "Huginn-Muninn DHCP vendor class identifiers -- 425K"
-                " vendor IDs"
+                " vendor IDs (2-part split)"
             ),
         ),
         FeedSource(
             key="huginn_dhcpv6",
             title="Huginn-Muninn DHCPv6 Signatures",
-            endpoint="https://raw.githubusercontent.com/Ringmast4r/Huginn-Muninn/main/DHCPv6_Signatures/json/dhcp6_signature.json",
+            # Upstream renamed dhcp6_signature.json -> dhcpv6_signature.json
+            endpoint="https://raw.githubusercontent.com/Ringmast4r/Huginn-Muninn/main/DHCPv6_Signatures/json/dhcpv6_signature.json",
             kind="json",
             summary=(
                 "Huginn-Muninn DHCPv6 option request patterns for"
@@ -129,7 +132,8 @@ def _build_default_feeds() -> list[FeedSource]:
         FeedSource(
             key="huginn_dhcpv6_enterprise",
             title="Huginn-Muninn DHCPv6 Enterprise",
-            endpoint="https://raw.githubusercontent.com/Ringmast4r/Huginn-Muninn/main/DHCPv6_Enterprise/json/dhcp6_enterprise.json",
+            # Upstream renamed dhcp6_enterprise.json -> dhcpv6_enterprise.json
+            endpoint="https://raw.githubusercontent.com/Ringmast4r/Huginn-Muninn/main/DHCPv6_Enterprise/json/dhcpv6_enterprise.json",
             kind="json",
             summary=(
                 "Huginn-Muninn DHCPv6 enterprise identifiers -- 58K"
