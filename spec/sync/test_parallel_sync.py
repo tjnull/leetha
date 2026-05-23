@@ -167,3 +167,24 @@ async def test_merger_preserves_per_source_event_order(monkeypatch):
         assert events[-1] == "complete", f"{name} last event not complete: {events}"
         # downloading events must appear contiguously between start and complete
         assert events.count("downloading") == 5
+
+
+async def test_sync_all_emits_envelope_and_no_source_index(monkeypatch):
+    from leetha.sync import sync_all_with_progress
+    import leetha.sync as sync_mod
+
+    async def fake_gen(name):
+        yield {"event": "start", "source": name}
+        yield {"event": "complete", "source": name, "entries": 3, "size": 9}
+
+    monkeypatch.setattr(sync_mod, "sync_source_with_progress",
+                        lambda n: fake_gen(n))
+
+    events = [ev async for ev in sync_all_with_progress()]
+    kinds = [e["event"] for e in events]
+    assert kinds[0] == "sync_start"
+    assert kinds[-1] == "sync_complete"
+    assert "source_index" not in kinds            # removed
+    final = events[-1]
+    assert final["succeeded"] >= 1
+    assert final["failed"] == 0

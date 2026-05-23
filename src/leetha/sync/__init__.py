@@ -447,28 +447,26 @@ async def sync_sources_concurrent(
 
 
 async def sync_all_with_progress() -> AsyncGenerator[dict, None]:
-    """Sync all sources, yielding progress events."""
+    """Sync all sources concurrently, yielding merged progress events."""
     from leetha.sync.registry import SourceRegistry
     registry = SourceRegistry()
     sources = registry.list_sources()
+    names = [s.name for s in sources]
 
-    yield {"event": "sync_start", "total_sources": len(sources)}
+    yield {"event": "sync_start", "total_sources": len(names)}
 
     succeeded = 0
     failed = 0
-
-    for idx, src in enumerate(sources):
-        yield {"event": "source_index", "index": idx, "total_sources": len(sources)}
-        async for event in sync_source_with_progress(src.name):
-            yield event
-            if event["event"] == "complete":
-                succeeded += 1
-            elif event["event"] == "error":
-                failed += 1
+    async for event in sync_sources_concurrent(names, concurrency=5):
+        yield event
+        if event.get("event") == "complete":
+            succeeded += 1
+        elif event.get("event") == "error":
+            failed += 1
 
     yield {
         "event": "sync_complete",
-        "total_sources": len(sources),
+        "total_sources": len(names),
         "succeeded": succeeded,
         "failed": failed,
     }
