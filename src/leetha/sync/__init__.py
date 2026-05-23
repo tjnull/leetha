@@ -14,6 +14,25 @@ def _format_bytes(n: int) -> str:
     return f"{n:.1f} TB"
 
 
+def _order_sources_small_first(source_names: list[str]) -> list[str]:
+    """Order feeds so single-file sources are submitted before
+    git_multifile ones. The big multifile feed (mac_vendors) then lands
+    in a concurrency slot last and never blocks the quick feeds.
+    Unknown names keep their relative order at the end.
+    """
+    from leetha.sync.registry import SourceRegistry
+    registry = SourceRegistry()
+
+    def sort_key(name: str) -> tuple[int, int]:
+        src = registry.get_source(name)
+        kind = getattr(src, "kind", "json") if src else "json"
+        # 0 = single-file (download first), 1 = multifile (last)
+        bucket = 1 if kind == "git_multifile" else 0
+        return (bucket, source_names.index(name))
+
+    return sorted(source_names, key=sort_key)
+
+
 async def run_sync(list_sources: bool = False, source: str | None = None):
     """CLI entry point for the sync command with progress bars."""
     from leetha.sync.registry import SourceRegistry
