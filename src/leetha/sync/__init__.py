@@ -18,7 +18,8 @@ def _order_sources_small_first(source_names: list[str]) -> list[str]:
     """Order feeds so single-file sources are submitted before
     git_multifile ones. The big multifile feed (mac_vendors) then lands
     in a concurrency slot last and never blocks the quick feeds.
-    Unknown names keep their relative order at the end.
+    Unknown names are treated as single-file (front bucket) and keep
+    their relative input order.
     """
     from leetha.sync.registry import SourceRegistry
     registry = SourceRegistry()
