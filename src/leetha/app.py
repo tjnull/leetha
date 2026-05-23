@@ -70,6 +70,29 @@ def _clean_hostname(raw: str | None) -> str | None:
     return name if name else None
 
 
+def _safe_enqueue(sub: "asyncio.Queue", event: dict) -> None:
+    """Push *event* onto a subscriber queue without ever raising.
+
+    Drops the oldest item and retries when the queue is full, then gives
+    up silently. This MUST be used (rather than a bare ``put_nowait``)
+    whenever the enqueue is scheduled via ``loop.call_soon_threadsafe``:
+    a deferred ``put_nowait`` callback that raises ``QueueFull`` has no
+    surrounding handler and surfaces as an "Exception in callback" loop
+    error.
+    """
+    try:
+        sub.put_nowait(event)
+    except asyncio.QueueFull:
+        try:
+            sub.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
+        try:
+            sub.put_nowait(event)
+        except asyncio.QueueFull:
+            pass
+
+
 class LeethaApp:
     """Central application that orchestrates all subsystems."""
 
@@ -331,8 +354,8 @@ class LeethaApp:
         }
         for sub in list(subscribers):
             try:
-                main_loop.call_soon_threadsafe(sub.put_nowait, event)
-            except (RuntimeError, asyncio.QueueFull):
+                main_loop.call_soon_threadsafe(_safe_enqueue, sub, event)
+            except RuntimeError:
                 pass
 
     def _process_thread(self):
@@ -410,8 +433,8 @@ class LeethaApp:
             }
             for sub in list(self.event_subscribers):
                 try:
-                    main_loop.call_soon_threadsafe(sub.put_nowait, event)
-                except (RuntimeError, asyncio.QueueFull):
+                    main_loop.call_soon_threadsafe(_safe_enqueue, sub, event)
+                except RuntimeError:
                     pass
 
         def _run_arp_security(ev_loop, pkt, spoof_det, store):
