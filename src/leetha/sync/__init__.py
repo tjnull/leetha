@@ -405,7 +405,10 @@ async def sync_sources_concurrent(
     ``source`` field, so the interleaved stream is unambiguous.
     """
     ordered = _order_sources_small_first(source_names)
-    queue: asyncio.Queue = asyncio.Queue()
+    # Bounded so fast producers pause (backpressure) when a slow
+    # consumer — e.g. an SSE client — falls behind, instead of buffering
+    # unbounded events in memory.
+    queue: asyncio.Queue = asyncio.Queue(maxsize=concurrency * 8)
     sem = asyncio.Semaphore(concurrency)
     _SENTINEL = object()
 
@@ -418,6 +421,10 @@ async def sync_sources_concurrent(
                 await queue.put({"event": "error", "source": name, "error": str(exc)})
 
     async def run_all() -> None:
+        # return_exceptions=True is defense-in-depth: the per-worker
+        # try/except already isolates source failures, so workers should
+        # never propagate here. This only guards the rare case where
+        # queue.put itself raises during shutdown.
         await asyncio.gather(*(worker(n) for n in ordered), return_exceptions=True)
         await queue.put(_SENTINEL)
 
@@ -434,6 +441,8 @@ async def sync_sources_concurrent(
         try:
             await runner
         except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            # The runner is already being torn down here, so its
+            # exceptions are not actionable.
             pass
 
 

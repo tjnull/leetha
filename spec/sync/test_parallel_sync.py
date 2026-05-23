@@ -88,7 +88,9 @@ async def test_merger_respects_concurrency_bound(monkeypatch):
         active += 1
         peak = max(peak, active)
         try:
-            await asyncio.sleep(0.02)
+            for _ in range(5):
+                await asyncio.sleep(0.005)
+                yield {"event": "downloading", "source": name, "downloaded": 1}
             yield {"event": "complete", "source": name, "entries": 0, "size": 0}
         finally:
             active -= 1
@@ -138,3 +140,30 @@ async def test_merger_clean_early_close(monkeypatch):
     first = await gen.__anext__()
     assert first["event"] == "downloading"
     await gen.aclose()  # must not raise / leave orphan tasks
+
+
+async def test_merger_preserves_per_source_event_order(monkeypatch):
+    from leetha.sync import sync_sources_concurrent
+    import leetha.sync as sync_mod
+
+    async def fake_gen(name):
+        # Several ordered events per source, interleaved with awaits so
+        # the scheduler can interleave sources.
+        yield {"event": "start", "source": name}
+        for i in range(5):
+            await asyncio.sleep(0)
+            yield {"event": "downloading", "source": name, "seq": i}
+        yield {"event": "complete", "source": name, "entries": 0, "size": 0}
+
+    monkeypatch.setattr(sync_mod, "sync_source_with_progress",
+                        lambda n: fake_gen(n))
+
+    per_source: dict[str, list] = {}
+    async for ev in sync_sources_concurrent([f"s{i}" for i in range(4)], concurrency=4):
+        per_source.setdefault(ev["source"], []).append(ev["event"])
+
+    for name, events in per_source.items():
+        assert events[0] == "start", f"{name} first event not start: {events}"
+        assert events[-1] == "complete", f"{name} last event not complete: {events}"
+        # downloading events must appear contiguously between start and complete
+        assert events.count("downloading") == 5
