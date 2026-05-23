@@ -173,11 +173,13 @@ def _build_default_feeds() -> list[FeedSource]:
         FeedSource(
             key="ja4_fingerprints",
             title="JA4 TLS Fingerprints",
-            endpoint="https://ja4db.com/api/read/",
-            kind="json",
+            # ja4db.com/api/read/ went offline (host stopped accepting
+            # connections); use FoxIO's GitHub-hosted CSV mirror instead.
+            endpoint="https://raw.githubusercontent.com/FoxIO-LLC/ja4/main/ja4plus-mapping.csv",
+            kind="csv",
             summary=(
                 "FoxIO JA4+ fingerprint database for TLS"
-                " identification"
+                " identification (ja4plus-mapping.csv)"
             ),
         ),
         # Satori fingerprints -- annotated device fingerprints from Huginn-Muninn

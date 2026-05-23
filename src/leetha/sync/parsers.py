@@ -580,6 +580,55 @@ def ingest_ja4(content: str) -> dict:
     return table
 
 
+# Fingerprint columns in FoxIO's ja4plus-mapping.csv. The column name is
+# used directly as the fp_type.
+_JA4_CSV_FP_COLUMNS = ("ja4", "ja4s", "ja4h", "ja4x", "ja4t", "ja4tscan")
+
+
+def ingest_ja4_csv(content: str) -> dict:
+    """Ingest the FoxIO JA4+ database from ``ja4plus-mapping.csv``.
+
+    The canonical ja4db.com JSON API went offline, so we read FoxIO's
+    GitHub-hosted CSV mirror instead. Columns:
+
+        Application,Library,Device,OS,ja4,ja4s,ja4h,ja4x,ja4t,ja4tscan,Notes
+
+    Each non-empty fingerprint column becomes its own table entry, keyed
+    by the fingerprint value. Output matches :func:`ingest_ja4` so the
+    lookup consumer is unchanged:
+    ``{fp_value: {app, os_family, fp_type, description, user_agent}}``.
+    """
+    table: dict[str, dict] = {}
+    try:
+        reader = csv.DictReader(StringIO(content))
+        # Bail cleanly if this isn't the expected mapping CSV.
+        if not reader.fieldnames or "ja4" not in reader.fieldnames:
+            return table
+        for row in reader:
+            app_label = (
+                (row.get("Application") or "").strip()
+                or (row.get("Library") or "").strip()
+                or (row.get("Device") or "").strip()
+            )
+            os_info = (row.get("OS") or "").strip() or None
+            notes = (row.get("Notes") or "").strip()
+            for col in _JA4_CSV_FP_COLUMNS:
+                fp_val = (row.get(col) or "").strip()
+                if not fp_val:
+                    continue
+                table[fp_val] = {
+                    "app": app_label,
+                    "os_family": os_info,
+                    "fp_type": col,
+                    "description": notes or app_label,
+                    "user_agent": None,
+                }
+        log.info("Ingested %d JA4+ fingerprints (CSV)", len(table))
+    except Exception as exc:
+        log.error("JA4 CSV ingestion failed: %s", exc)
+    return table
+
+
 # ===================================================================
 # Backward-compatible aliases (parse_* -> ingest_*)
 # ===================================================================
@@ -595,6 +644,7 @@ parse_huginn_mac_vendors = ingest_huginn_mac_vendors
 parse_iana_enterprise = ingest_iana_enterprise
 parse_ja3_database = ingest_ja3
 parse_ja4_database = ingest_ja4
+parse_ja4_csv = ingest_ja4_csv
 
 
 # ===================================================================

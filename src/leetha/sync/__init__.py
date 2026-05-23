@@ -225,7 +225,7 @@ PARSER_MAP = {
     "huginn_mac_vendors": "parse_huginn_mac_vendors",
     "iana_enterprise": "parse_iana_enterprise",
     "ja3_fingerprints": "parse_ja3_database",
-    "ja4_fingerprints": "parse_ja4_database",
+    "ja4_fingerprints": "parse_ja4_csv",
     "satori_dhcp": "parse_satori",
     "satori_useragent": "parse_satori",
     "satori_tcp": "parse_satori",
