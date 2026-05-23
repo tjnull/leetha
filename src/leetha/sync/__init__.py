@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncGenerator
 
 
@@ -390,6 +391,50 @@ async def sync_source_with_progress(source_name: str) -> AsyncGenerator[dict, No
         }
     except Exception as e:
         yield {"event": "error", "source": src.name, "error": str(e)}
+
+
+async def sync_sources_concurrent(
+    source_names: list[str], concurrency: int = 5
+) -> AsyncGenerator[dict, None]:
+    """Sync multiple sources concurrently, merging their progress events.
+
+    Runs at most *concurrency* sources at once via a semaphore. Each
+    worker drains ``sync_source_with_progress(name)`` into a shared queue.
+    A worker that raises emits an ``error`` event instead of propagating,
+    so one failed source never blocks the rest. Events keep their
+    ``source`` field, so the interleaved stream is unambiguous.
+    """
+    ordered = _order_sources_small_first(source_names)
+    queue: asyncio.Queue = asyncio.Queue()
+    sem = asyncio.Semaphore(concurrency)
+    _SENTINEL = object()
+
+    async def worker(name: str) -> None:
+        async with sem:
+            try:
+                async for event in sync_source_with_progress(name):
+                    await queue.put(event)
+            except Exception as exc:  # noqa: BLE001 — isolate per source
+                await queue.put({"event": "error", "source": name, "error": str(exc)})
+
+    async def run_all() -> None:
+        await asyncio.gather(*(worker(n) for n in ordered), return_exceptions=True)
+        await queue.put(_SENTINEL)
+
+    runner = asyncio.create_task(run_all())
+    try:
+        while True:
+            item = await queue.get()
+            if item is _SENTINEL:
+                break
+            yield item
+    finally:
+        if not runner.done():
+            runner.cancel()
+        try:
+            await runner
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
 
 
 async def sync_all_with_progress() -> AsyncGenerator[dict, None]:
