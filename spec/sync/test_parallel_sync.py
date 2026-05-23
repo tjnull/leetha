@@ -240,3 +240,21 @@ def test_cli_task_router_tracks_per_source():
     t.on_event({"event": "error", "source": "b", "error": "x"})
     assert t.failed == 1
     assert t.done == 2  # completed + errored
+
+
+def test_cli_tracker_accumulates_and_defaults():
+    from leetha.sync import _CliSyncTracker
+
+    t = _CliSyncTracker(["a", "b", "c"])
+    t.on_event({"event": "complete", "source": "a", "entries": 10, "size": 100})
+    t.on_event({"event": "complete", "source": "b", "entries": 5, "size": 50})
+    # a complete with no entries/size keys must default to 0 (no crash)
+    t.on_event({"event": "complete", "source": "c"})
+    assert t.succeeded == 3
+    assert t.failed == 0
+    assert t.done == 3
+    assert t.total_entries == 15
+    assert t.total_bytes == 150
+    # unknown envelope events return None and don't touch counters
+    assert t.on_event({"event": "sync_start", "total_sources": 3}) is None
+    assert t.succeeded == 3 and t.done == 3

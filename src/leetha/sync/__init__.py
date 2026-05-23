@@ -155,8 +155,9 @@ async def run_sync(list_sources: bool = False, source: str | None = None):
         tracker = _CliSyncTracker(source_names)
 
         async for event in sync_sources_concurrent(source_names, concurrency=5):
-            tracker.on_event(event)
-            src_name = event.get("source")
+            # on_event updates counters and returns the source name for
+            # events that should refresh a bar (None otherwise).
+            src_name = tracker.on_event(event)
             task_id = task_by_source.get(src_name) if src_name else None
             etype = event.get("event")
 
