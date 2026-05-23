@@ -454,10 +454,17 @@ async def sync_sources_concurrent(
             runner.cancel()
         try:
             await runner
-        except (asyncio.CancelledError, Exception):  # noqa: BLE001
-            # The runner is already being torn down here, so its
-            # exceptions are not actionable.
+        except asyncio.CancelledError:
+            # Expected when the consumer closes the generator early.
             pass
+        except Exception:  # noqa: BLE001
+            # run_all already uses return_exceptions=True, so reaching
+            # here is unexpected; log it rather than silently dropping.
+            import logging
+            logging.getLogger(__name__).debug(
+                "sync_sources_concurrent runner raised during teardown",
+                exc_info=True,
+            )
 
 
 async def sync_all_with_progress() -> AsyncGenerator[dict, None]:

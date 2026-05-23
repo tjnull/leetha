@@ -1,6 +1,5 @@
 """Parallel source-sync behavior."""
 import asyncio
-import pytest
 
 from leetha.sync import _order_sources_small_first
 
