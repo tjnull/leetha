@@ -645,6 +645,55 @@ def ingest_satori(content: str) -> list[dict]:
 
 parse_satori = ingest_satori
 
+
+# ===================================================================
+# Rapid7 Recog fingerprint parser (one XML file per banner/header type)
+# ===================================================================
+
+def ingest_recog(content: str) -> dict:
+    """Parse one Rapid7 Recog XML fingerprint file.
+
+    Returns ``{match_type: [fingerprint, ...]}`` keyed by the file's
+    ``matches`` attribute (e.g. ``ssh.banner``, ``http_header.server``).
+    Each fingerprint is ``{pattern, params, description}`` where ``params``
+    are the ``<param pos name value>`` extractions (``value`` is None for
+    capture-group extractions resolved at match time). The multifile sync
+    merges files by their (distinct) match type.
+    """
+    import xml.etree.ElementTree as ET
+
+    out: dict[str, list] = {}
+    try:
+        root = ET.fromstring(content)
+    except ET.ParseError as exc:
+        log.warning("Recog XML parse failed: %s", exc)
+        return out
+
+    match_type = root.get("matches") or "unknown"
+    fps: list[dict] = []
+    for fp in root.findall("fingerprint"):
+        pattern = fp.get("pattern")
+        if not pattern:
+            continue
+        params = []
+        for p in fp.findall("param"):
+            try:
+                pos = int(p.get("pos", 0))
+            except (TypeError, ValueError):
+                pos = 0
+            params.append({"pos": pos, "name": p.get("name", ""), "value": p.get("value")})
+        desc_el = fp.find("description")
+        desc = (desc_el.text or "").strip() if desc_el is not None and desc_el.text else ""
+        fps.append({"pattern": pattern, "params": params, "description": desc})
+
+    if fps:
+        out[match_type] = fps
+    log.info("Ingested %d Recog '%s' fingerprints", len(fps), match_type)
+    return out
+
+
+parse_recog = ingest_recog
+
 # Also expose old private helper names in case anything references them
 _abbreviate_vendor = _shorten_vendor
 _hash_dhcp_options = _fingerprint_dhcp_opts

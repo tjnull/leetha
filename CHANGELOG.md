@@ -7,7 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Rapid7 Recog fingerprint sync source.** A curated set of Recog XML
+  fingerprints (SSH, HTTP Server, FTP, SMTP, POP/IMAP, SNMP sysDescr, SMB
+  native OS, NTP, SIP, MySQL) is now synced and consulted in the banner /
+  header identification path for passive service, OS, and device ID.
+- **DTP/STP Layer-2 capture and detection.** The capture filter now admits
+  STP/CDP/DTP control frames (previously dropped), a DTP parser/processor
+  was added, and the VLAN-hopping (L2-007) and STP-root-takeover (L2-009)
+  detections are now grounded in real frames — L2-007 keys on a negotiating
+  DTP frame, L2-009 fires on multiple advertised roots (superior BPDU).
+  A new L2-010 states the vantage limitation when no L2 control plane is
+  visible (typical access port) so an empty result isn't read as "all clear".
+
 ### Fixed
+- **Evidence fusion no longer lets stale fingerprint DBs overrule strong
+  sources.** Fusion summed every source's score, so correlated databases
+  (Satori + Huginn lineage) and duplicate evidence could outvote the
+  authoritative IEEE OUI (mislabeling a Withings device "EyeFi" and a modern
+  Windows host "Windows 2000/XP"). It now de-duplicates per source, scores by
+  best-source × a bounded boost over distinct source families, ignores
+  non-answer values, and demotes the OUI device-type for multi-product
+  vendors so behavioural evidence wins (Samsung TV stays smart_tv).
+- **Device validator now validates live data.** The manufacturer-agreement
+  check read the never-enriched legacy `devices` table and looked up the OUI
+  vendor under the wrong key, so it validated nothing; it now reads
+  hosts/verdicts and flags genuine OUI-vs-verdict vendor disagreements.
+- **DHCP opt55 matching** no longer subset-fingerprints from short, generic
+  option lists (a Samsung TV was mislabeled "Siemens HMI / Windows CE").
 - **Restored 5 broken Huginn-Muninn feeds.** DHCP Signatures, DHCP
   Vendors, DHCPv6 Signatures, DHCPv6 Enterprise, and MAC Vendors were
   404ing because the registry pointed at non-existent renamed/split

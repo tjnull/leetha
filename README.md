@@ -335,6 +335,7 @@ Leetha passively captures service banners from observed TCP traffic without send
 | JA3 TLS Fingerprints | Database | TLS client identification with matching |
 | JA4+ TLS Fingerprints | Database | Modern TLS client identification with matching |
 | p0f TCP Signatures | Database | TCP/IP stack OS fingerprinting |
+| Rapid7 Recog | Database | SSH/HTTP/FTP/SMTP/SNMP/SMB banner & header fingerprints (service/OS/device) |
 | Custom Vendor Patterns | 4,645 | Banner and protocol-specific identification |
 
 ## Architecture

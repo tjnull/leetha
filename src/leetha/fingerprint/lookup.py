@@ -626,10 +626,101 @@ class SignatureMatcher:
                 except re.error:
                     continue
 
+        # Final fallback: Rapid7 Recog banner/header fingerprints.
+        recog_hit = self.match_recog(protocol, banner_text)
+        if recog_hit:
+            return recog_hit
+
         return None
 
     # Backward-compat alias
     lookup_banner = match_banner
+
+    # Map a leetha protocol/banner kind to the Recog ``matches`` type.
+    _RECOG_MATCH_TYPES: dict[str, str] = {
+        "ssh": "ssh.banner",
+        "ftp": "ftp.banner",
+        "smtp": "smtp.banner",
+        "pop3": "pop3.banner", "pop": "pop3.banner",
+        "imap": "imap4.banner", "imap4": "imap4.banner",
+        "snmp": "snmp.sys_description",
+        "smb": "smb.native_os",
+        "ntp": "ntp.readvar",
+        "sip": "sip_header.server",
+        "mysql": "mysql.banners",
+        "http": "http_header.server",
+        "http_server": "http_header.server",
+        "http_cookie": "http_header.cookie",
+        "http_xpoweredby": "http_header.x-powered-by",
+    }
+
+    def match_recog(self, kind: str, text: str) -> FingerprintMatch | None:
+        """Match a banner/header against the Rapid7 Recog fingerprint DB.
+
+        ``kind`` is a leetha protocol/header name (ssh, http, ftp, smtp, ...)
+        mapped to a Recog ``matches`` type. Static ``value`` params give the
+        vendor/product/OS directly; capture-group params are resolved from the
+        regex match.
+        """
+        if not text or not kind:
+            return None
+        match_type = self._RECOG_MATCH_TYPES.get(kind.lower())
+        if not match_type:
+            return None
+        blob = self._fetch_json("recog")
+        if not blob:
+            return None
+        fingerprints = blob.get("entries", {}).get(match_type, [])
+        for fp in fingerprints:
+            pattern = fp.get("pattern")
+            if not pattern:
+                continue
+            try:
+                m = re.search(pattern, text)
+            except re.error:
+                continue  # Recog uses some regex constructs Python rejects
+            if not m:
+                continue
+
+            vendor = product = os_family = device_type = version = None
+            for p in fp.get("params", []):
+                name = p.get("name", "")
+                val = p.get("value")
+                if val is None and p.get("pos"):
+                    try:
+                        val = m.group(p["pos"])
+                    except Exception:
+                        val = None
+                if not val:
+                    continue
+                if name in ("service.vendor", "hw.vendor", "os.vendor") and not vendor:
+                    vendor = val
+                elif name in ("hw.product", "hw.model", "service.product") and not product:
+                    product = val
+                elif name in ("os.product", "os.family") and not os_family:
+                    os_family = val
+                elif name == "hw.device" and not device_type:
+                    device_type = val
+                elif name in ("service.version", "os.version", "hw.version") and not version:
+                    version = val
+
+            if vendor or product or os_family or device_type:
+                return FingerprintMatch(
+                    source="recog",
+                    match_type="pattern",
+                    confidence=0.80,
+                    manufacturer=vendor,
+                    os_family=os_family,
+                    device_type=device_type,
+                    model=product,
+                    raw_data={
+                        "recog_match": match_type,
+                        "description": fp.get("description"),
+                        "version": version,
+                        "matched_pattern": pattern,
+                    },
+                )
+        return None
 
     # ------------------------------------------------------------------
 

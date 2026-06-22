@@ -233,6 +233,7 @@ PARSER_MAP = {
     "satori_web": "parse_satori",
     "satori_sip": "parse_satori",
     "satori_ntp": "parse_satori",
+    "recog": "parse_recog",
 }
 
 CACHE_NAMES = {
@@ -242,9 +243,25 @@ CACHE_NAMES = {
 
 # File lists for git_multifile sources, keyed by feed key. Each value is
 # the ordered list of filenames to fetch from the feed's directory base.
-# Currently empty -- the only multifile feed (huginn_mac_vendors) was
-# removed -- but the download machinery below remains for future feeds.
-MULTIFILE_MANIFESTS: dict[str, list[str]] = {}
+MULTIFILE_MANIFESTS: dict[str, list[str]] = {
+    # Rapid7 Recog: a curated set of the XML files useful for PASSIVE
+    # banner/header fingerprinting (each has a distinct ``matches`` type).
+    "recog": [
+        "ssh_banners.xml",
+        "http_servers.xml",
+        "http_cookies.xml",
+        "http_xpoweredby.xml",
+        "ftp_banners.xml",
+        "smtp_banners.xml",
+        "pop_banners.xml",
+        "imap_banners.xml",
+        "snmp_sysdescr.xml",
+        "smb_native_os.xml",
+        "ntp_banners.xml",
+        "sip_banners.xml",
+        "mysql_banners.xml",
+    ],
+}
 
 
 async def sync_source_with_progress(source_name: str) -> AsyncGenerator[dict, None]:

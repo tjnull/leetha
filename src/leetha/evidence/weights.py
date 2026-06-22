@@ -29,6 +29,7 @@ _TRUST_TIER_2 = {
     "tcp": 0.65,
     "banner": 0.75,
     "banner_cache": 0.70,
+    "recog": 0.80,
     "http_useragent": 0.75,
     "dhcpv6": 0.75,
     "mdns": 0.70,

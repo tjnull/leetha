@@ -230,6 +230,17 @@ def _build_default_feeds() -> list[FeedSource]:
             kind="json",
             summary="Satori NTP client fingerprints (25 entries)",
         ),
+        FeedSource(
+            key="recog",
+            title="Rapid7 Recog Fingerprints",
+            endpoint="https://raw.githubusercontent.com/rapid7/recog/main/xml/",
+            kind="git_multifile",
+            summary=(
+                "Rapid7 Recog banner/header fingerprints (SSH, HTTP Server,"
+                " FTP, SMTP, POP/IMAP, SNMP sysDescr, SMB native OS, NTP, SIP,"
+                " MySQL) for passive service, OS, and device identification"
+            ),
+        ),
     ]
 
 
