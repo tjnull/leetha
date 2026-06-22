@@ -33,6 +33,25 @@ from leetha.analysis.spoofing import SpoofingDetector
 logger = logging.getLogger(__name__)
 
 
+def _resolve_finding_rule(alert, fallback_map):
+    """Map a spoofing/security Alert to its specific FindingRule.
+
+    Detectors set ``alert.rule`` to a precise FindingRule value (e.g.
+    ``oui_mismatch``, ``fingerprint_drift``, ``arp_spoofing``) so the
+    findings list stays triage-able instead of collapsing every detection
+    into ``identity_shift``. Falls back to the AlertType map, then to
+    IDENTITY_SHIFT, when no precise rule is supplied or it is unrecognized.
+    """
+    from leetha.store.models import FindingRule
+    rule_hint = getattr(alert, "rule", None)
+    if rule_hint:
+        try:
+            return FindingRule(rule_hint)
+        except ValueError:
+            pass
+    return fallback_map.get(alert.alert_type, FindingRule.IDENTITY_SHIFT)
+
+
 def _clean_hostname(raw: str | None) -> str | None:
     """Clean and normalize a hostname from any protocol source.
 
@@ -197,8 +216,8 @@ class LeethaApp:
 
         # Fire-and-forget: preload smaller Huginn caches in a background
         # thread.  Not awaited so the pipeline starts immediately.
-        # huginn_dhcp (138 MB) and huginn_mac_vendors (667 MB) are NOT
-        # preloaded — loaded on-demand only when needed.
+        # huginn_dhcp (138 MB) is NOT preloaded — loaded on-demand only
+        # when needed.
         loop = asyncio.get_running_loop()
         loop.run_in_executor(None, self._preload_caches)
 
@@ -450,12 +469,12 @@ class LeethaApp:
             ))
             _MAP = {
                 AlertType.SPOOFING: FindingRule.IDENTITY_SHIFT,
-                AlertType.MAC_SPOOFING: FindingRule.IDENTITY_SHIFT,
+                AlertType.MAC_SPOOFING: FindingRule.MAC_SPOOFING,
             }
             for alert in alerts:
                 finding = Finding(
                     hw_addr=alert.device_mac,
-                    rule=_MAP.get(alert.alert_type, FindingRule.IDENTITY_SHIFT),
+                    rule=_resolve_finding_rule(alert, _MAP),
                     severity=AlertSeverity(alert.severity.value),
                     message=alert.message,
                 )
@@ -495,12 +514,12 @@ class LeethaApp:
                     snapshot_writer=_snap_write))
             _MAP = {
                 AlertType.SPOOFING: FindingRule.IDENTITY_SHIFT,
-                AlertType.MAC_SPOOFING: FindingRule.IDENTITY_SHIFT,
+                AlertType.MAC_SPOOFING: FindingRule.MAC_SPOOFING,
             }
             for alert in alerts:
                 finding = Finding(
                     hw_addr=alert.device_mac,
-                    rule=_MAP.get(alert.alert_type, FindingRule.IDENTITY_SHIFT),
+                    rule=_resolve_finding_rule(alert, _MAP),
                     severity=AlertSeverity(alert.severity.value),
                     message=alert.message,
                 )
@@ -627,7 +646,7 @@ class LeethaApp:
             "huginn_dhcp_vendor", "huginn_dhcpv6_enterprise",
             "huginn_devices",
             # huginn_dhcp (138 MB) loaded on-demand only
-            # huginn_mac_vendors (667 MB) NOT preloaded — OUI index handles MAC lookups
+            # MAC lookups are served entirely by the IEEE OUI index
         ):
             if name in lookup._json_cache:
                 continue
@@ -992,7 +1011,9 @@ class LeethaApp:
 
             finding = Finding(
                 hw_addr=v.hw_addr,
-                rule=FindingRule.IDENTITY_SHIFT,
+                # An infrastructure device going quiet is a presence event, not
+                # an identity change — label it as such so it's triage-able.
+                rule=FindingRule.DEVICE_WENT_OFFLINE,
                 severity=severity,
                 message=(
                     f"{'Gateway' if is_gateway else 'Infrastructure device'} offline: "

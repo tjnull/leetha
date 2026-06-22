@@ -44,6 +44,24 @@ async def _device_passively_observed(store, mac: str) -> bool:
     return bool(row[0])
 
 
+async def _baseline_established(store) -> bool:
+    """True once the operator has curated the inventory at all.
+
+    Until at least one device has been explicitly approved or rejected,
+    *every* device is 'unapproved' simply because no baseline exists yet —
+    so a new unapproved device is just inventory (INFO), not a WARNING.
+    Once the operator has started approving/rejecting, a newly-appearing
+    unapproved device is genuinely noteworthy.
+    """
+    try:
+        cursor = await store.connection.execute(
+            "SELECT 1 FROM devices WHERE authorization IN ('approved','rejected') LIMIT 1",
+        )
+        return (await cursor.fetchone()) is not None
+    except Exception:
+        return False
+
+
 @register_rule("new_host")
 class NewHostRule(RuleBase):
     severity = "info"  # graded dynamically; retained for registry-level defaults
@@ -60,6 +78,11 @@ class NewHostRule(RuleBase):
                 return None
             auth = await _device_authorization(store, host.hw_addr)
             sev = _AUTH_SEVERITY.get(auth, AlertSeverity.WARNING)
+            # Pre-baseline, an unapproved device is just inventory: don't
+            # raise a WARNING for every device on first deployment. Rejected
+            # devices stay CRITICAL regardless (explicit operator signal).
+            if auth == "unapproved" and not await _baseline_established(store):
+                sev = AlertSeverity.INFO
             parts = [f"New host discovered: {host.hw_addr}"]
             if verdict.vendor:
                 parts.append(verdict.vendor)

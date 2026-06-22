@@ -53,6 +53,30 @@ CATEGORY_LABELS: dict[str, str] = {
 }
 
 
+# Device types that legitimately bridge/route between subnets or span the
+# segment by design. Rules that key off "device on multiple subnets" or
+# "non-router behaviour" should exclude these to avoid flagging the network
+# infrastructure itself.
+_INFRA_DEVICE_TYPES: frozenset[str] = frozenset({
+    "router", "gateway", "firewall", "switch", "access_point",
+    "network_device", "wifi_router",
+})
+
+
+# Severity rank for gating (higher = more urgent). Used to decide which
+# findings are "actionable" enough to feed attack-chain assembly.
+_SEVERITY_RANK: dict[str, int] = {
+    "info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4,
+}
+
+# Max sightings loaded per (device, source_type) when building the analysis
+# context. Capping per source — rather than per device — ensures a chatty
+# protocol can't truncate a low-volume but actionable signal of another kind.
+# (Very high single-protocol volumes are still sampled; presence detection on
+# extreme captures would benefit from pushing existence checks into SQL.)
+_PER_SOURCE_OBS_CAP = 5000
+
+
 # Data structures
 
 @dataclass
@@ -126,20 +150,117 @@ class AnalysisContext:
 
 # Context builder
 
+async def _load_devices_from_store(db: Database):
+    """Build Device objects from the hosts + verdicts tables.
+
+    The live pipeline writes identity into hosts/verdicts, not the legacy
+    `devices` table, so the exposure rules must read from there to see real
+    devices (vendor, category, IP, randomized-MAC flag).
+    """
+    from leetha.store.models import Device
+
+    conn = db._conn
+    assert conn is not None
+    devices: list = []
+    async with conn.execute(
+        "SELECT hw_addr, ip_addr, ip_v6, mac_randomized, real_hw_addr,"
+        " discovered_at, last_active, disposition FROM hosts"
+    ) as cur:
+        host_rows = await cur.fetchall()
+
+    for h in host_rows:
+        hw = h["hw_addr"]
+        async with conn.execute(
+            "SELECT vendor, category, platform, platform_version, hostname,"
+            " certainty FROM verdicts WHERE hw_addr = ?", (hw,)
+        ) as vcur:
+            v = await vcur.fetchone()
+        devices.append(Device(
+            mac=hw,
+            ip_v4=h["ip_addr"],
+            ip_v6=h["ip_v6"] if "ip_v6" in h.keys() else None,
+            manufacturer=v["vendor"] if v else None,
+            device_type=v["category"] if v else None,
+            os_family=v["platform"] if v else None,
+            os_version=v["platform_version"] if v else None,
+            hostname=v["hostname"] if v else None,
+            confidence=(v["certainty"] if v else 0) or 0,
+            alert_status=h["disposition"] or "new",
+            is_randomized_mac=bool(h["mac_randomized"]),
+            correlated_mac=h["real_hw_addr"],
+        ))
+    return devices, {d.mac: d for d in devices}
+
+
+async def _load_observations_from_sightings(db: Database):
+    """Adapt sighting rows into Observation objects keyed by source type.
+
+    Sightings already carry per-protocol payloads (arp/mdns/tls/icmpv6/
+    ssdp/lldp/dhcpv6/dns/...) whose field names line up with what the rules
+    read, so the sighting ``source`` maps directly to ``source_type`` and
+    the JSON ``payload`` becomes ``raw_data``.
+    """
+    from leetha.store.models import Observation
+
+    conn = db._conn
+    assert conn is not None
+    observations_by_mac: dict[str, list] = {}
+    observations_by_type: dict[str, list] = {}
+    # Cap PER (device, source_type), not per device. A device that emits tens
+    # of thousands of one protocol (e.g. tcp_syn/tls) must not crowd out a
+    # low-volume but actionable signal of another (e.g. a WPAD/LLMNR query in
+    # `dns`). The window function keeps the most recent N of each kind, with
+    # an id tiebreaker for deterministic results across runs.
+    sql = (
+        "SELECT hw_addr, source, payload, certainty, interface, network, timestamp"
+        " FROM ("
+        "   SELECT *, ROW_NUMBER() OVER ("
+        "     PARTITION BY hw_addr, source ORDER BY timestamp DESC, id DESC) AS rn"
+        "   FROM sightings"
+        " ) WHERE rn <= ?"
+    )
+    async with conn.execute(sql, (_PER_SOURCE_OBS_CAP,)) as cur:
+        rows = await cur.fetchall()
+    for s in rows:
+        payload = s["payload"]
+        obs = Observation(
+            device_mac=s["hw_addr"],
+            source_type=s["source"],
+            raw_data=payload if isinstance(payload, str) else json.dumps(payload or {}),
+            match_result="{}",
+            confidence=0,
+            timestamp=_coerce_obs_ts(s["timestamp"]),
+            interface=s["interface"] if "interface" in s.keys() else None,
+            network=s["network"] if "network" in s.keys() else None,
+        )
+        observations_by_mac.setdefault(s["hw_addr"], []).append(obs)
+        observations_by_type.setdefault(s["source"], []).append(obs)
+    return observations_by_mac, observations_by_type
+
+
+def _coerce_obs_ts(value):
+    """Best-effort ISO timestamp -> datetime for Observation rows."""
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            pass
+    return datetime.now()
+
+
 async def _build_context(db: Database, data_dir: Path | None = None,
                          interface: str | None = None,
                          attacker_ip: str | None = None,
                          interface_type: str = "local") -> AnalysisContext:
-    devices = await db.list_devices()
-    device_map = {d.mac: d for d in devices}
+    # Device identity lives in the hosts + verdicts tables that the live
+    # pipeline populates. The legacy `devices` table is no longer enriched
+    # (and `observations` is never written), so we source everything from
+    # hosts/verdicts/sightings via the shared connection.
+    devices, device_map = await _load_devices_from_store(db)
 
-    observations_by_mac: dict[str, list] = {}
-    observations_by_type: dict[str, list] = {}
-    for device in devices:
-        obs_list = await db.get_observations(device.mac, limit=500)
-        observations_by_mac[device.mac] = obs_list
-        for obs in obs_list:
-            observations_by_type.setdefault(obs.source_type, []).append(obs)
+    observations_by_mac, observations_by_type = await _load_observations_from_sightings(db)
 
     probe_results = await db.list_probe_targets(status="completed")
     probe_by_mac: dict[str, list[dict]] = {}
@@ -370,7 +491,10 @@ class MDNSDetectedRule:
     rule_id = "NR-003"
     name = "mDNS Queries Detected"
     category = Category.NAME_RESOLUTION
-    severity = Severity.MEDIUM
+    # mDNS is ubiquitous on any modern LAN; this is inventory, not an
+    # exposure an analyst should chase. (mDNS poisoning needs an active
+    # responder, which passive presence does not indicate.)
+    severity = Severity.INFO
 
     def evaluate(self, ctx: AnalysisContext) -> list[Finding]:
         mdns_obs = ctx.observations_by_type.get("mdns", [])
@@ -630,7 +754,10 @@ class DHCPStarvationRiskRule:
     rule_id = "DH-001"
     name = "DHCP Activity Detected"
     category = Category.DHCP
-    severity = Severity.MEDIUM
+    # DHCP DISCOVER/REQUEST is normal client behaviour on every network;
+    # presence is inventory. Actual starvation would show as an abnormal
+    # volume/rate, which this presence check does not measure.
+    severity = Severity.INFO
 
     def evaluate(self, ctx: AnalysisContext) -> list[Finding]:
         dhcp_obs = ctx.observations_by_type.get("dhcpv4", [])
@@ -745,7 +872,9 @@ class RouterAdvertisementRule:
     rule_id = "RT-001"
     name = "IPv6 Router Advertisements Detected"
     category = Category.ROUTING
-    severity = Severity.HIGH
+    # A single RA sender is the legitimate router (normal). Rogue-RA MITM
+    # shows up as MORE THAN ONE distinct device sending RAs on the segment.
+    severity = Severity.INFO
 
     def evaluate(self, ctx: AnalysisContext) -> list[Finding]:
         icmpv6_obs = ctx.observations_by_type.get("icmpv6", [])
@@ -759,18 +888,27 @@ class RouterAdvertisementRule:
                     affected[mac] = _device_info(dev) if dev else {"mac": mac}
         if not affected:
             return []
+        # Multiple distinct RA senders = a candidate rogue RA (a second
+        # "router" appeared). One sender is the normal gateway → INFO.
+        rogue = len(affected) > 1
+        severity = Severity.HIGH if rogue else Severity.INFO
+        description = (
+            "Multiple devices are sending IPv6 Router Advertisements on this "
+            "segment. A rogue RA lets an attacker become the default IPv6 "
+            "gateway, enabling man-in-the-middle even on IPv4-primary networks."
+            if rogue else
+            "IPv6 Router Advertisements were observed from a single router "
+            "(expected on any IPv6-enabled segment). Recorded as inventory; "
+            "watch for additional RA senders, which would indicate a rogue RA."
+        )
         return [Finding(
             rule_id=self.rule_id,
             name=self.name,
             category=self.category,
-            severity=self.severity,
-            description=(
-                "IPv6 Router Advertisement messages were detected. An attacker can send "
-                "rogue RAs to become the default IPv6 gateway, enabling man-in-the-middle "
-                "attacks even on IPv4-primary networks."
-            ),
+            severity=severity,
+            description=description,
             affected_devices=list(affected.values()),
-            evidence=[f"{len(affected)} router(s) sending RAs"],
+            evidence=[f"{len(affected)} distinct device(s) sending RAs"],
             tools=[
                 ToolRecommendation(
                     name="mitm6",
@@ -1095,11 +1233,18 @@ class NDPSpoofingRiskRule:
     rule_id = "L2-004"
     name = "IPv6 NDP Spoofing Risk"
     category = Category.LAYER2
-    severity = Severity.HIGH
+    # The Override flag on an unsolicited NA is set by many OSes during
+    # normal address (re)configuration, so presence alone is a weak signal.
+    # Elevated to HIGH only when multiple MACs advertise the SAME target
+    # address (an actual conflict) -- see evaluate().
+    severity = Severity.LOW
 
     def evaluate(self, ctx: AnalysisContext) -> list[Finding]:
         icmpv6_obs = ctx.observations_by_type.get("icmpv6", [])
         affected: dict[str, dict] = {}
+        # Track which MACs claim each NA target address; >1 MAC for the same
+        # target is an actual address conflict (real spoofing signal).
+        target_macs: dict[str, set[str]] = {}
         for obs in icmpv6_obs:
             raw = _parse_raw_data(obs)
             icmp_type = raw.get("icmpv6_type")
@@ -1111,19 +1256,42 @@ class NDPSpoofingRiskRule:
                 if dev and dev.device_type not in ("router", "gateway", "firewall"):
                     if mac not in affected:
                         affected[mac] = _device_info(dev)
+                    target = raw.get("target")
+                    if target:
+                        target_macs.setdefault(target, set()).add(mac)
         if not affected:
             return []
+        # Elevate only when two different MACs advertise the same target
+        # address with Override -- a genuine NDP conflict/spoof. A lone host
+        # setting Override on its own address is normal OS behaviour.
+        contested = [t for t, macs in target_macs.items() if len(macs) > 1]
+        if contested:
+            severity = Severity.HIGH
+            description = (
+                "Multiple MAC addresses advertised the same IPv6 target with the "
+                "Override flag — a genuine Neighbor Discovery conflict. NDP has no "
+                "authentication; an attacker can inject spoofed NAs to redirect IPv6 "
+                "traffic through their machine."
+            )
+            evidence = [
+                f"{len(contested)} IPv6 target(s) claimed by multiple MACs",
+                f"{len(affected)} non-router device(s) sending NA with override flag",
+            ]
+        else:
+            severity = Severity.LOW
+            description = (
+                "Non-router devices sent IPv6 Neighbor Advertisements with the Override "
+                "flag. This is common during normal address (re)configuration and is "
+                "recorded as context; it becomes an active spoofing concern only when "
+                "two devices contest the same target address."
+            )
+            evidence = [f"{len(affected)} non-router device(s) sending NA with override flag"]
         return [Finding(
             rule_id=self.rule_id, name=self.name, category=self.category,
-            severity=self.severity,
-            description=(
-                "IPv6 Neighbor Advertisement packets with the Override flag were detected "
-                "from non-router devices. NDP is the IPv6 equivalent of ARP and has no "
-                "built-in authentication — an attacker can inject spoofed NAs to redirect "
-                "IPv6 traffic through their machine."
-            ),
+            severity=severity,
+            description=description,
             affected_devices=list(affected.values()),
-            evidence=[f"{len(affected)} non-router device(s) sending NA with override flag"],
+            evidence=evidence,
             tools=[
                 ToolRecommendation(
                     name="THC-IPv6 parasite6",
@@ -1303,7 +1471,10 @@ class DHCPv6ActivityRule:
     rule_id = "DH-004"
     name = "DHCPv6 Activity Detected — IPv6 MITM Surface"
     category = Category.DHCP
-    severity = Severity.HIGH
+    # DHCPv6 client traffic is normal on any IPv6 LAN; presence is
+    # inventory. The MITM risk is the IPv6 stack being enabled, not an
+    # active attack -- surface it as INFO context.
+    severity = Severity.INFO
 
     def evaluate(self, ctx: AnalysisContext) -> list[Finding]:
         dhcpv6_obs = ctx.observations_by_type.get("dhcpv6", [])
@@ -1389,7 +1560,10 @@ class PhantomIPRule:
     rule_id = "NI-004"
     name = "Phantom/Stale IP References Detected"
     category = Category.NETWORK_INTEL
-    severity = Severity.MEDIUM
+    # ARP requests for IPs the tool hasn't catalogued (gateways, offline
+    # or transient hosts, addresses outside the captured segment) are
+    # normal background noise -- inventory, not an exposure.
+    severity = Severity.INFO
 
     def evaluate(self, ctx: AnalysisContext) -> list[Finding]:
         known_ips: set[str] = set()
@@ -1524,7 +1698,10 @@ class VLANLeakageRule:
     rule_id = "L2-008"
     name = "VLAN Leakage — Device on Multiple Subnets"
     category = Category.LAYER2
-    severity = Severity.HIGH
+    # Routers/firewalls/switches/APs legitimately bridge subnets, so spanning
+    # multiple subnets is only suspicious for ordinary endpoints. MEDIUM
+    # because the /20 grouping is a heuristic, not proof of a VLAN leak.
+    severity = Severity.MEDIUM
 
     def evaluate(self, ctx: AnalysisContext) -> list[Finding]:
         import ipaddress
@@ -1534,6 +1711,10 @@ class VLANLeakageRule:
             raw = _parse_raw_data(obs)
             ip_str = raw.get("src_ip")
             if not ip_str or ip_str == "0.0.0.0":
+                continue
+            # Infrastructure routes between subnets by design — not a leak.
+            dev = ctx.device_map.get(obs.device_mac)
+            if dev and dev.device_type in _INFRA_DEVICE_TYPES:
                 continue
             try:
                 net = str(ipaddress.ip_network(f"{ip_str}/20", strict=False))
@@ -2306,6 +2487,10 @@ CHAIN_DEFINITIONS: list[dict] = [
         "severity": Severity.CRITICAL,
         "prerequisite_rules": ["NR-001", "NR-002"],
         "match_mode": "any",
+        # The relay half only works against Windows/SMB/AD targets. Without
+        # any on the segment, LLMNR poisoning captures nothing relayable, so
+        # don't assert this CRITICAL chain.
+        "requires_env": "windows",
         "steps": [
             {"order": 1, "description": "Run RelayKing to identify which hosts have SMB signing disabled or LDAP channel binding unenforced"},
             {"order": 2, "description": "Start Responder or Pretender to poison LLMNR/NBT-NS queries on the local subnet"},
@@ -2343,7 +2528,10 @@ CHAIN_DEFINITIONS: list[dict] = [
             "bypassing network segmentation entirely."
         ),
         "severity": Severity.CRITICAL,
-        "prerequisite_rules": ["L2-007", "L2-008"],
+        # DTP trunk hopping requires an actual DTP/trunk-negotiating switch
+        # (L2-007). A device merely appearing on multiple subnets (L2-008) is
+        # a routing/heuristic observation, not evidence DTP hopping is possible.
+        "prerequisite_rules": ["L2-007"],
         "match_mode": "any",
         "steps": [
             {"order": 1, "description": "Use Yersinia to send DTP frames and negotiate trunk mode on the switch port"},
@@ -2380,8 +2568,11 @@ CHAIN_DEFINITIONS: list[dict] = [
             "poison DNS responses to redirect all traffic."
         ),
         "severity": Severity.CRITICAL,
-        "prerequisite_rules": ["DH-001", "NR-004"],
-        "match_mode": "any",
+        # Requires an actual rogue-DHCP signal (multiple DHCP servers, DH-003)
+        # plus clients asking for WPAD (NR-004) — the exploit path. Mere DHCP
+        # presence (DH-001) or a WPAD query alone is not a rogue-DHCP chain.
+        "prerequisite_rules": ["DH-003", "NR-004"],
+        "match_mode": "custom",
         "steps": [
             {"order": 1, "description": "Deploy rogue DHCP server to assign attacker as DNS/gateway"},
             {"order": 2, "description": "Respond to DNS queries with spoofed addresses"},
@@ -2406,6 +2597,10 @@ CHAIN_DEFINITIONS: list[dict] = [
         "severity": Severity.HIGH,
         "prerequisite_rules": ["RT-001"],
         "match_mode": "any",
+        # mitm6's payoff (DHCPv6 DNS takeover -> NTLM relay) needs a
+        # Windows/AD environment. RT-001 only reaches the chain when it's a
+        # genuine rogue RA (>=2 senders) per its own gating.
+        "requires_env": "windows",
         "steps": [
             {"order": 1, "description": "Send rogue Router Advertisements to claim default gateway"},
             {"order": 2, "description": "Serve as DHCPv6 DNS server, respond with attacker IP"},
@@ -2430,6 +2625,7 @@ CHAIN_DEFINITIONS: list[dict] = [
         "severity": Severity.CRITICAL,
         "prerequisite_rules": ["SE-009", "SE-010", "SE-011", "SE-012"],
         "match_mode": "any",
+        "requires_env": "ics",
         "steps": [
             {"order": 1, "description": "Enumerate ICS devices and identify protocol versions"},
             {"order": 2, "description": "Read registers/coils to understand process variables"},
@@ -2448,6 +2644,7 @@ CHAIN_DEFINITIONS: list[dict] = [
         "severity": Severity.CRITICAL,
         "prerequisite_rules": ["NR-001", "SE-003"],
         "match_mode": "all",
+        "requires_env": "windows",
         "steps": [
             {"order": 1, "description": "Run RelayKing to validate which SMB targets have signing disabled"},
             {"order": 2, "description": "Start Responder to capture NTLMv2 authentication attempts"},
@@ -2485,8 +2682,12 @@ CHAIN_DEFINITIONS: list[dict] = [
             "then relay to SMB/LDAP/ADCS targets."
         ),
         "severity": Severity.CRITICAL,
+        # Requires an actionable rogue-DHCPv6 signal (DH-004) as the mandatory
+        # trigger, not a client-side WPAD query alone. DHCPv6 *presence* is
+        # INFO and won't seed this chain — only a genuine anomaly will.
         "prerequisite_rules": ["DH-004", "NR-004"],
-        "match_mode": "any",
+        "match_mode": "custom",
+        "requires_env": "windows",
         "steps": [
             {"order": 1, "description": "Run RelayKing to identify relay-able targets"},
             {"order": 2, "description": "Start mitm6 or Pretender to become DHCPv6 DNS server"},
@@ -2541,6 +2742,7 @@ CHAIN_DEFINITIONS: list[dict] = [
         "severity": Severity.CRITICAL,
         "prerequisite_rules": ["NR-001", "SE-018"],
         "match_mode": "all",
+        "requires_env": "windows",
         "steps": [
             {"order": 1, "description": "Run RelayKing to validate LDAP relay viability on the DC"},
             {"order": 2, "description": "Start Responder to poison LLMNR/NBT-NS queries"},
@@ -2577,7 +2779,10 @@ CHAIN_DEFINITIONS: list[dict] = [
             "then flows through the attacker."
         ),
         "severity": Severity.HIGH,
-        "prerequisite_rules": ["L2-006"],
+        # STP root-bridge takeover requires observed STP BPDUs (L2-009), not
+        # merely CDP/LLDP discovery traffic (L2-006), which every managed
+        # switch emits normally.
+        "prerequisite_rules": ["L2-009"],
         "match_mode": "any",
         "steps": [
             {"order": 1, "description": "Use Yersinia to inject superior BPDUs and claim root bridge"},
@@ -2602,17 +2807,69 @@ CHAIN_DEFINITIONS: list[dict] = [
 ]
 
 
+# Findings that evidence a Windows/SMB/AD environment (relay targets exist).
+# NetBIOS is a strong passive Windows indicator; SMB/LDAP/Kerberos/WinRM come
+# from service detection.
+_WINDOWS_ENV_RULES = frozenset({"NR-002", "SE-003", "SE-018", "SE-019", "SE-032"})
+# Findings that evidence an industrial-control environment.
+_ICS_ENV_RULES = frozenset({
+    "SE-009", "SE-010", "SE-011", "SE-012", "SE-013", "SE-014", "SE-015",
+    "SE-016", "SE-017", "SE-024",
+})
+
+
+def _detect_environments(findings: list[Finding], ctx: AnalysisContext | None) -> dict[str, bool]:
+    """Determine which attack environments the network actually supports.
+
+    Used to gate chains so we never assert an attack that isn't doable here
+    (e.g. NTLM relay with no Windows/AD targets present).
+    """
+    all_ids = {f.rule_id for f in findings}
+    windows = bool(all_ids & _WINDOWS_ENV_RULES)
+    if ctx is not None:
+        # A resolved AD domain or discovered DC is decisive Windows/AD evidence.
+        windows = windows or bool(getattr(ctx, "domain", None)) or bool(getattr(ctx, "dc_ip", None))
+    return {
+        "windows": windows,
+        "ics": bool(all_ids & _ICS_ENV_RULES),
+    }
+
+
 def build_chains(findings: list[Finding], ctx: AnalysisContext | None = None) -> list[AttackChain]:
-    """Build attack chains from findings that match prerequisites."""
-    finding_ids = {f.rule_id for f in findings}
-    finding_map = {f.rule_id: f for f in findings}
+    """Build attack chains from findings that match prerequisites.
+
+    Only *actionable* findings (severity MEDIUM or higher) seed chains.
+    INFO/LOW findings are inventory/context — e.g. mDNS present, a single
+    router's RAs, LLDP from the local switch — and must not, on their own,
+    assemble alarming multi-step MITM/takeover chains.
+    """
+    actionable = [
+        f for f in findings
+        if _SEVERITY_RANK.get(str(getattr(f.severity, "value", f.severity)), 0)
+        >= _SEVERITY_RANK["medium"]
+    ]
+    finding_ids = {f.rule_id for f in actionable}
+    finding_map = {f.rule_id: f for f in actionable}
     chains: list[AttackChain] = []
 
     interface = ctx.interface if ctx else "eth0"
 
+    # Environment feasibility. A chain only represents a *doable* attack when
+    # the network actually supports it: NTLM-relay / domain chains need
+    # Windows/SMB/AD targets; ICS chains need industrial protocols. Detect
+    # these from ALL findings (not just actionable) plus derived context, so
+    # we don't assert, say, "SMB Relay -> Domain Compromise" on an all-IoT
+    # network with no Windows hosts to relay to.
+    env_present = _detect_environments(findings, ctx)
+
     for defn in CHAIN_DEFINITIONS:
         prereqs = set(defn["prerequisite_rules"])
         mode = defn.get("match_mode", "any")
+
+        # Skip chains whose required environment isn't actually present.
+        req_env = defn.get("requires_env")
+        if req_env and not env_present.get(req_env, False):
+            continue
 
         if mode == "any":
             matched = bool(prereqs & finding_ids)
@@ -2735,7 +2992,10 @@ class IoTDefaultCredentialRiskRule:
     rule_id = "CRED-002"
     name = "IoT Default Credential Risk"
     category = Category.SERVICE_EXPLOIT
-    severity = Severity.MEDIUM
+    # This is a device-class advisory (you own IoT gear), not evidence that
+    # any specific device actually has weak creds — keep it as INFO context
+    # so it doesn't compete with findings backed by observed weaknesses.
+    severity = Severity.INFO
 
     _RISKY_TYPES = {
         "ip_camera": "IP cameras frequently have admin/admin or similar defaults",
@@ -2787,12 +3047,19 @@ class MultiSubnetDeviceRule:
     rule_id = "NET-007"
     name = "Device Visible Across Subnets"
     category = Category.NETWORK_INTEL
-    severity = Severity.MEDIUM
+    # Infrastructure spans subnets by design; for ordinary endpoints this is
+    # context (multi-homing, a roamed device, or the monitoring host), not a
+    # confirmed pivot — surface as INFO.
+    severity = Severity.INFO
 
     def evaluate(self, ctx: AnalysisContext) -> list[Finding]:
         import ipaddress as _ipaddress
         mac_subnets: dict[str, set[str]] = {}
         for mac, obs_list in ctx.observations_by_mac.items():
+            dev = ctx.device_map.get(mac)
+            # Routers/switches/firewalls legitimately bridge subnets.
+            if dev and dev.device_type in _INFRA_DEVICE_TYPES:
+                continue
             for obs in obs_list:
                 raw = _parse_raw_data(obs)
                 src_ip = raw.get("src_ip")

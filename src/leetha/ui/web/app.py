@@ -1201,201 +1201,22 @@ _attack_surface_cache_ts = 0.0
 _ATTACK_SURFACE_TTL = 30.0  # seconds
 
 
-async def _build_context_from_store(store, data_dir, interface=None,
-                                    attacker_ip=None, interface_type="local"):
-    """Build an AnalysisContext from the new Store tables (verdicts/hosts/sightings).
-
-    This replaces the old _build_context which reads from the legacy 'devices' table
-    that the new pipeline no longer populates.
-    """
-    from datetime import datetime, timezone
-    from leetha.analysis.attack_surface import AnalysisContext
-    from leetha.store.models import Device, Observation
-
-    # Build Device objects from ALL hosts (including those without verdicts)
-    host_count = await store.hosts.count()
-    all_hosts = await store.hosts.find_all(limit=max(host_count, 1000))
-    devices = []
-    for h in all_hosts:
-        v = await store.verdicts.find_by_addr(h.hw_addr)
-        devices.append(Device(
-            mac=h.hw_addr,
-            ip_v4=h.ip_addr,
-            ip_v6=h.ip_v6,
-            manufacturer=v.vendor if v else None,
-            device_type=v.category if v else None,
-            os_family=v.platform if v else None,
-            os_version=v.platform_version if v else None,
-            hostname=v.hostname if v else None,
-            confidence=v.certainty if v else 0,
-            first_seen=h.discovered_at if h.discovered_at else datetime.now(timezone.utc),
-            last_seen=h.last_active if h.last_active else datetime.now(timezone.utc),
-            alert_status=h.disposition or "new",
-            is_randomized_mac=h.mac_randomized,
-            correlated_mac=h.real_hw_addr,
-        ))
-    device_map = {d.mac: d for d in devices}
-
-    # Build observations from sightings
-    observations_by_mac: dict[str, list] = {}
-    observations_by_type: dict[str, list] = {}
-    for d in devices:
-        sightings = await store.sightings.for_host(d.mac, limit=500)
-        obs_list = []
-        for s in sightings:
-            obs = Observation(
-                device_mac=s.hw_addr,
-                source_type=s.source,
-                raw_data=json.dumps(s.payload) if isinstance(s.payload, dict) else str(s.payload or ""),
-                match_result="{}",
-                confidence=int(s.certainty * 100) if s.certainty <= 1.0 else int(s.certainty),
-                timestamp=s.timestamp,
-                interface=s.interface,
-                network=s.network,
-            )
-            obs_list.append(obs)
-            observations_by_type.setdefault(s.source, []).append(obs)
-        observations_by_mac[d.mac] = obs_list
-
-    # Probe results from old DB (still stored there)
-    probe_results = []
-    probe_by_mac: dict[str, list[dict]] = {}
-    probe_by_service: dict[str, list[dict]] = {}
-    try:
-        probe_results = await app_instance.db.list_probe_targets(status="completed")
-        for p in probe_results:
-            probe_by_mac.setdefault(p["mac"], []).append(p)
-            if p.get("result"):
-                try:
-                    result = json.loads(p["result"]) if isinstance(p["result"], str) else p["result"]
-                    svc = result.get("service", "")
-                    if svc:
-                        probe_by_service.setdefault(svc, []).append(p)
-                except (json.JSONDecodeError, TypeError, AttributeError):
-                    pass
-    except Exception:
-        pass
-
-    # Network context
-    gateway_ip = None
-    dc_ip = None
-    for d in devices:
-        if d.device_type in ("router", "gateway", "firewall") and d.ip_v4:
-            gateway_ip = gateway_ip or d.ip_v4
-
-    # Domain from DNS observations
-    domain = None
-    for obs in observations_by_type.get("dns", []):
-        try:
-            raw = json.loads(obs.raw_data) if isinstance(obs.raw_data, str) else {}
-        except (json.JSONDecodeError, TypeError):
-            raw = {}
-        qname = raw.get("query_name", "").lower().rstrip(".")
-        for tld in (".local", ".corp", ".internal", ".lan"):
-            if qname.endswith(tld):
-                parts = qname.split(".")
-                if len(parts) >= 2:
-                    domain = ".".join(parts[-2:])
-                    break
-        if domain:
-            break
-
-    # Exclusions
-    exclusions = []
-    if data_dir:
-        exc_file = data_dir / "attack_surface_exclusions.json"
-        if exc_file.exists():
-            try:
-                exc_data = json.loads(exc_file.read_text())
-                exclusions = exc_data.get("exclusions", [])
-            except (json.JSONDecodeError, OSError):
-                pass
-
-    return AnalysisContext(
-        devices=devices,
-        observations_by_mac=observations_by_mac,
-        observations_by_type=observations_by_type,
-        probe_results=probe_results,
-        probe_by_mac=probe_by_mac,
-        probe_by_service=probe_by_service,
-        device_map=device_map,
-        data_dir=data_dir,
-        interface=interface or "eth0",
-        interface_type=interface_type,
-        gateway_ip=gateway_ip,
-        domain=domain,
-        attacker_ip=attacker_ip,
-        dc_ip=dc_ip,
-        exclusions=exclusions,
-    )
-
-
 async def _get_cached_attack_surface():
     global _attack_surface_cache, _attack_surface_cache_ts
     now = _time.monotonic()
     if _attack_surface_cache is None or (now - _attack_surface_cache_ts) > _ATTACK_SURFACE_TTL:
-        from datetime import datetime, timezone
-        from leetha.analysis.attack_surface import (
-            build_chains, _build_summary,
-        )
         data_dir = getattr(app_instance.config, "data_dir", None)
         interface = getattr(app_instance.config, "interface", None)
 
-        # Primary path: build context from new Store and run analysis rules
+        # Single shared analysis path: analyze_attack_surface() builds its
+        # context from the live hosts/verdicts/sightings tables and runs all
+        # passive + service rules and chain assembly. (Previously the web UI
+        # duplicated this with a separate, divergent builder.)
         try:
-            ctx = await _build_context_from_store(
-                app_instance.store, data_dir, interface=interface)
-
-            # Import and run all attack surface rules
-            from leetha.analysis.attack_surface import (
-                UnencryptedProtocolRule, IoTDefaultCredentialRiskRule,
-                MultiSubnetDeviceRule, LLMNRDetectedRule, NetBIOSDetectedRule,
-                MDNSDetectedRule, WPADDetectedRule, ARPActivityRule,
-                ARPDuplicateIPRule, GratuitousARPRule, DHCPStarvationRiskRule,
-                DHCPAnomalyRule, RouterAdvertisementRule, RoutingProtocolProbeRule,
-                TLSWeakVersionRule, HTTPWithoutTLSRule, UPnPDetectedRule,
-                InternalDNSQueriesRule, MultipleGatewaysRule, NDPSpoofingRiskRule,
-                MACDiversityRule, DiscoveryProtocolRule, MultipleDHCPServersRule,
-                DHCPv6ActivityRule, ICMPRedirectRiskRule, PhantomIPRule,
-                VLANHoppingDTPRule, VLANLeakageRule, STPManipulationRiskRule,
-                ServiceExploitEvaluator,
-            )
-
-            all_findings = []
-            passive_rules = [
-                UnencryptedProtocolRule(), IoTDefaultCredentialRiskRule(),
-                MultiSubnetDeviceRule(), LLMNRDetectedRule(), NetBIOSDetectedRule(),
-                MDNSDetectedRule(), WPADDetectedRule(), ARPActivityRule(),
-                ARPDuplicateIPRule(), GratuitousARPRule(), DHCPStarvationRiskRule(),
-                DHCPAnomalyRule(), RouterAdvertisementRule(), RoutingProtocolProbeRule(),
-                TLSWeakVersionRule(), HTTPWithoutTLSRule(), UPnPDetectedRule(),
-                InternalDNSQueriesRule(), MultipleGatewaysRule(), NDPSpoofingRiskRule(),
-                MACDiversityRule(), DiscoveryProtocolRule(), MultipleDHCPServersRule(),
-                DHCPv6ActivityRule(), ICMPRedirectRiskRule(), PhantomIPRule(),
-                VLANHoppingDTPRule(), VLANLeakageRule(), STPManipulationRiskRule(),
-            ]
-            for rule in passive_rules:
-                try:
-                    all_findings.extend(rule.evaluate(ctx))
-                except Exception:
-                    pass
-
-            svc_eval = ServiceExploitEvaluator()
-            try:
-                all_findings.extend(svc_eval.evaluate(ctx))
-            except Exception:
-                pass
-
-            chains = build_chains(all_findings, ctx)
-            summary = _build_summary(all_findings, chains)
-            _attack_surface_cache = {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "findings": [f.to_dict() for f in all_findings],
-                "chains": [c.to_dict() for c in chains],
-                "summary": summary,
-            }
+            from leetha.analysis.attack_surface import analyze_attack_surface
+            _attack_surface_cache = await analyze_attack_surface(
+                app_instance.db, data_dir=data_dir, interface=interface)
         except Exception:
-            # Final fallback
             _attack_surface_cache = {"findings": [], "chains": [], "summary": {}}
         _attack_surface_cache_ts = now
     return _attack_surface_cache

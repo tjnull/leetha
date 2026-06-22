@@ -46,6 +46,28 @@ def _extract_oui_prefix(mac: str) -> str:
     return mac.replace(":", "").replace("-", "").upper()[:6]
 
 
+def _is_locally_administered(mac: str) -> bool:
+    """True if the MAC has the locally-administered (U/L) bit set.
+
+    Such addresses (randomized/privacy MACs, many VM/virtual NICs) are never
+    registered in the IEEE OUI database by design, so checking them for "OUI
+    coverage" or manufacturer agreement always yields a false positive. This
+    is derived from the address itself, so it works even when the stored
+    ``is_randomized_mac`` flag wasn't populated.
+    """
+    cleaned = mac.replace(":", "").replace("-", "").replace(".", "")
+    try:
+        first_octet = int(cleaned[:2], 16)
+    except (ValueError, IndexError):
+        return False
+    return bool(first_octet & 0x02)
+
+
+def _skip_for_oui(dev) -> bool:
+    """Devices to exclude from OUI-based checks (no IEEE registration)."""
+    return bool(getattr(dev, "is_randomized_mac", False)) or _is_locally_administered(dev.mac)
+
+
 # ---------------------------------------------------------------------------
 # Individual checks
 # ---------------------------------------------------------------------------
@@ -64,7 +86,7 @@ async def check_oui_coverage(db: Database, cache_dir: Path) -> dict:
     issues: list[dict] = []
 
     for dev in all_devices:
-        if dev.is_randomized_mac:
+        if _skip_for_oui(dev):
             continue
 
         pfx = _extract_oui_prefix(dev.mac)
@@ -99,7 +121,7 @@ async def check_manufacturer_agreement(db: Database, cache_dir: Path) -> dict:
     issues: list[dict] = []
 
     for dev in all_devices:
-        if dev.is_randomized_mac or not dev.manufacturer:
+        if _skip_for_oui(dev) or not dev.manufacturer:
             continue
 
         pfx = _extract_oui_prefix(dev.mac)

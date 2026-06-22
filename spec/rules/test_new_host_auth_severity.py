@@ -43,13 +43,38 @@ def _verdict() -> Verdict:
 
 
 @pytest.mark.asyncio
-async def test_new_host_unapproved_fires_warning(db_and_store):
+async def test_new_host_unapproved_is_info_pre_baseline(db_and_store):
+    """Before any device is curated, an unapproved device is INFO inventory
+    (every device is unapproved on first deployment — don't WARNING-spam)."""
     db, store = db_and_store
     ts = datetime.now(timezone.utc)
     await db.upsert_device(Device(
         mac="aa:bb:cc:dd:ee:01", first_seen=ts, last_seen=ts,
     ))
-    # default authorization = 'unapproved'
+    # default authorization = 'unapproved', no baseline established yet
+
+    rule = NewHostRule()
+    finding = await rule.evaluate(_host(), _verdict(), store)
+    assert finding is not None
+    assert finding.severity == AlertSeverity.INFO
+    assert finding.rule == FindingRule.NEW_HOST
+
+
+@pytest.mark.asyncio
+async def test_new_host_unapproved_fires_warning_post_baseline(db_and_store):
+    """Once the operator has curated (approved/rejected) any device, a new
+    unapproved device is genuinely noteworthy → WARNING."""
+    db, store = db_and_store
+    ts = datetime.now(timezone.utc)
+    # Establish a baseline: a *different* device gets approved.
+    await db.upsert_device(Device(
+        mac="aa:bb:cc:dd:ee:99", first_seen=ts, last_seen=ts,
+    ))
+    await db.approve_device("aa:bb:cc:dd:ee:99", actor="alice")
+    # The device under test remains unapproved.
+    await db.upsert_device(Device(
+        mac="aa:bb:cc:dd:ee:01", first_seen=ts, last_seen=ts,
+    ))
 
     rule = NewHostRule()
     finding = await rule.evaluate(_host(), _verdict(), store)
@@ -89,13 +114,13 @@ async def test_new_host_rejected_fires_critical(db_and_store):
 
 
 @pytest.mark.asyncio
-async def test_new_host_no_device_row_defaults_to_warning(db_and_store):
-    """If device row hasn't been created yet, treat as unapproved (WARNING)."""
+async def test_new_host_no_device_row_is_info_pre_baseline(db_and_store):
+    """No device row yet → unapproved, and with no baseline that is INFO."""
     _db, store = db_and_store
     rule = NewHostRule()
     finding = await rule.evaluate(_host(), _verdict(), store)
     assert finding is not None
-    assert finding.severity == AlertSeverity.WARNING
+    assert finding.severity == AlertSeverity.INFO
 
 
 @pytest.mark.asyncio

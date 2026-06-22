@@ -15,6 +15,40 @@ from typing import Awaitable, Callable
 
 log = logging.getLogger(__name__)
 
+DEFAULT_PRESENCE_THRESHOLD = 300  # seconds; the stored column default
+
+# Per-category "no traffic = offline" defaults. Sleepy/battery and consumer
+# devices legitimately go quiet for long stretches, so a flat 5-minute
+# threshold makes them flap online/offline. These widen the window per type.
+_TYPE_PRESENCE_DEFAULTS: dict[str, int] = {
+    "phone": 1800, "tablet": 1800, "wearable": 3600,
+    "media_device": 1800, "media_player": 1800, "smart_speaker": 1800,
+    "streaming_device": 1800, "smart_tv": 1800, "game_console": 1800,
+    "laptop": 1200, "robot_vacuum": 3600, "printer": 3600,
+    "iot": 900, "smart_home": 900, "camera": 900,
+}
+
+# Randomized-MAC devices are privacy-rotating consumer gear (phones, etc.)
+# that sleep and reconnect under new MACs — never flap them on the short
+# default window.
+_RANDOMIZED_MIN_THRESHOLD = 1800
+
+
+def _effective_threshold(base, device_type, mac_randomized) -> int:
+    """Resolve the offline threshold for a device.
+
+    An explicit, non-default per-device threshold always wins (operator
+    intent). Otherwise apply a per-category default, and never let a
+    randomized-MAC device use less than the randomized minimum.
+    """
+    base = int(base or DEFAULT_PRESENCE_THRESHOLD)
+    if base != DEFAULT_PRESENCE_THRESHOLD:
+        return base  # operator override — respect it
+    eff = _TYPE_PRESENCE_DEFAULTS.get((device_type or "").lower(), base)
+    if mac_randomized:
+        eff = max(eff, _RANDOMIZED_MIN_THRESHOLD)
+    return eff
+
 
 @dataclass
 class PresenceTransition:
@@ -65,6 +99,8 @@ class PresenceSweeper:
                    d.offline_since AS offline_since,
                    COALESCE(d.presence_threshold_seconds, 300) AS threshold,
                    d.criticality AS criticality,
+                   d.device_type AS device_type,
+                   COALESCE(h.mac_randomized, d.is_randomized_mac, 0) AS mac_randomized,
                    (d.mac IS NULL) AS missing_device_row
             FROM hosts h
             FULL OUTER JOIN devices d ON h.hw_addr = d.mac
@@ -91,7 +127,9 @@ class PresenceSweeper:
                 continue
             if last_seen.tzinfo is None:
                 last_seen = last_seen.replace(tzinfo=timezone.utc)
-            threshold = int(row["threshold"] or 300)
+            _dtype = row["device_type"] if "device_type" in row.keys() else None
+            _rand = row["mac_randomized"] if "mac_randomized" in row.keys() else 0
+            threshold = _effective_threshold(row["threshold"], _dtype, _rand)
             age = (now - last_seen).total_seconds()
             currently_online = bool(row["is_online"])
             should_be_online = age < threshold
@@ -143,6 +181,8 @@ class PresenceSweeper:
                    d.offline_since AS offline_since,
                    COALESCE(d.presence_threshold_seconds, 300) AS threshold,
                    d.criticality AS criticality,
+                   d.device_type AS device_type,
+                   COALESCE(h.mac_randomized, d.is_randomized_mac, 0) AS mac_randomized,
                    (d.mac IS NULL) AS missing_device_row
             FROM hosts h LEFT JOIN devices d ON h.hw_addr = d.mac
             UNION
@@ -152,6 +192,8 @@ class PresenceSweeper:
                    d.offline_since,
                    COALESCE(d.presence_threshold_seconds, 300) AS threshold,
                    d.criticality,
+                   d.device_type AS device_type,
+                   COALESCE(h.mac_randomized, d.is_randomized_mac, 0) AS mac_randomized,
                    0 AS missing_device_row
             FROM devices d LEFT JOIN hosts h ON h.hw_addr = d.mac
             WHERE h.hw_addr IS NULL

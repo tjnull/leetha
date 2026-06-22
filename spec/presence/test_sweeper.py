@@ -195,3 +195,53 @@ async def test_devices_only_still_swept_when_no_host_row(env):
     trans = await sweeper.sweep_once()
     assert len(trans) == 1
     assert trans[0].new_state == "offline"
+
+
+# ---------------------------------------------------------------------------
+# Per-device-type + randomized-MAC presence thresholds (audit fix)
+# ---------------------------------------------------------------------------
+
+from leetha.presence.sweeper import _effective_threshold, DEFAULT_PRESENCE_THRESHOLD
+
+
+def test_effective_threshold_type_default():
+    # Sleepy device type widens the default 300s window.
+    assert _effective_threshold(DEFAULT_PRESENCE_THRESHOLD, "media_device", 0) == 1800
+
+
+def test_effective_threshold_randomized_floor():
+    # A randomized-MAC device never uses less than the randomized minimum.
+    assert _effective_threshold(DEFAULT_PRESENCE_THRESHOLD, "computer", 1) >= 1800
+
+
+def test_effective_threshold_operator_override_wins():
+    # A non-default per-device value is an explicit operator choice — respect it.
+    assert _effective_threshold(120, "media_device", 1) == 120
+
+
+@pytest.mark.asyncio
+async def test_sleepy_device_does_not_flap_within_type_window(env):
+    db, store = env
+    now = datetime.now(timezone.utc)
+    quiet = now - timedelta(seconds=600)  # > 300 default, < 1800 media default
+    await db.upsert_device(_dev("aa:bb:cc:dd:ee:42", quiet, device_type="media_device"))
+    await store.hosts.upsert(_host("aa:bb:cc:dd:ee:42", quiet))
+
+    sweeper = PresenceSweeper(db, now_fn=lambda: now)
+    trans = await sweeper.sweep_once()
+    assert trans == []  # still within the media_device window → no offline flap
+
+
+@pytest.mark.asyncio
+async def test_randomized_mac_device_does_not_flap(env):
+    db, store = env
+    now = datetime.now(timezone.utc)
+    quiet = now - timedelta(seconds=600)
+    await db.upsert_device(_dev("fa:7c:26:59:f1:09", quiet, is_randomized_mac=True))
+    h = Host(hw_addr="fa:7c:26:59:f1:09", discovered_at=quiet, last_active=quiet,
+             disposition="new", mac_randomized=True)
+    await store.hosts.upsert(h)
+
+    sweeper = PresenceSweeper(db, now_fn=lambda: now)
+    trans = await sweeper.sweep_once()
+    assert trans == []  # randomized-MAC consumer device → no 5-minute flap

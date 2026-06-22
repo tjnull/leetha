@@ -28,6 +28,9 @@ GRATUITOUS_BURST_LIMIT_INFRA = 50     # higher threshold for infrastructure devi
 MAC_OSCILLATION_WINDOW = 300          # seconds
 MAC_OSCILLATION_CHANGE_LIMIT = 3      # transitions
 RATE_LIMIT_INTERVAL = 300             # seconds between duplicate alerts
+DRIFT_FLIPFLOP_WINDOW = 1800          # seconds; suppress drift that reverts
+                                      # to a recently-seen identity (fusion
+                                      # oscillation, not a real change)
 
 _INFRA_TYPES = {"router", "switch", "gateway", "access_point", "firewall",
                 "load_balancer", "Router", "UniFi Switch", "UniFi AP"}
@@ -50,6 +53,56 @@ _KNOWN_OUI_VENDOR_PAIRS: dict[str, set[str]] = {
 }
 
 
+# OS / software vendors that get attributed as a device's "manufacturer" from
+# fingerprinting (OS, TLS, UA, DHCP) but never make the NIC. For these, the
+# NIC's OUI vendor differing from the identified manufacturer is EXPECTED
+# (e.g. an ASUS or Intel NIC in a machine running Windows → manufacturer
+# "Microsoft"), so an OUI-vs-manufacturer mismatch is not a spoofing signal.
+_OS_DERIVED_VENDORS: frozenset[str] = frozenset({
+    "microsoft", "canonical", "ubuntu", "debian", "red hat", "redhat",
+    "fedora", "centos", "suse", "linux", "google", "android", "alpine",
+    "vmware", "citrix", "proxmox", "openbsd", "freebsd", "netbsd",
+})
+
+# Device categories whose identified "manufacturer" reflects the OS/platform
+# rather than the hardware brand. The OUI (hardware) vendor legitimately
+# differs from the OS vendor on these, so the OUI-mismatch check is skipped.
+_OS_DERIVED_CATEGORIES: frozenset[str] = frozenset({
+    "computer", "laptop", "desktop", "workstation", "server",
+    "virtual_machine", "vm", "hypervisor",
+})
+
+
+def _is_os_derived_vendor(name: str | None) -> bool:
+    """True when a manufacturer label is really an OS/software vendor."""
+    if not name:
+        return False
+    low = name.lower()
+    return any(v in low for v in _OS_DERIVED_VENDORS)
+
+
+def _is_laa(mac: str | None) -> bool:
+    """True if the MAC has the locally-administered (U/L) bit set.
+
+    Randomized/privacy MACs (and many virtual NICs) set this bit. ARP
+    churn between such addresses is usually benign privacy rotation rather
+    than spoofing.
+    """
+    if not mac:
+        return False
+    cleaned = mac.replace(":", "").replace("-", "").replace(".", "")
+    try:
+        return bool(int(cleaned[:2], 16) & 0x02)
+    except (ValueError, IndexError):
+        return False
+
+
+# A real IP conflict means two MACs claim the same IP at roughly the same
+# time. If the previous claimant was last seen longer ago than this, the IP
+# was almost certainly reassigned (DHCP lease churn), not contested.
+IP_CONFLICT_ACTIVE_WINDOW = 120  # seconds
+
+
 class AddressVerifier:
     """Monitors ARP traffic and device updates to surface spoofing indicators."""
 
@@ -63,6 +116,10 @@ class AddressVerifier:
         self._gratuitous_timestamps: dict[str, deque] = defaultdict(deque)  # mac -> deque of timestamps
         self._oscillation_log: dict[str, list[tuple[str, float]]] = defaultdict(list)  # ip -> [(mac, ts)]
         self._rate_limiter: dict[str, float] = {}               # composite key -> last fire time
+        # mac -> deque of (identity_tuple, ts) for fingerprint-drift flip-flop
+        # suppression (don't re-alert when a device reverts to a recently-seen
+        # identity, which is fusion oscillation rather than a real change).
+        self._identity_history: dict[str, deque] = defaultdict(deque)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -171,13 +228,22 @@ class AddressVerifier:
                         f"Trusted binding violation: {src_ip} bound to "
                         f"{pinned_label} but {src_label} is claiming it"
                     ),
+                    rule="gateway_impersonation",
                 ))
 
         # --- Check 2: IP conflict (only when no trusted binding exists) ---
         prior = self._arp_timeline.get(src_ip)
         if prior and prior["mac"] != src_mac and not pinned_mac:
+            # Benign-churn guards:
+            #  * stale prior claim → DHCP reassignment, not a live conflict;
+            #  * both MACs locally-administered → privacy/randomized rotation.
+            prior_age = time.monotonic() - prior.get("last_seen", 0.0)
+            both_randomized = _is_laa(src_mac) and _is_laa(prior["mac"])
+            recent_conflict = prior_age <= IP_CONFLICT_ACTIVE_WINDOW
             rl_key = f"ip_conflict:{src_ip}"
-            if self._rate_limit_ok(rl_key) and not self.is_suppressed(src_mac, src_ip, "ip_conflict"):
+            if (recent_conflict and not both_randomized
+                    and self._rate_limit_ok(rl_key)
+                    and not self.is_suppressed(src_mac, src_ip, "ip_conflict")):
                 src_label = await self._describe_host(src_mac, src_ip)
                 prior_label = await self._describe_host(prior["mac"], src_ip)
                 findings.append(Alert(
@@ -188,6 +254,7 @@ class AddressVerifier:
                         f"IP conflict on {src_ip}: claimed by "
                         f"{prior_label} and {src_label}"
                     ),
+                    rule="addr_conflict",
                 ))
 
         # --- Check 3: gratuitous ARP burst ---
@@ -223,6 +290,7 @@ class AddressVerifier:
                             f"Gratuitous ARP flood from {src_label}: "
                             f"{len(ts_queue)} in {GRATUITOUS_BURST_WINDOW}s"
                         ),
+                        rule="arp_spoofing",
                     ))
 
         # --- Check 4: MAC oscillation on this IP ---
@@ -253,9 +321,24 @@ class AddressVerifier:
         )
 
         if change_count >= MAC_OSCILLATION_CHANGE_LIMIT:
+            seen_macs = {m for m, _ in osc_entries}
+            # Benign-churn guards:
+            #  * every oscillating MAC is locally-administered → a single
+            #    privacy/randomized device reusing the IP, not spoofing;
+            #  * the claimant is infrastructure → VRRP/HSRP failover on a
+            #    shared virtual IP, which legitimately moves between MACs.
+            all_randomized = bool(seen_macs) and all(_is_laa(m) for m in seen_macs)
+            is_infra_device = False
+            try:
+                dev_record = await self._db.get_device(src_mac)
+                if dev_record and dev_record.device_type in _INFRA_TYPES:
+                    is_infra_device = True
+            except Exception:
+                pass
             rl_key = f"flip_flop:{src_ip}"
-            if self._rate_limit_ok(rl_key) and not self.is_suppressed(src_mac, src_ip, "flip_flop"):
-                seen_macs = {m for m, _ in osc_entries}
+            if (not all_randomized and not is_infra_device
+                    and self._rate_limit_ok(rl_key)
+                    and not self.is_suppressed(src_mac, src_ip, "flip_flop")):
                 findings.append(Alert(
                     device_mac=src_mac,
                     alert_type=AlertType.SPOOFING,
@@ -265,6 +348,7 @@ class AddressVerifier:
                         f"in {MAC_OSCILLATION_WINDOW}s between "
                         f"{', '.join(sorted(seen_macs))}"
                     ),
+                    rule="arp_spoofing",
                 ))
 
         # Record latest observation
@@ -338,7 +422,32 @@ class AddressVerifier:
             if not is_infra and prev["os_family"] and device.os_family and prev["os_family"] != device.os_family:
                 deltas.append(f"OS: {prev['os_family']} \u2192 {device.os_family}")
             if prev["manufacturer"] and device.manufacturer and prev["manufacturer"] != device.manufacturer:
-                deltas.append(f"manufacturer: {prev['manufacturer']} \u2192 {device.manufacturer}")
+                # Ignore manufacturer "drift" that is really the fusion engine
+                # alternating between the hardware/OUI vendor and an OS-derived
+                # vendor (e.g. ASUS <-> Microsoft on an ASUS PC running
+                # Windows). One side OS-derived + the other not = facet flip,
+                # not a genuine manufacturer change.
+                _prev_os = _is_os_derived_vendor(prev["manufacturer"])
+                _cur_os = _is_os_derived_vendor(device.manufacturer)
+                if _prev_os != _cur_os:
+                    pass  # OS-vendor <-> hardware-vendor churn \u2014 not drift
+                else:
+                    deltas.append(
+                        f"manufacturer: {prev['manufacturer']} \u2192 {device.manufacturer}")
+
+            # Flip-flop suppression: if this identity was already seen recently
+            # for this MAC, the device is oscillating between identities (fusion
+            # instability), not genuinely changing \u2014 don't alert.
+            if deltas:
+                now_mono = time.monotonic()
+                ident = (device.manufacturer, device.os_family)
+                history = self._identity_history[device.mac]
+                while history and (now_mono - history[0][1]) > DRIFT_FLIPFLOP_WINDOW:
+                    history.popleft()
+                reverting = any(prev_ident == ident for prev_ident, _ in history)
+                history.append((ident, now_mono))
+                if reverting:
+                    deltas = []  # seen this identity before \u2014 oscillation
 
             if deltas:
                 rl_key = f"fp_drift:{device.mac}"
@@ -357,14 +466,26 @@ class AddressVerifier:
                             f"Fingerprint drift on {host_label}: "
                             + ", ".join(deltas)
                         ),
+                        rule="fingerprint_drift",
                     ))
 
         # --- Check 6: OUI vs behavioural manufacturer mismatch ---
+        # Only meaningful for appliances/IoT where the brand IS the hardware
+        # maker. For general-purpose computers (and OS-derived manufacturer
+        # labels like "Microsoft"), the NIC vendor and the OS vendor are
+        # different companies by design — not spoofing. Skip those.
+        _dtype = (getattr(device, "device_type", "") or "").lower().replace(" ", "_")
+        _mfg_lc = (device.manufacturer or "").lower()
+        _os_derived = (
+            _dtype in _OS_DERIVED_CATEGORIES
+            or any(v in _mfg_lc for v in _OS_DERIVED_VENDORS)
+        )
         if (
             oui_vendor
             and device.manufacturer
             and device.confidence is not None and device.confidence >= 60
             and not device.is_randomized_mac
+            and not _os_derived
         ):
             oui_norm = oui_vendor.lower()
             mfg_norm = device.manufacturer.lower()
@@ -392,6 +513,7 @@ class AddressVerifier:
                             f"OUI mismatch on {host_label}: NIC vendor "
                             f"'{oui_vendor}' but identified as '{device.manufacturer}'"
                         ),
+                        rule="oui_mismatch",
                     ))
 
         # --- Check 7: Explicit MAC spoofing detection ---
@@ -440,6 +562,7 @@ class AddressVerifier:
                             f"Possible MAC spoofing on {host_label}: {detail}. "
                             f"A different device may be using this MAC address."
                         ),
+                        rule="mac_spoofing",
                     ))
 
         # Persist snapshot

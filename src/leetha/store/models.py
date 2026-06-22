@@ -278,6 +278,10 @@ class Alert:
     id: int | None = None
     timestamp: datetime = field(default_factory=lambda: datetime.now(_tz.utc))
     acknowledged: bool = False
+    # Optional precise finding-rule name (a FindingRule value string). Lets a
+    # detector that emits several distinct checks under one AlertType tell the
+    # persistence layer which specific rule fired, instead of collapsing them.
+    rule: str | None = None
 
 
 # ── New domain types for leetha architecture ──
@@ -293,6 +297,13 @@ class FindingRule(StrEnum):
     DHCP_ANOMALY = "dhcp_anomaly"
     IDENTITY_SHIFT = "identity_shift"
     BEHAVIORAL_DRIFT = "behavioral_drift"
+    # Spoofing / drift detections split out from the catch-all identity_shift
+    # so analysts can triage each kind distinctly.
+    OUI_MISMATCH = "oui_mismatch"
+    FINGERPRINT_DRIFT = "fingerprint_drift"
+    MAC_SPOOFING = "mac_spoofing"
+    ARP_SPOOFING = "arp_spoofing"
+    GATEWAY_IMPERSONATION = "gateway_impersonation"
     SENSOR_CONNECT = "sensor_connect"
     SENSOR_DISCONNECT = "sensor_disconnect"
     # Phase A.4 — presence rules
