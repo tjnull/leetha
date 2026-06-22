@@ -146,6 +146,12 @@ Leetha reads `LEETHA_*` environment variables as defaults for its CLI flags, so 
 | `LEETHA_TLS_CERT` | `--tls-cert`    | auto-generated   |
 | `LEETHA_TLS_KEY`  | `--tls-key`     | auto-generated   |
 | `LEETHA_AUTH`     | `--auth` / `--no-auth` | auto (on for non-loopback binds) |
+| `LEETHA_LOG_LEVEL`| `--log-level`   | `INFO`           |
+
+Logs are written to `<data_dir>/leetha.log` (rotating, 5 MB × 3 files) — by
+default `~/.leetha/leetha.log`. Nothing is printed to the terminal so the
+interactive console stays clean; pass `--log-console` to also mirror
+WARNING+ records to stderr.
 
 Examples:
 
@@ -319,14 +325,13 @@ Leetha passively captures service banners from observed TCP traffic without send
 
 | Source | Records | Data Provided |
 |--------|---------|---------------|
-| Huginn-Muninn MAC Vendors | 10.1M | MAC to vendor/device mapping |
-| Huginn DHCP Vendors | 425K | DHCP vendor class identifiers |
-| Huginn DHCP Signatures | 368K | DHCP option fingerprints |
-| Huginn-Muninn Devices | 116K | Device profiles (model, category, OS) |
-| IEEE OUI | 86K+ | MAC manufacturer lookup |
+| Huginn DHCP Vendors | 446K | DHCP vendor class identifiers |
+| Huginn DHCP Signatures | 456K | DHCP option fingerprints |
+| Huginn-Muninn Devices | 119K | Device profiles (model, category, OS) |
+| IEEE OUI | 88K+ | MAC manufacturer lookup (authoritative MAC→vendor source) |
+| IANA Enterprise Numbers | 66K | SNMP/protocol enterprise OIDs |
 | Huginn DHCPv6 Enterprise | 58K | DHCPv6 enterprise identifiers |
-| IANA Enterprise Numbers | 50K+ | SNMP/protocol enterprise OIDs |
-| Huginn DHCPv6 | 40K | DHCPv6 fingerprints |
+| Huginn DHCPv6 | 1.6K | DHCPv6 fingerprints |
 | JA3 TLS Fingerprints | Database | TLS client identification with matching |
 | JA4+ TLS Fingerprints | Database | Modern TLS client identification with matching |
 | p0f TCP Signatures | Database | TCP/IP stack OS fingerprinting |

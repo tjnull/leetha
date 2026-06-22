@@ -5,6 +5,36 @@ All notable changes to Leetha will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Restored 5 broken Huginn-Muninn feeds.** DHCP Signatures, DHCP
+  Vendors, DHCPv6 Signatures, DHCPv6 Enterprise, and MAC Vendors were
+  404ing because the registry pointed at non-existent renamed/split
+  paths. Re-pinned to the filenames that actually exist upstream
+  (`dhcp_signature.json`, `dhcp_vendor.json`, `dhcp6_*.json`,
+  `mac_vendor_pNN_cM.json`), with a live-URL test guarding regressions.
+- **Interactive console no longer corrupts the prompt with log output.**
+  leetha configured no logging handlers, so Python's lastResort handler
+  dumped WARNING+ records to stderr — landing on top of the REPL prompt
+  (notably the async "sensor listener disabled" line). Logs now go to a
+  rotating `<data_dir>/leetha.log` (configurable via `--log-level` /
+  `LEETHA_LOG_LEVEL`, mirror to stderr with `--log-console`). The CA-not-
+  initialized message dropped from WARNING to INFO.
+- **Capture privilege check happens before app construction.** Selecting
+  an interface without raw-socket privileges no longer spins up (and
+  immediately tears down) a throwaway app + sensor listener before the
+  sudo re-exec.
+
+### Removed
+- **Dropped the `huginn_mac_vendors` feed.** Its upstream export was
+  99.7% `Unknown MAC Vendor (xxxxxx)` placeholder rows and added only 5
+  real vendors over the IEEE OUI Master Database, at a 700 MB+ download /
+  multi-GB resident cost — and it fabricated bogus "Unknown MAC Vendor"
+  matches for unassigned OUIs. MAC-to-vendor resolution now relies solely
+  on the authoritative IEEE OUI registry. Removed from the registry, sync
+  pipeline, lookup path, web UI source list, and docs.
+
 ## [1.3.0] - 2026-05-23 — Fingerprint Coverage, Parallel Sync & Performance
 
 Expanded device-fingerprint coverage, parallel feed syncing, and a set
