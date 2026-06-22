@@ -205,7 +205,12 @@ async def start_sensor_listener(
                 ssl_ctx.load_verify_locations(str(ca_dir / "ca.crt"))
                 ssl_ctx.verify_mode = ssl.CERT_REQUIRED
             except CANotInitialized:
-                log.warning("CA not initialized — sensor listener disabled (build a sensor first)")
+                # Expected state until the operator builds a sensor; this is
+                # informational, not a warning. Logging it at WARNING made it
+                # leak onto the interactive console via the root lastResort
+                # handler (and land on top of the REPL prompt, since this
+                # runs in a background task).
+                log.info("sensor listener disabled — no CA yet (run `leetha remote ca init` / build a sensor first)")
                 return
 
             _ws_server = await serve(

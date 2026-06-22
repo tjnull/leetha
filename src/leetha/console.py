@@ -931,24 +931,27 @@ class LeethaConsole:
         ]
         names = ", ".join(f"[cyan]{i.name}[/cyan]" for i in self.interfaces)
 
+        # Capture needs raw-socket privileges. Check BEFORE building the app
+        # so we don't spin up (and immediately tear down) a throwaway app +
+        # sensor listener — which emitted a spurious "sensor listener
+        # disabled" log line — just to discover we need sudo.
+        from leetha.platform import has_capture_privilege
+        if not has_capture_privilege():
+            self._warn("Capture requires elevated privileges — re-launching with sudo")
+            self._reexec_under_sudo()
+            return  # unreachable — execvp replaces the process
+
         # Auto-start capture after selecting interfaces
         self.app = LeethaApp(interfaces=self.interfaces)
         await self.app.start()
 
-        # start() defers capture to start_capture() which checks privileges.
-        # If capture didn't actually start, re-exec under sudo.
+        # Privilege check passed but capture still failed (e.g. interface
+        # down) — sudo won't help, so report it rather than re-exec looping.
         if not self.app.capture_engine._workers:
             await self.app.stop()
             self.app = None
-            self._warn("Capture requires elevated privileges — re-launching with sudo")
-            import os
-            import sys
-            leetha_bin = os.path.abspath(sys.argv[0])
-            iface_args = []
-            for iface in self.interfaces:
-                iface_args.extend(["-i", iface.name])
-            os.execvp("sudo", ["sudo", sys.executable, leetha_bin] + iface_args)
-            return  # unreachable — execvp replaces the process
+            self._error("Capture failed to start on the selected interface(s)")
+            return
 
         self._success(f"Capture started on {names}")
         self.console.print()
@@ -987,23 +990,38 @@ class LeethaConsole:
             self._error("No interfaces selected")
             self._show_interface_hint()
             return False
+        # Re-exec under sudo up front if we lack capture privileges, rather
+        # than starting a throwaway app just to tear it back down.
+        from leetha.platform import has_capture_privilege
+        if not has_capture_privilege():
+            self._warn("Capture requires elevated privileges — re-launching with sudo")
+            self._reexec_under_sudo()
+            return False  # unreachable — execvp replaces the process
         self.app = LeethaApp(interfaces=self.interfaces)
         await self.app.start()
         if not self.app.capture_engine._workers:
             await self.app.stop()
             self.app = None
-            self._warn("Capture requires elevated privileges — re-launching with sudo")
-            import os
-            import sys
-            leetha_bin = os.path.abspath(sys.argv[0])
-            iface_args = []
-            for iface in self.interfaces:
-                iface_args.extend(["-i", iface.name])
-            os.execvp("sudo", ["sudo", sys.executable, leetha_bin] + iface_args)
-            return False  # unreachable
+            self._error("Capture failed to start on the selected interface(s)")
+            return False
         names = ", ".join(f"[cyan]{i.name}[/cyan]" for i in self.interfaces)
         self._success(f"Capture started on {names}")
         return True
+
+    def _reexec_under_sudo(self) -> None:
+        """Re-launch leetha under sudo, preserving the selected interfaces.
+
+        ``os.execvp`` replaces the current process image, so on success this
+        never returns. The selected interfaces are passed as ``-i`` flags so
+        the elevated process resumes capture on them directly.
+        """
+        import os
+        import sys
+        leetha_bin = os.path.abspath(sys.argv[0])
+        iface_args: list[str] = []
+        for iface in self.interfaces:
+            iface_args.extend(["-i", iface.name])
+        os.execvp("sudo", ["sudo", sys.executable, leetha_bin] + iface_args)
 
     async def _cmd_live(self, args: list[str]) -> None:
         decode = "--decode" in args

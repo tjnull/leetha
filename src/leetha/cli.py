@@ -169,6 +169,20 @@ console commands:
         default=None,
         help="SSH private key path for --remote capture",
     )
+    parser.add_argument(
+        "--log-level",
+        default=_env_default("LOG_LEVEL", None),
+        metavar="LEVEL",
+        help="Log verbosity written to <data_dir>/leetha.log "
+             "(DEBUG/INFO/WARNING/ERROR; default INFO, or $LEETHA_LOG_LEVEL)",
+    )
+    parser.add_argument(
+        "--log-console",
+        action="store_true",
+        default=False,
+        help="Also mirror WARNING+ logs to stderr (off by default so the "
+             "interactive console stays clean)",
+    )
 
     sub = parser.add_subparsers(dest="command")
 
@@ -414,6 +428,21 @@ async def _run_trust(args):
 def main():
     parser = build_parser()
     args = parser.parse_args()
+
+    # Route logs to <data_dir>/leetha.log before anything else runs, so no
+    # library WARNING/ERROR leaks to the terminal via the lastResort handler
+    # (which used to corrupt the interactive console). Best-effort: never let
+    # a logging problem stop startup.
+    try:
+        from leetha.config import get_config
+        from leetha.logging_setup import setup_logging
+        setup_logging(
+            get_config().data_dir,
+            level=getattr(args, "log_level", None),
+            console=getattr(args, "log_console", False),
+        )
+    except Exception:
+        pass
 
     # --auth/--no-auth is a tri-state (True/False/None) so it can't live in
     # _env_default; apply LEETHA_AUTH here when neither flag was passed.
