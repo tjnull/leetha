@@ -20,12 +20,17 @@ DEFAULT_PRESENCE_THRESHOLD = 300  # seconds; the stored column default
 # Per-category "no traffic = offline" defaults. Sleepy/battery and consumer
 # devices legitimately go quiet for long stretches, so a flat 5-minute
 # threshold makes them flap online/offline. These widen the window per type.
+# Longer "no traffic = offline" windows for device classes that legitimately
+# sleep/standby, to avoid flapping. Deliberately omits security-relevant or
+# continuously-connected classes — cameras stream constantly and a camera
+# going dark is itself notable, so they keep the short default and alert
+# promptly. (smart_home/iot kept modest, not multi-minute-blind.)
 _TYPE_PRESENCE_DEFAULTS: dict[str, int] = {
     "phone": 1800, "tablet": 1800, "wearable": 3600,
     "media_device": 1800, "media_player": 1800, "smart_speaker": 1800,
     "streaming_device": 1800, "smart_tv": 1800, "game_console": 1800,
     "laptop": 1200, "robot_vacuum": 3600, "printer": 3600,
-    "iot": 900, "smart_home": 900, "camera": 900,
+    "iot": 600, "smart_home": 600,
 }
 
 # Randomized-MAC devices are privacy-rotating consumer gear (phones, etc.)

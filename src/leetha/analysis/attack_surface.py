@@ -2682,9 +2682,12 @@ CHAIN_DEFINITIONS: list[dict] = [
             "then relay to SMB/LDAP/ADCS targets."
         ),
         "severity": Severity.CRITICAL,
-        # Requires an actionable rogue-DHCPv6 signal (DH-004) as the mandatory
-        # trigger, not a client-side WPAD query alone. DHCPv6 *presence* is
-        # INFO and won't seed this chain — only a genuine anomaly will.
+        # Custom match requires DH-004 (the mandatory first prereq) to be
+        # actionable. DH-004 is currently INFO-only (we have no passive
+        # detector for a *rogue* DHCPv6 server vs. normal client traffic), so
+        # this chain is intentionally DORMANT — it will activate only once a
+        # real rogue-DHCPv6 signal exists. This avoids asserting a CRITICAL
+        # DHCPv6-spoofing chain from a client-side WPAD query alone.
         "prerequisite_rules": ["DH-004", "NR-004"],
         "match_mode": "custom",
         "requires_env": "windows",
@@ -2827,8 +2830,13 @@ def _detect_environments(findings: list[Finding], ctx: AnalysisContext | None) -
     all_ids = {f.rule_id for f in findings}
     windows = bool(all_ids & _WINDOWS_ENV_RULES)
     if ctx is not None:
-        # A resolved AD domain or discovered DC is decisive Windows/AD evidence.
-        windows = windows or bool(getattr(ctx, "domain", None)) or bool(getattr(ctx, "dc_ip", None))
+        # A discovered DC (from a Kerberos probe) is decisive Windows/AD
+        # evidence. NOTE: ctx.domain is intentionally NOT used here — it is
+        # derived from any ``.local``/``.lan`` DNS name (ubiquitous mDNS), so
+        # it would mark virtually every network as "windows" and defeat the
+        # gate. Only real Windows service signals (_WINDOWS_ENV_RULES) and a
+        # Kerberos-derived DC count.
+        windows = windows or bool(getattr(ctx, "dc_ip", None))
     return {
         "windows": windows,
         "ics": bool(all_ids & _ICS_ENV_RULES),

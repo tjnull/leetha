@@ -50,6 +50,19 @@ async def test_os_vendor_manufacturer_is_not_oui_mismatch():
     assert not any(getattr(a, "rule", None) == "oui_mismatch" for a in alerts)
 
 
+async def test_google_hardware_device_oui_mismatch_still_flags():
+    # Google makes hardware (Nest/Chromecast); a Google-branded device with a
+    # mismatched NIC OUI must STILL be checked (regression: "google" was
+    # wrongly treated as an OS-only vendor and skipped).
+    det = SpoofingDetector(db=None)
+    dev = _mac_dev(mac="00:11:22:33:44:66", manufacturer="Google",
+                   device_type="smart_speaker")
+    alerts = await det.process_device_update(
+        dev, oui_vendor="Some Unrelated Vendor LLC",
+        snapshot_reader=_no_prior, snapshot_writer=_noop_writer)
+    assert any(getattr(a, "rule", None) == "oui_mismatch" for a in alerts)
+
+
 async def test_appliance_brand_mismatch_still_flags():
     det = SpoofingDetector(db=None)
     dev = _mac_dev(mac="00:11:22:33:44:55", manufacturer="Hikvision",

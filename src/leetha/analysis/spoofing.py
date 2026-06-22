@@ -58,9 +58,15 @@ _KNOWN_OUI_VENDOR_PAIRS: dict[str, set[str]] = {
 # NIC's OUI vendor differing from the identified manufacturer is EXPECTED
 # (e.g. an ASUS or Intel NIC in a machine running Windows → manufacturer
 # "Microsoft"), so an OUI-vs-manufacturer mismatch is not a spoofing signal.
+# Pure OS/software vendors that never manufacture NICs. Deliberately excludes
+# Google/Android (Google makes Nest/Chromecast/Pixel hardware) and a bare
+# "linux" (matches Android UAs and many real vendor strings) — keeping those
+# here would skip the OUI-mismatch check on genuine hardware and mask real
+# spoofs. OS attribution for those comes from device category/os_family, not
+# the manufacturer label.
 _OS_DERIVED_VENDORS: frozenset[str] = frozenset({
     "microsoft", "canonical", "ubuntu", "debian", "red hat", "redhat",
-    "fedora", "centos", "suse", "linux", "google", "android", "alpine",
+    "fedora", "centos", "suse", "alpine",
     "vmware", "citrix", "proxmox", "openbsd", "freebsd", "netbsd",
 })
 
@@ -448,6 +454,17 @@ class AddressVerifier:
                 history.append((ident, now_mono))
                 if reverting:
                     deltas = []  # seen this identity before \u2014 oscillation
+                # Bound the per-MAC history map so randomized-MAC churn on a
+                # long-running sensor can't grow it unbounded: once it gets
+                # large, drop MACs whose most recent entry has aged past the
+                # flip-flop window (they can no longer match anything).
+                if len(self._identity_history) > 10000:
+                    cutoff = now_mono - DRIFT_FLIPFLOP_WINDOW
+                    for stale_mac in [
+                        m for m, h in self._identity_history.items()
+                        if not h or h[-1][1] < cutoff
+                    ]:
+                        del self._identity_history[stale_mac]
 
             if deltas:
                 rl_key = f"fp_drift:{device.mac}"

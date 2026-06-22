@@ -1571,17 +1571,20 @@ async def api_incidents(include_resolved: bool = False):
             return "mac_spoofing"
 
         mapped = rule_map.get(rule, rule)
-        # For spoofing-related rules, try to parse more specific subtypes from message
-        if mapped in ("spoofing", "other"):
+        # For spoofing-related rules, parse the specific subtype from the
+        # message. ``arp_spoofing`` covers both ARP flip-flop and gratuitous-
+        # ARP floods, which the message text disambiguates into the distinct
+        # threat subtypes the UI knows about.
+        if mapped in ("spoofing", "other", "arp_spoofing"):
             msg_l = msg.lower()
             if "gateway" in msg_l or "trusted binding" in msg_l:
                 return "gateway_impersonation"
-            if "ip conflict" in msg_l or "conflict" in msg_l:
-                return "ip_conflict"
             if "flip" in msg_l and "flop" in msg_l:
                 return "flip_flop"
             if "gratuitous" in msg_l and "flood" in msg_l:
                 return "grat_flood"
+            if "ip conflict" in msg_l or "conflict" in msg_l:
+                return "ip_conflict"
         return mapped or "other"
 
     # Group ALL alerts by (device_mac, subtype)

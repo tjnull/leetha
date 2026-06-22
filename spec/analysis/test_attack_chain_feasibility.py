@@ -20,8 +20,33 @@ def _f(rule_id, severity=Severity.HIGH, category=Category.NAME_RESOLUTION):
                    severity=severity, description="x")
 
 
+class _Ctx:
+    """Minimal AnalysisContext stand-in for chain-gating tests."""
+    def __init__(self, domain=None, dc_ip=None, interface="eth0"):
+        self.domain = domain
+        self.dc_ip = dc_ip
+        self.interface = interface
+        # Attributes read during chain tool-command hydration:
+        self.gateway_ip = None
+        self.attacker_ip = None
+        self.device_map = {}
+
+
 def _chain_ids(findings, ctx=None):
     return {c.chain_id for c in build_chains(findings, ctx)}
+
+
+def test_mdns_local_domain_does_not_satisfy_windows_env():
+    # ctx.domain derived from a ubiquitous mDNS ".local" name must NOT mark
+    # the network as Windows/AD — otherwise the relay chains fire everywhere.
+    ids = _chain_ids([_f("NR-001")], ctx=_Ctx(domain="home.local"))
+    assert "CHAIN-001" not in ids
+
+
+def test_discovered_dc_does_satisfy_windows_env():
+    # A Kerberos-discovered DC is real AD evidence → relay chain feasible.
+    ids = _chain_ids([_f("NR-001")], ctx=_Ctx(dc_ip="192.168.1.10"))
+    assert "CHAIN-001" in ids
 
 
 def test_llmnr_alone_does_not_build_relay_chain_without_windows():
