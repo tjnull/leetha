@@ -65,3 +65,30 @@ def test_oui_category_kept_for_single_product_vendor():
         _e("dhcp", category="router", certainty=0.75),
     ]
     assert eng.compute("aa:bb:cc:00:00:05", ev).category == "health_device"
+
+
+def test_vendor_only_match_infers_category_when_none_present():
+    # Live regression: a JBL/Gaoshengda Wi-Fi speaker module whose only
+    # category signal is OUI "unknown" (filtered as junk) must still classify
+    # via the vendor->device-type map instead of surfacing as "unclassified".
+    ev = [
+        _e("dns_answer", certainty=0.6),
+        _e("oui", vendor="Hui Zhou Gaoshengda Technology Co.,LTD",
+           category="unknown", certainty=0.95),
+    ]
+    assert eng.compute("78:93:c3:00:00:01", ev).category == "smart_speaker"
+
+
+def test_vendor_only_fallback_does_not_override_real_evidence():
+    # The vendor inference is a LAST resort — a real behavioural category wins.
+    ev = [
+        _e("oui", vendor="JBL", category="unknown", certainty=0.95),
+        _e("ssdp_server", category="smart_tv", certainty=0.85),
+    ]
+    assert eng.compute("78:93:c3:00:00:02", ev).category == "smart_tv"
+
+
+def test_broad_vendor_stays_unclassified_without_category_signal():
+    # Apple makes many device classes — vendor alone must NOT force a category.
+    ev = [_e("mdns", vendor="Apple", certainty=0.7)]
+    assert eng.compute("fa:7c:26:00:00:01", ev).category is None

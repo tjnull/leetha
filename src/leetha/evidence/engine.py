@@ -178,6 +178,17 @@ class VerdictEngine:
         # This overrides ambiguous mDNS service evidence that can't
         # distinguish macOS from iOS.
         chosen_category = category[0]
+
+        # Last-resort fallback: when no source produced a usable category but
+        # the vendor is known, infer the device type from the vendor name
+        # (e.g. "Hui Zhou Gaoshengda" -> smart_speaker Wi-Fi module, "JBL" ->
+        # smart_speaker). This only fills an otherwise-empty category, so it
+        # never overrides real behavioural evidence and keeps vendor-only
+        # matches from surfacing as "unclassified".
+        if chosen_category is None and vendor[0] is not None:
+            from leetha.fingerprint.evidence import _guess_device_type_from_vendor
+            chosen_category = _guess_device_type_from_vendor(vendor[0])
+
         if chosen_hostname and vendor[0] == "Apple":
             hn_lower = chosen_hostname.lower()
             if "macbook" in hn_lower:
