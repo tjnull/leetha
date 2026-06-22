@@ -1262,16 +1262,17 @@ class LeethaApp:
                 op=packet.fields.get("op", 0),
                 interface=packet.interface or "unknown",
             )
-            # Map old AlertType to new FindingRule
-            _ALERT_TO_FINDING = {
+            # Map old AlertType to new FindingRule, preferring the precise
+            # per-detection ``alert.rule`` via the shared resolver so this
+            # path stays consistent with the process-thread security checks.
+            _MAP = {
                 AlertType.SPOOFING: FindingRule.IDENTITY_SHIFT,
-                AlertType.MAC_SPOOFING: FindingRule.IDENTITY_SHIFT,
+                AlertType.MAC_SPOOFING: FindingRule.MAC_SPOOFING,
             }
             for alert in alerts:
-                rule = _ALERT_TO_FINDING.get(alert.alert_type, FindingRule.IDENTITY_SHIFT)
                 finding = Finding(
                     hw_addr=alert.device_mac,
-                    rule=rule,
+                    rule=_resolve_finding_rule(alert, _MAP),
                     severity=AlertSeverity(alert.severity.value),
                     message=alert.message,
                 )
@@ -1325,15 +1326,17 @@ class LeethaApp:
                 snapshot_reader=_snapshot_reader,
                 snapshot_writer=_snapshot_writer)
 
-            _ALERT_TO_FINDING = {
+            # Prefer the precise per-detection ``alert.rule`` via the shared
+            # resolver so this path stays consistent with the process-thread
+            # security checks instead of collapsing everything to IDENTITY_SHIFT.
+            _MAP = {
                 AlertType.SPOOFING: FindingRule.IDENTITY_SHIFT,
-                AlertType.MAC_SPOOFING: FindingRule.IDENTITY_SHIFT,
+                AlertType.MAC_SPOOFING: FindingRule.MAC_SPOOFING,
             }
             for alert in alerts:
-                rule = _ALERT_TO_FINDING.get(alert.alert_type, FindingRule.IDENTITY_SHIFT)
                 finding = Finding(
                     hw_addr=alert.device_mac,
-                    rule=rule,
+                    rule=_resolve_finding_rule(alert, _MAP),
                     severity=AlertSeverity(alert.severity.value),
                     message=alert.message,
                 )
