@@ -53,6 +53,21 @@ def parse_stp(packet) -> CapturedPacket | None:
     )
 
 
+def parse_dtp(packet) -> CapturedPacket | None:
+    """Parse a Cisco DTP frame into CapturedPacket."""
+    from leetha.capture.parsers.dtp import parse_dtp as _parse_raw
+    result = _parse_raw(packet)
+    if result is None:
+        return None
+    return CapturedPacket(
+        protocol="dtp",
+        hw_addr=packet.src if hasattr(packet, 'src') else "",
+        ip_addr="",
+        fields=result,
+        raw=bytes(packet) if hasattr(packet, '__bytes__') else None,
+    )
+
+
 def parse_snmp(packet) -> CapturedPacket | None:
     """Parse SNMP packet into CapturedPacket."""
     from leetha.capture.parsers.snmp import parse_snmp as _parse_raw

@@ -33,7 +33,7 @@ _CDP_CAP_MAP = {
 }
 
 
-@register_processor("lldp", "cdp", "stp", "snmp")
+@register_processor("lldp", "cdp", "stp", "dtp", "snmp")
 class InfrastructureProcessor(Processor):
     """Handles infrastructure discovery protocols."""
 
@@ -45,6 +45,8 @@ class InfrastructureProcessor(Processor):
             return self._analyze_cdp(packet)
         elif protocol == "stp":
             return self._analyze_stp(packet)
+        elif protocol == "dtp":
+            return self._analyze_dtp(packet)
         elif protocol == "snmp":
             return self._analyze_snmp(packet)
         return []
@@ -224,6 +226,34 @@ class InfrastructureProcessor(Processor):
                 "bridge_priority": bridge_priority,
                 "bridge_mac": bridge_mac,
                 "is_root": is_root,
+                # Persist the root-bridge identity so the STP-root-takeover
+                # detection (L2-009) can compare advertised roots over time
+                # and flag a superior/changed root bridge.
+                "root_mac": packet.get("root_mac", ""),
+                "root_priority": packet.get("root_priority", 32768),
+                "bridge_id": packet.get("bridge_id", ""),
+                "root_id": packet.get("root_id", ""),
+                "port_id": packet.get("port_id", 0),
+                "interface": getattr(packet, "interface", None),
+            },
+        )]
+
+    def _analyze_dtp(self, packet: CapturedPacket) -> list[Evidence]:
+        """DTP classification — a DTP speaker is a switch (or an attacker
+        spoofing one). Carries the trunk-negotiation state used by the
+        VLAN-hopping detection (L2-007)."""
+        return [Evidence(
+            source="dtp", method="exact", certainty=0.90,
+            category="switch",
+            raw={
+                "mode": packet.get("mode", "unknown"),
+                "status_byte": packet.get("status_byte"),
+                "negotiating": packet.get("negotiating", False),
+                "encap": packet.get("encap"),
+                "domain": packet.get("domain"),
+                "neighbor_mac": packet.get("neighbor_mac"),
+                "src_mac": packet.get("src_mac", ""),
+                "interface": getattr(packet, "interface", None),
             },
         )]
 

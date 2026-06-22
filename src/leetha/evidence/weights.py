@@ -88,6 +88,7 @@ _TRUST_INFRASTRUCTURE = {
     "dns_behavioral": 0.60,
     "icmpv6_ra": 0.60,
     "stp": 0.50,
+    "dtp": 0.90,
     "arp": 0.30,
     "ip_observed": 0.30,
     "http_host": 0.40,

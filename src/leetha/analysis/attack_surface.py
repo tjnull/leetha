@@ -1628,42 +1628,50 @@ class VLANHoppingDTPRule:
     severity = Severity.HIGH
 
     def evaluate(self, ctx: AnalysisContext) -> list[Finding]:
-        # Look for CDP observations that reveal native VLAN or trunk info
+        dtp_obs = ctx.observations_by_type.get("dtp", [])
         cdp_obs = ctx.observations_by_type.get("cdp", [])
-        stp_obs = ctx.observations_by_type.get("stp", [])
-        lldp_obs = ctx.observations_by_type.get("lldp", [])
 
-        trunk_indicators = []
-        affected = []
+        trunk_indicators: list[str] = []
+        affected: list[dict] = []
+        negotiating = False
 
+        # Primary, evidence-grounded signal: an actual DTP frame whose status
+        # is dynamic-auto/desirable/on means the port will form a trunk —
+        # exactly what switch-spoofing VLAN hopping exploits.
+        for obs in dtp_obs:
+            raw = _parse_raw_data(obs)
+            if raw.get("negotiating"):
+                negotiating = True
+                mode = raw.get("mode", "negotiating")
+                trunk_indicators.append(
+                    f"DTP '{mode}' observed from {obs.device_mac} — port will negotiate a trunk")
+                dev = ctx.device_map.get(obs.device_mac)
+                info = _device_info(dev) if dev else {"mac": obs.device_mac}
+                if info not in affected:
+                    affected.append(info)
+
+        # Secondary: CDP leaks the native VLAN (info disclosure that aids
+        # double-tagging) — weaker than live DTP negotiation.
         for obs in cdp_obs:
             raw = _parse_raw_data(obs)
             if raw.get("native_vlan"):
-                trunk_indicators.append(f"CDP reveals native VLAN {raw['native_vlan']} on {obs.device_mac}")
+                trunk_indicators.append(
+                    f"CDP reveals native VLAN {raw['native_vlan']} on {obs.device_mac}")
                 dev = ctx.device_map.get(obs.device_mac)
-                affected.append(_device_info(dev) if dev else {"mac": obs.device_mac})
-
-        # STP BPDUs from multiple bridge IDs indicate trunk/spanning tree participation
-        bridge_ids = set()
-        for obs in stp_obs:
-            raw = _parse_raw_data(obs)
-            bridge_id = raw.get("bridge_id") or raw.get("bridge_mac")
-            if bridge_id:
-                bridge_ids.add(bridge_id)
-
-        if len(bridge_ids) > 1:
-            trunk_indicators.append(f"STP BPDUs from {len(bridge_ids)} different bridges detected — indicates trunk port")
-            for obs in stp_obs[:5]:
-                dev = ctx.device_map.get(obs.device_mac)
-                if dev and _device_info(dev) not in affected:
-                    affected.append(_device_info(dev))
+                info = _device_info(dev) if dev else {"mac": obs.device_mac}
+                if info not in affected:
+                    affected.append(info)
 
         if not trunk_indicators:
             return []
 
+        # Live DTP negotiation is a real trunk-spoofing exposure (HIGH); a CDP
+        # native-VLAN leak alone is information disclosure (MEDIUM).
+        severity = Severity.HIGH if negotiating else Severity.MEDIUM
+
         return [Finding(
             rule_id=self.rule_id, name=self.name, category=self.category,
-            severity=self.severity,
+            severity=severity,
             description=(
                 "Evidence of trunk port or DTP-capable port detected. An attacker on a trunk port can "
                 "perform VLAN hopping attacks using 802.1Q double tagging or DTP negotiation, gaining "
@@ -1774,35 +1782,50 @@ class STPManipulationRiskRule:
         if not stp_obs:
             return []
 
-        root_bridges = {}
+        # Track the (lowest) priority advertised for each distinct root bridge.
+        roots: dict[str, int] = {}
         for obs in stp_obs:
             raw = _parse_raw_data(obs)
             root_mac = raw.get("root_mac")
-            root_prio = raw.get("root_priority", 32768)
-            bridge_mac = raw.get("bridge_mac")
             if root_mac:
-                root_bridges[root_mac] = {"priority": root_prio, "bridge_mac": bridge_mac}
+                rp = raw.get("root_priority", 32768)
+                roots[root_mac] = min(roots.get(root_mac, 1 << 30), rp)
 
-        if not root_bridges:
+        if not roots:
             return []
 
+        # A single, stable root is normal on a switched segment (INFO). MORE
+        # THAN ONE distinct root advertised means the root changed/was
+        # contested — the signature of a superior-BPDU root-takeover attempt.
+        contested = len(roots) > 1
+        severity = Severity.HIGH if contested else Severity.INFO
+
         affected = []
-        evidence = []
-        for root_mac, info in root_bridges.items():
+        ev = [f"{len(roots)} distinct root bridge(s) advertised"]
+        for root_mac, prio in sorted(roots.items(), key=lambda kv: kv[1]):
             dev = ctx.device_map.get(root_mac)
             affected.append(_device_info(dev) if dev else {"mac": root_mac})
-            evidence.append(f"Root bridge {root_mac} with priority {info['priority']}")
+            ev.append(f"Root bridge {root_mac} (priority {prio})")
+
+        if contested:
+            description = (
+                "Multiple distinct STP root bridges were advertised on this segment. A superior "
+                "BPDU (lower priority) can displace the legitimate root bridge so all Layer-2 "
+                "traffic reroutes through the attacker for interception (STP root takeover)."
+            )
+        else:
+            description = (
+                "A single STP root bridge was observed (expected on a switched segment). "
+                "Recorded as context; an additional or lower-priority root would indicate a "
+                "root-takeover attempt."
+            )
 
         return [Finding(
             rule_id=self.rule_id, name=self.name, category=self.category,
-            severity=self.severity,
-            description=(
-                "STP (Spanning Tree Protocol) traffic detected with root bridge information. "
-                "An attacker can send BPDUs with a lower priority to become the root bridge, "
-                "forcing all network traffic to flow through their machine for interception."
-            ),
+            severity=severity,
+            description=description,
             affected_devices=affected[:10],
-            evidence=evidence[:5],
+            evidence=ev[:6],
             tools=[
                 ToolRecommendation(
                     name="Yersinia (STP Attack)",
@@ -1816,6 +1839,37 @@ class STPManipulationRiskRule:
                     description="Send STP BPDUs with priority 0 to claim root bridge",
                 ),
             ],
+        )]
+
+
+class L2ControlPlaneVisibilityRule:
+    """State the honest vantage limitation when STP/DTP/CDP aren't visible."""
+    rule_id = "L2-010"
+    name = "No Layer-2 Control-Plane Visibility"
+    category = Category.LAYER2
+    severity = Severity.INFO
+
+    def evaluate(self, ctx: AnalysisContext) -> list[Finding]:
+        if any(ctx.observations_by_type.get(s) for s in ("stp", "dtp", "cdp")):
+            return []  # we can see the L2 control plane; the L2 rules apply
+        # Switches don't forward BPDUs/DTP to access ports, so seeing none
+        # almost certainly means we're on an access port and blind to these
+        # attacks. Make that explicit so an empty VLAN-hopping/STP section
+        # isn't misread as "all clear".
+        return [Finding(
+            rule_id=self.rule_id, name=self.name, category=self.category,
+            severity=Severity.INFO,
+            description=(
+                "No STP, DTP, or CDP frames were observed, so the Layer-2 control plane of "
+                "this segment is not visible — typical of an access port, where switches do "
+                "not forward BPDUs/DTP. VLAN-hopping (L2-007) and STP-takeover (L2-009) "
+                "detection is BLIND here; an empty result is not evidence the segment is safe. "
+                "To assess these, monitor from a trunk port or a SPAN session configured with "
+                "'encapsulation replicate'."
+            ),
+            affected_devices=[],
+            evidence=["No stp/dtp/cdp sightings on the monitored interface(s)"],
+            tools=[],
         )]
 
 
@@ -3149,6 +3203,7 @@ async def analyze_attack_surface(db: Database, data_dir: Path | None = None,
         VLANHoppingDTPRule(),
         VLANLeakageRule(),
         STPManipulationRiskRule(),
+        L2ControlPlaneVisibilityRule(),
     ]
 
     for rule in passive_rules:

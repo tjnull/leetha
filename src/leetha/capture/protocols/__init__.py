@@ -23,6 +23,7 @@ from leetha.capture.protocols.discovery import parse_llmnr_netbios as _new_parse
 from leetha.capture.protocols.infrastructure import parse_lldp as _new_parse_lldp
 from leetha.capture.protocols.infrastructure import parse_cdp as _new_parse_cdp
 from leetha.capture.protocols.infrastructure import parse_stp as _new_parse_stp
+from leetha.capture.protocols.infrastructure import parse_dtp as _new_parse_dtp
 from leetha.capture.protocols.infrastructure import parse_snmp as _new_parse_snmp
 from leetha.capture.protocols.fallback import parse_ip_observed as _new_parse_ip_observed
 from leetha.capture.protocols.icmpv6 import parse_icmpv6 as _new_parse_icmpv6
@@ -50,7 +51,7 @@ from leetha.capture.protocols.discovery import parse_upnp as _new_parse_upnp
 
 # Ordered parser chain -- most specific first, fallback last
 PARSER_CHAIN = [
-    _new_parse_lldp, _new_parse_cdp, _new_parse_stp,
+    _new_parse_lldp, _new_parse_cdp, _new_parse_stp, _new_parse_dtp,
     _new_parse_eap,
     _new_parse_goose, _new_parse_profinet,  # L2 OT protocols
     _new_parse_arp,

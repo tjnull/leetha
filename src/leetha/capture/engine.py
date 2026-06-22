@@ -26,7 +26,16 @@ log = logging.getLogger(__name__)
 # BPF filter fragments -- assembled at runtime based on interface type
 # ---------------------------------------------------------------------------
 
-_BPF_L2_PROTOS = "ether proto 0x88cc"                        # LLDP
+_BPF_L2_PROTOS = (
+    "ether proto 0x88cc"                          # LLDP (EtherType)
+    # STP/CDP/DTP are 802.3 LLC frames with a length field (no EtherType),
+    # so they must be matched by their well-known multicast destinations or
+    # they are silently dropped: 01:80:c2:00:00:00 = IEEE bridge group (STP),
+    # 01:00:0c:cc:cc:cc = Cisco group (CDP/DTP/VTP), :cd = PVST+.
+    " or ether dst 01:80:c2:00:00:00"
+    " or ether dst 01:00:0c:cc:cc:cc"
+    " or ether dst 01:00:0c:cc:cc:cd"
+)
 _BPF_SNMP = "udp port 161 or udp port 162"
 _BPF_TCP_SYN = "tcp[tcpflags] & tcp-syn != 0"
 _BPF_TLS = "tcp port 443"
