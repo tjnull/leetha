@@ -16,7 +16,7 @@ native two-press semantics.
 from pathlib import Path
 
 
-SRC = (Path(__file__).resolve().parents[1] / "src" / "leetha" / "console.py").read_text()
+SRC = (Path(__file__).resolve().parents[1] / "src" / "leetha" / "console.py").read_text(encoding="utf-8")
 
 
 def _web_sigint_block() -> str:

@@ -98,7 +98,7 @@ class TestVerdictEngine:
         source_pattern = re.compile(r'source="([a-z_]+)"')
         sources_used = set()
         for py_file in processors_dir.glob("*.py"):
-            text = py_file.read_text()
+            text = py_file.read_text(encoding="utf-8")
             sources_used.update(source_pattern.findall(text))
 
         missing = sources_used - set(_SOURCE_WEIGHTS.keys())

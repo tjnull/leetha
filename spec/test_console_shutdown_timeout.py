@@ -61,7 +61,7 @@ def test_cleanup_source_has_bounded_awaits():
     """Source-level pin: console.py's shutdown awaits must use wait_for."""
     from pathlib import Path
     src = Path(__file__).resolve().parents[1] / "src" / "leetha" / "console.py"
-    text = src.read_text()
+    text = src.read_text(encoding="utf-8")
     # The finally block must bound each cleanup call.
     assert "asyncio.wait_for(self.app.stop(), timeout=" in text, (
         "app.stop() must be wrapped in asyncio.wait_for with a timeout"
@@ -78,7 +78,7 @@ def test_force_exit_watchdog_is_installed():
     """A daemon thread must force os._exit after 5s if cleanup hangs."""
     from pathlib import Path
     src = Path(__file__).resolve().parents[1] / "src" / "leetha" / "console.py"
-    text = src.read_text()
+    text = src.read_text(encoding="utf-8")
     # Watchdog pattern
     assert "_force_exit" in text, "console.py must install a force-exit watchdog"
     assert "daemon=True" in text, "force-exit watchdog must be a daemon thread"

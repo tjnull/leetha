@@ -50,7 +50,7 @@ def test_full_embedded_rs_generation(ca_dir, tmp_path):
 
     rs_path = tmp_path / "embedded.rs"
     rs_path.write_text(rs)
-    content = rs_path.read_text()
+    content = rs_path.read_text(encoding="utf-8")
     assert content.count("pub const") == 6
 
 

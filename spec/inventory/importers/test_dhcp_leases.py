@@ -15,7 +15,7 @@ FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "dhcp_leases"
 
 
 def _read(name: str) -> str:
-    return (FIXTURES / name).read_text()
+    return (FIXTURES / name).read_text(encoding="utf-8")
 
 
 def test_parse_isc_fixture():

@@ -60,7 +60,7 @@ def _call_handler() -> tuple[bool, int | None, float]:
 
 def test_sigint_handler_source_pins_immediate_exit():
     """console.py's _sigint_handler must call os._exit(0) with no awaits."""
-    src = (Path(__file__).resolve().parents[1] / "src" / "leetha" / "console.py").read_text()
+    src = (Path(__file__).resolve().parents[1] / "src" / "leetha" / "console.py").read_text(encoding="utf-8")
     # Find the handler — it's defined inside run(). Grab the first
     # _sigint_handler block and assert its contents.
     idx = src.find("def _sigint_handler(")

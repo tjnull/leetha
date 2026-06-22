@@ -42,7 +42,7 @@ def test_save_and_load_admin_token(tmp_path):
 
     token_file = leetha_dir / "admin-token"
     assert token_file.exists()
-    assert token_file.read_text().strip() == token
+    assert token_file.read_text(encoding="utf-8").strip() == token
 
     # File permissions: owner read/write only (0600) — Unix only
     import platform

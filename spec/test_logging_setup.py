@@ -32,7 +32,7 @@ def test_records_go_to_logfile_not_stderr(tmp_path, capsys):
     log.warning("something noteworthy")
     logging.shutdown()
 
-    contents = log_path.read_text()
+    contents = log_path.read_text(encoding="utf-8")
     assert "sensor listener disabled" in contents
     assert "something noteworthy" in contents
 
@@ -53,7 +53,7 @@ def test_secrets_are_scrubbed(tmp_path):
     log_path = setup_logging(tmp_path, level="INFO")
     logging.getLogger("leetha.test").warning("auth token=hunter2 leaked")
     logging.shutdown()
-    contents = log_path.read_text()
+    contents = log_path.read_text(encoding="utf-8")
     assert "hunter2" not in contents
     assert "[REDACTED]" in contents
 
