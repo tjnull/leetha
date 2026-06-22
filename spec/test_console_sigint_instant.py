@@ -20,6 +20,14 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
+# These tests drive real SIGINT (signal 2) into a spawned child process,
+# which is a Unix signal model; Windows raises "Unsupported signal: 2".
+_unix_only = pytest.mark.skipif(
+    sys.platform == "win32", reason="SIGINT subprocess semantics are Unix-only"
+)
+
 
 def _call_handler() -> tuple[bool, int | None, float]:
     """Call LeethaConsole._sigint_handler with os._exit patched.
@@ -77,6 +85,7 @@ def test_sigint_handler_source_pins_immediate_exit():
     )
 
 
+@_unix_only
 def test_sigint_subprocess_exits_within_500ms():
     """Spawn a python process that installs the LeethaConsole handler +
     blocks, send SIGINT, measure how long until the process exits.
@@ -131,6 +140,7 @@ while True:
     )
 
 
+@_unix_only
 def test_goodbye_message_printed_on_sigint():
     """User should see a brief 'stopped' message when Ctrl+C fires."""
     script = r"""

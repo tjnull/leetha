@@ -24,6 +24,7 @@ def test_missing_returns_none(tmp_path):
     assert get_secret("never-stored", data_dir=tmp_path) is None
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Unix file-permission bits do not apply on Windows")
 def test_keyfile_chmod_is_600(tmp_path):
     store_secret("x", "y", data_dir=tmp_path)
     key_path = tmp_path / _KEY_FILENAME
