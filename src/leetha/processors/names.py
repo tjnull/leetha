@@ -276,6 +276,28 @@ class NameResolutionProcessor(Processor):
                             raw={"service_type": service_type, "match": mdns_match},
                         ))
 
+        # mDNS instance name as a hostname candidate. The instance label is
+        # usually the device's friendly name ("Living Room", "Office
+        # Printer", "Johns-iPhone"). Use it only for this device's own
+        # announcements (not reflected / cross-device) and only when it's a
+        # real name rather than a service label.
+        if name and not belongs_to_other_device and not reflected:
+            cand = name
+            m = self._AIRPLAY_NAME_RE.match(cand)
+            if m:
+                cand = m.group(2)  # strip "<hex_id>@" advertising-device prefix
+            if "._" in cand:           # fully-qualified instance → drop service
+                cand = cand.split("._")[0]
+            if cand.endswith(".local"):
+                cand = cand[:-6]
+            cand = cand.strip(".-")
+            if is_valid_hostname(cand):
+                evidence.append(Evidence(
+                    source="mdns_name", method="exact", certainty=0.72,
+                    hostname=cand,
+                    raw={"service_type": service_type, "instance_name": name},
+                ))
+
         if txt_records:
             model = txt_records.get("model") or txt_records.get("md")
             vendor = txt_records.get("manufacturer") or txt_records.get("vendor")

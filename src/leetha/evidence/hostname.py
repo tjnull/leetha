@@ -53,6 +53,16 @@ def is_valid_hostname(name: str | None) -> bool:
     if not name:
         return False
 
+    # --- mDNS / DNS-SD service labels are not hostnames ---------------------
+    # Service-discovery labels always begin with an underscore
+    # (e.g. _airplay, _sftp-ssh, _apple-mobdev2, _esphomelib, _googlezone)
+    # and fully-qualified forms carry a _tcp/_udp protocol label or the
+    # _dns-sd meta label. These leak in via service-enumeration PTR records
+    # and must never be shown as a device hostname.
+    low = name.lower()
+    if name.startswith("_") or "._tcp" in low or "._udp" in low or "_dns-sd" in low:
+        return False
+
     # --- IPv4 / IPv6 ---------------------------------------------------------
     try:
         ipaddress.ip_address(name)
