@@ -429,28 +429,6 @@ def ingest_huginn_dhcpv6_enterprise(content: str) -> dict:
     return table
 
 
-def ingest_huginn_mac_vendors(content: str) -> dict:
-    """Ingest a single Huginn-Muninn MAC vendor JSON chunk.
-
-    Each file is an array of ``{"mac": ..., "name": ..., "device_id": ...}``
-    objects.  Returns ``{mac: {"name": ..., "device_id": ...}}``.
-    """
-    table: dict[str, dict] = {}
-    try:
-        records = json.loads(content)
-        for rec in records:
-            addr = rec.get("mac", "").lower()
-            if addr and len(addr) == 6:
-                table[addr] = {
-                    "name": rec.get("name", ""),
-                    "device_id": rec.get("device_id", "0"),
-                }
-        log.info("Ingested %d Huginn-Muninn MAC vendor entries", len(table))
-    except Exception as exc:
-        log.error("Huginn-Muninn MAC vendor ingestion failed: %s", exc)
-    return table
-
-
 def ingest_iana_enterprise(content: str) -> dict:
     """Ingest the IANA enterprise-numbers text file.
 
@@ -640,7 +618,6 @@ parse_huginn_dhcp_vendor = ingest_huginn_dhcp_vendor
 parse_huginn_combinations = ingest_huginn_combinations
 parse_huginn_dhcpv6 = ingest_huginn_dhcpv6
 parse_huginn_dhcpv6_enterprise = ingest_huginn_dhcpv6_enterprise
-parse_huginn_mac_vendors = ingest_huginn_mac_vendors
 parse_iana_enterprise = ingest_iana_enterprise
 parse_ja3_database = ingest_ja3
 parse_ja4_database = ingest_ja4

@@ -21,7 +21,6 @@ _TRUST_TIER_1 = {
     "oui": 0.90,
     "dns_server": 0.50,
     "huginn_dhcp": 0.80,
-    "huginn_mac": 0.85,
 }
 
 _TRUST_TIER_2 = {

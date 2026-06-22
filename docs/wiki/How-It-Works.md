@@ -204,7 +204,7 @@ When a manufacturer is known, Leetha cross-references a built-in vendor-OS datab
 
 ## Device Re-evaluation
 
-Sixty seconds after startup, Leetha triggers an automatic re-evaluation pass. All devices that still have an unknown device type, missing manufacturer, or confidence below a minimum threshold are re-fingerprinted using the Huginn databases (devices, DHCP, MAC vendors) that have now fully loaded. During early capture, evidence may arrive before the large Huginn datasets are ready; the re-evaluation pass ensures those devices benefit from the complete reference data. Re-evaluation follows the same VerdictEngine fusion pipeline -- no special logic is involved, just a second pass with the full dataset available.
+Sixty seconds after startup, Leetha triggers an automatic re-evaluation pass. All devices that still have an unknown device type, missing manufacturer, or confidence below a minimum threshold are re-fingerprinted using the Huginn databases (devices, DHCP) that have now fully loaded. During early capture, evidence may arrive before the large Huginn datasets are ready; the re-evaluation pass ensures those devices benefit from the complete reference data. Re-evaluation follows the same VerdictEngine fusion pipeline -- no special logic is involved, just a second pass with the full dataset available.
 
 ---
 

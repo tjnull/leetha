@@ -490,48 +490,15 @@ class SignatureMatcher:
                     ))
                     break
 
-        # Huginn MAC vendor table — only fall back to the massive
-        # huginn_mac_vendors (667 MB) if OUI lookup returned nothing
-        if not hits:
-            huginn_hit = self._resolve_huginn_mac(norm)
-            if huginn_hit:
-                hits.append(huginn_hit)
-
+        # MAC-to-vendor resolution relies solely on the IEEE OUI Master
+        # Database above -- the authoritative source. (The former
+        # huginn_mac_vendors fallback was removed: it was 99.7%
+        # placeholder rows and fabricated "Unknown MAC Vendor (...)"
+        # matches for unassigned OUIs.)
         return hits
 
     # Backward-compat alias
     lookup_mac = match_mac
-
-    # ------------------------------------------------------------------
-
-    def _resolve_huginn_mac(self, norm_mac: str) -> FingerprintMatch | None:
-        """Check the Huginn-Muninn MAC vendor table for *norm_mac*."""
-        blob = self._fetch_json("huginn_mac_vendors")
-        if not blob:
-            return None
-
-        rows = blob.get("entries", {})
-        short = norm_mac[:6].lower()
-        row = rows.get(short)
-        if not row:
-            return None
-
-        vendor_name = row.get("name", "")
-        if not vendor_name:
-            return None
-
-        return FingerprintMatch(
-            source="huginn_mac",
-            match_type="exact",
-            confidence=0.80,
-            manufacturer=vendor_name,
-            raw_data={
-                "source_db": "Huginn-Muninn MAC Vendors",
-                "source_file": "~/.leetha/cache/huginn_mac_vendors/",
-                "matched_key": f"MAC prefix {short}",
-                "huginn_device_id": row.get("device_id"),
-            },
-        )
 
     # ------------------------------------------------------------------
 
@@ -1748,7 +1715,6 @@ class SignatureMatcher:
     # Caches too large for on-demand loading -- only available after the
     # background warm-up task populates ``_store``.
     _WARM_ONLY_STORES = frozenset({
-        "huginn_mac_vendors",
         "huginn_dhcp",
         "huginn_devices",
         "huginn_dhcp_vendor",
@@ -1801,23 +1767,13 @@ class SignatureMatcher:
     def _compact_cache(name: str, data: dict) -> dict:
         """Reduce memory footprint of loaded caches.
 
-        - huginn_mac_vendors: intern repeated vendor strings (~60% savings)
         - huginn_dhcp: drop redundant 'options' lists and 'options_hash'
         """
         entries = data.get("entries") if isinstance(data, dict) else None
         if not isinstance(entries, dict):
             return data
 
-        if name == "huginn_mac_vendors":
-            intern_pool: dict[str, str] = {}
-            for key, rec in entries.items():
-                if isinstance(rec, dict):
-                    vendor = rec.get("name", "")
-                    if vendor not in intern_pool:
-                        intern_pool[vendor] = vendor
-                    entries[key] = {"name": intern_pool[vendor]}
-
-        elif name == "huginn_dhcp":
+        if name == "huginn_dhcp":
             for rec in entries.values():
                 if isinstance(rec, dict):
                     rec.pop("options", None)

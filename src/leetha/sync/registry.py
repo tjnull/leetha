@@ -99,30 +99,27 @@ def _build_default_feeds() -> list[FeedSource]:
         FeedSource(
             key="huginn_dhcp",
             title="Huginn-Muninn DHCP Signatures",
-            # Upstream renamed dhcp_signature.json -> split dhcp_fingerprint_partNN.json
-            endpoint="https://raw.githubusercontent.com/Ringmast4r/Huginn-Muninn/main/DHCP_Signatures/json/",
-            kind="git_multifile",
+            endpoint="https://raw.githubusercontent.com/Ringmast4r/Huginn-Muninn/main/DHCP_Signatures/json/dhcp_signature.json",
+            kind="json",
             summary=(
-                "Huginn-Muninn DHCP Option 55 fingerprints -- 368K"
-                " signatures (2-part split)"
+                "Huginn-Muninn DHCP Option 55 fingerprints for"
+                " device identification"
             ),
         ),
         FeedSource(
             key="huginn_dhcp_vendor",
             title="Huginn-Muninn DHCP Vendors",
-            # Upstream renamed dhcp_vendor.json -> split dhcp_vendor_partNN.json
-            endpoint="https://raw.githubusercontent.com/Ringmast4r/Huginn-Muninn/main/DHCP_Vendors/json/",
-            kind="git_multifile",
+            endpoint="https://raw.githubusercontent.com/Ringmast4r/Huginn-Muninn/main/DHCP_Vendors/json/dhcp_vendor.json",
+            kind="json",
             summary=(
-                "Huginn-Muninn DHCP vendor class identifiers -- 425K"
-                " vendor IDs (2-part split)"
+                "Huginn-Muninn DHCP vendor class identifiers for"
+                " device attribution"
             ),
         ),
         FeedSource(
             key="huginn_dhcpv6",
             title="Huginn-Muninn DHCPv6 Signatures",
-            # Upstream renamed dhcp6_signature.json -> dhcpv6_signature.json
-            endpoint="https://raw.githubusercontent.com/Ringmast4r/Huginn-Muninn/main/DHCPv6_Signatures/json/dhcpv6_signature.json",
+            endpoint="https://raw.githubusercontent.com/Ringmast4r/Huginn-Muninn/main/DHCPv6_Signatures/json/dhcp6_signature.json",
             kind="json",
             summary=(
                 "Huginn-Muninn DHCPv6 option request patterns for"
@@ -132,24 +129,18 @@ def _build_default_feeds() -> list[FeedSource]:
         FeedSource(
             key="huginn_dhcpv6_enterprise",
             title="Huginn-Muninn DHCPv6 Enterprise",
-            # Upstream renamed dhcp6_enterprise.json -> dhcpv6_enterprise.json
-            endpoint="https://raw.githubusercontent.com/Ringmast4r/Huginn-Muninn/main/DHCPv6_Enterprise/json/dhcpv6_enterprise.json",
+            endpoint="https://raw.githubusercontent.com/Ringmast4r/Huginn-Muninn/main/DHCPv6_Enterprise/json/dhcp6_enterprise.json",
             kind="json",
             summary=(
-                "Huginn-Muninn DHCPv6 enterprise identifiers -- 58K"
+                "Huginn-Muninn DHCPv6 enterprise identifiers --"
                 " vendor IDs for IPv6"
             ),
         ),
-        FeedSource(
-            key="huginn_mac_vendors",
-            title="Huginn-Muninn MAC Vendors",
-            endpoint="https://raw.githubusercontent.com/Ringmast4r/Huginn-Muninn/main/MAC_Vendors/json/",
-            kind="git_multifile",
-            summary=(
-                "Huginn-Muninn MAC vendor database -- 10.1M"
-                " MAC-to-vendor records across 31 JSON files"
-            ),
-        ),
+        # NOTE: huginn_mac_vendors was removed -- the upstream MAC_Vendors
+        # export is 99.7% "Unknown MAC Vendor (xxxxxx)" placeholder rows
+        # (full 24-bit enumeration) and added only 5 real vendors beyond the
+        # IEEE OUI Master Database we already sync, at a 700MB+ cost. The OUI
+        # feed is the authoritative MAC-to-vendor source.
         FeedSource(
             key="iana_enterprise",
             title="IANA Enterprise Numbers",

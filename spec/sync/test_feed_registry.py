@@ -1,10 +1,17 @@
 """Feed registry / manifest consistency checks.
 
 These guard against the upstream Huginn-Muninn repo reorganizing its
-JSON exports out from under us (which silently 404'd several feeds:
-DHCP_Signatures and DHCP_Vendors were split into ``_partNN`` shards,
-DHCPv6 files were renamed ``dhcp6_*`` → ``dhcpv6_*``, and MAC_Vendors
-moved from ``mac_vendor_pNN_cN`` to ``mac_vendor_partNN``).
+JSON exports out from under us, and pin the feed URLs to the layout that
+actually exists in the repo today:
+
+  - DHCP_Signatures/json/dhcp_signature.json   (single file)
+  - DHCP_Vendors/json/dhcp_vendor.json         (single file)
+  - DHCPv6_Signatures/json/dhcp6_signature.json
+  - DHCPv6_Enterprise/json/dhcp6_enterprise.json
+
+The MAC_Vendors feed was intentionally dropped -- upstream's export is
+99.7% "Unknown MAC Vendor (xxxxxx)" placeholder rows and added only 5
+real vendors over the IEEE OUI Master Database we already sync.
 
 The structural tests run offline. The live-URL test is marked
 ``network`` and skipped by default.
@@ -39,6 +46,16 @@ def test_git_multifile_feeds_have_manifests():
             )
 
 
+def test_no_orphan_manifests():
+    """Every MULTIFILE_MANIFESTS key must map to a git_multifile feed."""
+    cat = FeedCatalog()
+    multifile_keys = {f.key for f in cat.enumerate() if f.kind == "git_multifile"}
+    for key in MULTIFILE_MANIFESTS:
+        assert key in multifile_keys, (
+            f"manifest {key!r} has no matching git_multifile feed"
+        )
+
+
 def test_single_file_github_feeds_point_at_a_file():
     """Single-file feeds served from GitHub raw must name a file, not a
     directory. (API endpoints like ja4db.com/api/read/ legitimately end
@@ -55,39 +72,38 @@ def test_single_file_github_feeds_point_at_a_file():
             )
 
 
-def test_no_stale_dhcp6_naming_in_huginn_urls():
-    """Upstream renamed dhcp6_* to dhcpv6_*; pin so we don't regress."""
+def test_huginn_dhcp_feeds_use_upstream_filenames():
+    """Pin the DHCP/DHCPv6 feeds to the filenames that exist upstream so a
+    mistaken rename (e.g. dhcp6_ -> dhcpv6_, or a non-existent _partNN
+    split) can't silently 404 us again."""
     cat = FeedCatalog()
-    for feed in cat.enumerate():
-        if "Huginn-Muninn" in feed.endpoint:
-            assert "dhcp6_" not in feed.endpoint, (
-                f"{feed.key} still uses stale 'dhcp6_' naming: {feed.endpoint}"
-            )
-            # The old single-file DHCP signature/vendor names are gone too.
-            assert "dhcp_signature.json" not in feed.endpoint
-            assert "dhcp_vendor.json" not in feed.endpoint
+    by_key = {f.key: f for f in cat.enumerate()}
+
+    assert by_key["huginn_dhcp"].endpoint.endswith(
+        "/DHCP_Signatures/json/dhcp_signature.json"
+    )
+    assert by_key["huginn_dhcp"].kind == "json"
+
+    assert by_key["huginn_dhcp_vendor"].endpoint.endswith(
+        "/DHCP_Vendors/json/dhcp_vendor.json"
+    )
+    assert by_key["huginn_dhcp_vendor"].kind == "json"
+
+    assert by_key["huginn_dhcpv6"].endpoint.endswith(
+        "/DHCPv6_Signatures/json/dhcp6_signature.json"
+    )
+    assert by_key["huginn_dhcpv6_enterprise"].endpoint.endswith(
+        "/DHCPv6_Enterprise/json/dhcp6_enterprise.json"
+    )
 
 
-def test_mac_vendors_manifest_uses_part_naming():
-    files = MULTIFILE_MANIFESTS["huginn_mac_vendors"]
-    # 34 sequential parts + one trailing p35_c1 shard = 35 files
-    assert len(files) == 35, f"expected 35 mac_vendor files, got {len(files)}"
-    assert "mac_vendor_part01.json" in files
-    assert "mac_vendor_part34.json" in files
-    assert "mac_vendor_p35_c1.json" in files
-    # No stale pNN_cN naming for parts 1-34
-    assert not any(f.startswith("mac_vendor_p01_c") for f in files)
-
-
-def test_dhcp_split_manifests_present():
-    assert MULTIFILE_MANIFESTS["huginn_dhcp"] == [
-        "dhcp_fingerprint_part01.json",
-        "dhcp_fingerprint_part02.json",
-    ]
-    assert MULTIFILE_MANIFESTS["huginn_dhcp_vendor"] == [
-        "dhcp_vendor_part01.json",
-        "dhcp_vendor_part02.json",
-    ]
+def test_mac_vendors_feed_is_removed():
+    """huginn_mac_vendors was dropped (99.7% placeholder junk); it must
+    not reappear in the registry, PARSER_MAP, or any manifest."""
+    cat = FeedCatalog()
+    assert "huginn_mac_vendors" not in {f.key for f in cat.enumerate()}
+    assert "huginn_mac_vendors" not in PARSER_MAP
+    assert "huginn_mac_vendors" not in MULTIFILE_MANIFESTS
 
 
 def test_dhcpv6_enterprise_uses_dedicated_parser():
@@ -98,7 +114,7 @@ def test_dhcpv6_enterprise_uses_dedicated_parser():
 
 @pytest.mark.network
 def test_all_huginn_endpoints_resolve():
-    """Live check — every Huginn feed URL (and the first file of each
+    """Live check — every Huginn feed URL (and every file of each
     multifile manifest) must return HTTP 200. Skipped unless
     ``-m network`` is passed."""
     import urllib.request

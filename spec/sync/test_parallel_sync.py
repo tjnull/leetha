@@ -27,13 +27,14 @@ def test_order_empty_list_returns_empty():
 
 
 def test_order_unknown_names_retained_and_front_bucketed():
-    # Unknown names are treated as single-file (bucket 0) and must be
-    # retained; a known multifile feed must still sort last.
-    names = ["huginn_mac_vendors", "totally_unknown", "another_unknown"]
+    # Unknown names are treated as single-file (bucket 0), must be
+    # retained, and keep their relative input order. (There are currently
+    # no git_multifile feeds, so the bucket-1 case is exercised by
+    # test_order_single_file_feeds_before_multifile when one is added.)
+    names = ["totally_unknown", "ieee_oui", "another_unknown"]
     ordered = _order_sources_small_first(names)
     assert sorted(ordered) == sorted(names)          # no drops/dupes
-    assert ordered[-1] == "huginn_mac_vendors"       # multifile last
-    # the two unknowns keep their relative input order, ahead of multifile
+    # the two unknowns keep their relative input order
     assert ordered.index("totally_unknown") < ordered.index("another_unknown")
 
 

@@ -607,7 +607,7 @@ def _tally_ballots(
             # determine device_type for these vendors.
             if (
                 dim == "device_type"
-                and sig.source in ("oui", "huginn_mac", "huginn_device")
+                and sig.source in ("oui", "huginn_device")
             ):
                 mfr = getattr(sig, "manufacturer", "") or ""
                 if any(vname.lower() in mfr.lower() for vname in _MULTI_PRODUCT_VENDORS):

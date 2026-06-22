@@ -22,9 +22,9 @@ The React dashboard exposes the same functionality at `/sync` with real-time dow
 
 **IEEE OUI Master Registry** -- 86,000+ records mapping 3-byte MAC prefixes to registered manufacturers. Built from the IEEE MA-L, MA-M, and MA-S registries. This is the authoritative layer for manufacturer attribution.
 
-**Huginn-Muninn MAC Vendor Records** -- 10.1 million individual MAC-to-vendor mappings distributed across 31 JSON files. Covers assignments that fall outside standard OUI prefixes.
+> **Note:** A separate Huginn-Muninn MAC vendor feed was evaluated and removed. Its upstream export was 99.7% `Unknown MAC Vendor (xxxxxx)` placeholder rows (a full 24-bit prefix enumeration) and contributed only 5 real vendors beyond the IEEE OUI registry, at a 700 MB+ cost. MAC-to-vendor resolution relies solely on the IEEE OUI registry.
 
-*PatternLoader pipeline:* On every observed MAC, the OUI processor first checks the 1,900+ curated vendor entries in `patterns/data/` (which include device type, category, and model hints). If no curated match exists, the IEEE OUI table provides a manufacturer-only fallback. The Huginn MAC vendor records fill gaps for uncommon prefixes.
+*PatternLoader pipeline:* On every observed MAC, the OUI processor first checks the 1,900+ curated vendor entries in `patterns/data/` (which include device type, category, and model hints). If no curated match exists, the IEEE OUI table provides a manufacturer-only fallback.
 
 ### DHCPv4 Analysis
 
@@ -76,7 +76,6 @@ The React dashboard exposes the same functionality at `/sync` with real-time dow
   Huginn dhcp_vendor    -->    huginn_dhcp_vendor.json
   Huginn dhcpv6 JSON    -->    huginn_dhcpv6.json
   Huginn dhcpv6_ent     -->    huginn_dhcpv6_enterprise.json
-  Huginn MAC (31 files) -->    huginn_mac_vendors.json  (merged)
   IANA enterprise-num   -->    iana_enterprise.json
   JA3 CSV               -->    ja3.json
   JA4 API JSON          -->    ja4.json

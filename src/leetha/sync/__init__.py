@@ -17,8 +17,8 @@ def _format_bytes(n: int) -> str:
 
 def _order_sources_small_first(source_names: list[str]) -> list[str]:
     """Order feeds so single-file sources are submitted before
-    git_multifile ones. The big multifile feed (mac_vendors) then lands
-    in a concurrency slot last and never blocks the quick feeds.
+    git_multifile ones, so any large multifile feed lands in a
+    concurrency slot last and never blocks the quick feeds.
     Unknown names are treated as single-file (front bucket) and keep
     their relative input order.
     """
@@ -222,7 +222,6 @@ PARSER_MAP = {
     "huginn_dhcp_vendor": "parse_huginn_dhcp_vendor",
     "huginn_dhcpv6": "parse_huginn_dhcpv6",
     "huginn_dhcpv6_enterprise": "parse_huginn_dhcpv6_enterprise",
-    "huginn_mac_vendors": "parse_huginn_mac_vendors",
     "iana_enterprise": "parse_iana_enterprise",
     "ja3_fingerprints": "parse_ja3_database",
     "ja4_fingerprints": "parse_ja4_csv",
@@ -241,26 +240,11 @@ CACHE_NAMES = {
     "ja4_fingerprints": "ja4",
 }
 
-# File lists for git_multifile sources.
-# Upstream Huginn-Muninn reorganized its JSON exports into numbered
-# ``_partNN`` shards; keep these manifests in sync with the repo tree.
-MULTIFILE_MANIFESTS: dict[str, list[str]] = {
-    # MAC_Vendors: 34 sequential parts plus one trailing p35_c1 shard.
-    "huginn_mac_vendors": (
-        [f"mac_vendor_part{n:02d}.json" for n in range(1, 35)]
-        + ["mac_vendor_p35_c1.json"]
-    ),
-    # DHCP_Signatures: dhcp_signature.json was split into 2 fingerprint parts.
-    "huginn_dhcp": [
-        "dhcp_fingerprint_part01.json",
-        "dhcp_fingerprint_part02.json",
-    ],
-    # DHCP_Vendors: dhcp_vendor.json was split into 2 parts.
-    "huginn_dhcp_vendor": [
-        "dhcp_vendor_part01.json",
-        "dhcp_vendor_part02.json",
-    ],
-}
+# File lists for git_multifile sources, keyed by feed key. Each value is
+# the ordered list of filenames to fetch from the feed's directory base.
+# Currently empty -- the only multifile feed (huginn_mac_vendors) was
+# removed -- but the download machinery below remains for future feeds.
+MULTIFILE_MANIFESTS: dict[str, list[str]] = {}
 
 
 async def sync_source_with_progress(source_name: str) -> AsyncGenerator[dict, None]:
@@ -294,7 +278,8 @@ async def sync_source_with_progress(source_name: str) -> AsyncGenerator[dict, No
         yield {"event": "error", "source": src.name, "error": f"No parser for {src.name}"}
         return
 
-    # Multifile sources (e.g. huginn_mac_vendors with 31 JSON files)
+    # Multifile sources: fetch every file listed in the feed's manifest
+    # from its directory base, then merge the parsed chunks.
     if src.source_type == "git_multifile":
         filenames = MULTIFILE_MANIFESTS.get(src.name, [])
         if not filenames:
