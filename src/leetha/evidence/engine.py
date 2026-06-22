@@ -19,6 +19,52 @@ from leetha.evidence.weights import SOURCE_WEIGHTS as _SOURCE_WEIGHTS
 # Agreement boost: when N independent sources agree, multiply certainty
 _AGREEMENT_BONUS = {1: 1.0, 2: 1.1, 3: 1.2, 4: 1.25}
 
+# Values that are non-answers — they must never win a fused field.
+_JUNK_VALUES = frozenset({"unknown", "unidentified", "n/a", ""})
+
+
+def _is_multi_product_vendor(vendor: str | None) -> bool:
+    """True for vendors that make many device classes (Samsung, LG, ...).
+
+    Their IEEE OUI registry device-type is an unreliable CATEGORY hint (a
+    Samsung OUI block is generically "Phone" even for a Samsung TV), so the
+    OUI category must yield to behavioural evidence for these vendors.
+    """
+    if not vendor:
+        return False
+    from leetha.fingerprint.evidence import _MULTI_PRODUCT_VENDORS
+    vl = vendor.lower()
+    return any(v.lower() in vl for v in _MULTI_PRODUCT_VENDORS)
+
+
+def _source_family(source: str) -> str:
+    """Collapse correlated evidence sources into a single family.
+
+    Satori and the Huginn-Muninn datasets share the same upstream lineage,
+    so several of them "agreeing" is not independent corroboration. Counting
+    them as one family for the agreement boost stops stale fingerprint-DB
+    guesses from ganging up to overrule a strong authoritative source (e.g.
+    the IEEE OUI vendor).
+    """
+    if source.startswith("satori") or source.startswith("huginn"):
+        return "fingerprint_db"
+    return source
+
+
+def _combined_score(per_source_best: dict[str, float]) -> float:
+    """Fuse one candidate value's per-source scores into a single score.
+
+    Dominated by the single best (highest-weight) source, with only a small,
+    bounded bonus for additional INDEPENDENT source families — rather than an
+    unbounded sum where many weak/correlated sources overrun a strong one.
+    """
+    if not per_source_best:
+        return 0.0
+    best = max(per_source_best.values())
+    families = {_source_family(s) for s in per_source_best}
+    boost = _AGREEMENT_BONUS.get(min(len(families), 4), 1.25)
+    return best * boost
+
 
 def cap_evidence(
     evidence: list[Evidence],
@@ -59,8 +105,13 @@ class VerdictEngine:
         if not evidence:
             return Verdict(hw_addr=hw_addr, certainty=0)
 
-        category = self._fuse_field(evidence, "category")
+        # Vendor first: it decides whether to trust the OUI device-type as a
+        # category signal. For multi-product vendors (Samsung/LG/...) the OUI
+        # category is an unreliable hint and must yield to behavioural
+        # evidence (SSDP/mDNS), so demote it for the category fusion only.
         vendor = self._fuse_field(evidence, "vendor")
+        cat_demote = {"oui": 0.4} if _is_multi_product_vendor(vendor[0]) else None
+        category = self._fuse_field(evidence, "category", demote=cat_demote)
         platform = self._fuse_field(evidence, "platform")
         platform_version = self._fuse_field(evidence, "platform_version")
         model = self._fuse_field(evidence, "model")
@@ -163,40 +214,40 @@ class VerdictEngine:
         all_evidence = list(existing.evidence_chain) + list(new_evidence)
         return self.compute(existing.hw_addr, all_evidence)
 
-    def _fuse_field(self, evidence: list[Evidence], field: str) -> tuple[str | None, float]:
+    def _fuse_field(self, evidence: list[Evidence], field: str,
+                    demote: dict[str, float] | None = None) -> tuple[str | None, float]:
         """Fuse a single field from all evidence, returning (value, score).
 
-        Returns the highest-scored value after weighting and agreement boosting.
+        Each value is scored by its best (highest-weight) source times a
+        bounded agreement boost over independent source families. ``demote``
+        optionally scales specific sources' weight for this field (e.g. the
+        OUI device-type for a multi-product vendor). Non-answer values
+        (``unknown`` etc.) are ignored.
         """
-        candidates: dict[str, float] = {}
-        source_counts: dict[str, set] = {}
+        # value -> {source: best score from that source}. Keeping only the
+        # best score per source de-duplicates repeated identical evidence
+        # (which would otherwise double-count in the fusion).
+        per_source: dict[str, dict[str, float]] = {}
 
         for e in evidence:
             value = getattr(e, field, None)
-            if value is None:
+            if value is None or str(value).strip().lower() in _JUNK_VALUES:
                 continue
 
             weight = _SOURCE_WEIGHTS.get(e.source) or _SOURCE_WEIGHTS.get(
                 e.source.rsplit("_", 1)[0] if "_" in e.source else e.source, 0.5)
+            if demote:
+                weight *= demote.get(e.source, 1.0)
             score = e.certainty * weight
 
-            if value not in candidates:
-                candidates[value] = 0.0
-                source_counts[value] = set()
+            ss = per_source.setdefault(value, {})
+            if score > ss.get(e.source, 0.0):
+                ss[e.source] = score
 
-            candidates[value] += score
-            source_counts[value].add(e.source)
-
-        if not candidates:
+        if not per_source:
             return (None, 0.0)
 
-        # Apply agreement boost
-        for value in candidates:
-            n_sources = len(source_counts[value])
-            boost = _AGREEMENT_BONUS.get(min(n_sources, 4), 1.25)
-            candidates[value] *= boost
-
-        # Pick winner
+        candidates = {v: _combined_score(ss) for v, ss in per_source.items()}
         winner = max(candidates, key=candidates.get)  # type: ignore[arg-type]
         return (winner, min(candidates[winner], 1.0))
 
@@ -205,8 +256,7 @@ class VerdictEngine:
         import re
         from leetha.evidence.hostname import is_valid_hostname
 
-        candidates: dict[str, float] = {}
-        source_counts: dict[str, set] = {}
+        per_source: dict[str, dict[str, float]] = {}
 
         for e in evidence:
             value = e.hostname
@@ -227,20 +277,14 @@ class VerdictEngine:
             weight = _SOURCE_WEIGHTS.get(e.source) or _SOURCE_WEIGHTS.get(
                 e.source.rsplit("_", 1)[0] if "_" in e.source else e.source, 0.5)
             score = e.certainty * weight
-            if value not in candidates:
-                candidates[value] = 0.0
-                source_counts[value] = set()
-            candidates[value] += score
-            source_counts[value].add(e.source)
+            ss = per_source.setdefault(value, {})
+            if score > ss.get(e.source, 0.0):
+                ss[e.source] = score
 
-        if not candidates:
+        if not per_source:
             return None
 
-        for value in candidates:
-            n_sources = len(source_counts[value])
-            boost = _AGREEMENT_BONUS.get(min(n_sources, 4), 1.25)
-            candidates[value] *= boost
-
+        candidates = {v: _combined_score(ss) for v, ss in per_source.items()}
         return max(candidates, key=candidates.get)  # type: ignore[arg-type]
 
     # Known vendor/product keywords that appear in mDNS hostnames from
