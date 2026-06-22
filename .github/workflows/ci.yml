@@ -14,8 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     name: Leetha Lint
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
       - run: pip install ruff
@@ -25,8 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     name: Leetha Linux Tests
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
       - name: Create frontend dist placeholder
@@ -45,8 +45,8 @@ jobs:
     runs-on: macos-latest
     name: Leetha macOS Tests
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
       - name: Create frontend dist placeholder
@@ -65,8 +65,8 @@ jobs:
     runs-on: windows-latest
     name: Leetha Windows Tests
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
       - name: Create frontend dist placeholder
@@ -86,10 +86,10 @@ jobs:
     runs-on: ubuntu-latest
     name: Build Leetha Frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
       - run: cd frontend && bun install --frozen-lockfile && bun run build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: frontend-dist
           path: src/leetha/ui/web/dist/
@@ -99,11 +99,11 @@ jobs:
     runs-on: ubuntu-latest
     name: Build Leetha Deb
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           name: frontend-dist
           path: src/leetha/ui/web/dist/
@@ -127,7 +127,7 @@ jobs:
             --after-install /dev/null \
             /tmp/leetha-venv/lib/=/usr/lib/leetha/ \
             /tmp/leetha-venv/bin/leetha=/usr/bin/leetha
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: leetha-deb
           path: "*.deb"
@@ -137,11 +137,11 @@ jobs:
     runs-on: ubuntu-latest
     name: Build Leetha RPM
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           name: frontend-dist
           path: src/leetha/ui/web/dist/
@@ -164,7 +164,7 @@ jobs:
             --license "GPL-3.0" \
             /tmp/leetha-venv/lib/=/usr/lib/leetha/ \
             /tmp/leetha-venv/bin/leetha=/usr/bin/leetha
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: leetha-rpm
           path: "*.rpm"
