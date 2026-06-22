@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
       - run: cd frontend && bun install --frozen-lockfile && bun run build
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: frontend-dist
           path: src/leetha/ui/web/dist/
@@ -30,13 +30,13 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           name: frontend-dist
           path: src/leetha/ui/web/dist/
       - run: pip install build
       - run: python -m build --wheel
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: wheel
           path: dist/*
@@ -50,7 +50,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           name: frontend-dist
           path: src/leetha/ui/web/dist/
@@ -73,7 +73,7 @@ jobs:
             --license "GPL-3.0" \
             /tmp/leetha-venv/lib/=/usr/lib/leetha/ \
             /tmp/leetha-venv/bin/leetha=/usr/bin/leetha
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: deb
           path: "*.deb"
@@ -87,7 +87,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           name: frontend-dist
           path: src/leetha/ui/web/dist/
@@ -110,7 +110,7 @@ jobs:
             --license "GPL-3.0" \
             /tmp/leetha-venv/lib/=/usr/lib/leetha/ \
             /tmp/leetha-venv/bin/leetha=/usr/bin/leetha
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: rpm
           path: "*.rpm"
@@ -124,14 +124,14 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           name: frontend-dist
           path: src/leetha/ui/web/dist/
       - run: |
           pip install . pyinstaller
           pyinstaller --onefile --name leetha src/leetha/cli.py
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: macos-binary
           path: dist/leetha
@@ -145,14 +145,14 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           name: frontend-dist
           path: src/leetha/ui/web/dist/
       - run: |
           pip install . pyinstaller
           pyinstaller --onefile --name leetha src/leetha/cli.py
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: windows-binary
           path: dist/leetha.exe
@@ -162,7 +162,7 @@ jobs:
     runs-on: ubuntu-latest
     name: Create Leetha Release
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           merge-multiple: true
           path: artifacts/
