@@ -68,6 +68,68 @@ def _skip_for_oui(dev) -> bool:
     return bool(getattr(dev, "is_randomized_mac", False)) or _is_locally_administered(dev.mac)
 
 
+def _skip_for_manufacturer(dev) -> bool:
+    """Devices to exclude from the OUI-vs-manufacturer agreement check.
+
+    For general-purpose computers the identified "manufacturer" is the OS
+    vendor (Microsoft/Apple/Canonical/...), which legitimately differs from
+    the NIC's hardware OUI — flagging that would be noise. We reuse the same
+    OS-derived vendor/category vocabulary as the spoofing OUI-mismatch rule
+    so the two stay consistent. The check then only validates hardware-vendor
+    agreement for appliances/IoT, where the brand IS the hardware maker.
+    """
+    if _skip_for_oui(dev):
+        return True
+    try:
+        from leetha.analysis.spoofing import (
+            _OS_DERIVED_VENDORS, _OS_DERIVED_CATEGORIES,
+        )
+    except Exception:  # pragma: no cover - defensive
+        return False
+    mfr = (getattr(dev, "manufacturer", "") or "").lower()
+    cat = (getattr(dev, "category", "") or "").lower().replace(" ", "_")
+    if cat in _OS_DERIVED_CATEGORIES:
+        return True
+    return any(v in mfr for v in _OS_DERIVED_VENDORS)
+
+
+async def _load_devices_for_validation(db: Database):
+    """Build device records from the live ``hosts`` + ``verdicts`` tables.
+
+    The validator must check the identifications the running pipeline
+    actually produces: the vendor/category live in ``verdicts`` and host
+    metadata in ``hosts``. The legacy ``devices`` table is no longer
+    enriched (manufacturer/category are NULL), so reading it made the
+    manufacturer-agreement check silently validate nothing.
+    """
+    from types import SimpleNamespace
+
+    conn = db._conn
+    assert conn is not None
+    devices = []
+    async with conn.execute(
+        "SELECT h.hw_addr, h.mac_randomized, h.last_active, v.vendor, v.category "
+        "FROM hosts h LEFT JOIN verdicts v ON v.hw_addr = h.hw_addr"
+    ) as cur:
+        rows = await cur.fetchall()
+    for r in rows:
+        last = r["last_active"]
+        ls = None
+        if isinstance(last, str):
+            try:
+                ls = datetime.fromisoformat(last)
+            except ValueError:
+                ls = None
+        devices.append(SimpleNamespace(
+            mac=r["hw_addr"],
+            manufacturer=r["vendor"],
+            category=r["category"] if "category" in r.keys() else None,
+            is_randomized_mac=bool(r["mac_randomized"]),
+            last_seen=ls or datetime.now(timezone.utc),
+        ))
+    return devices
+
+
 # ---------------------------------------------------------------------------
 # Individual checks
 # ---------------------------------------------------------------------------
@@ -79,7 +141,7 @@ async def check_oui_coverage(db: Database, cache_dir: Path) -> dict:
     or belong to an unregistered vendor.
     """
     oui_table = _read_oui_db(cache_dir)
-    all_devices = await db.list_devices()
+    all_devices = await _load_devices_for_validation(db)
 
     ok_count = 0
     fail_count = 0
@@ -114,23 +176,25 @@ async def check_manufacturer_agreement(db: Database, cache_dir: Path) -> dict:
     substring match is used as the equality test).
     """
     oui_table = _read_oui_db(cache_dir)
-    all_devices = await db.list_devices()
+    all_devices = await _load_devices_for_validation(db)
 
     ok_count = 0
     fail_count = 0
     issues: list[dict] = []
 
     for dev in all_devices:
-        if _skip_for_oui(dev) or not dev.manufacturer:
+        if _skip_for_manufacturer(dev) or not dev.manufacturer:
             continue
 
         pfx = _extract_oui_prefix(dev.mac)
         oui_record = oui_table.get(pfx)
 
-        if not oui_record or not oui_record.get("manufacturer"):
+        # The IEEE OUI cache stores the vendor under "vendor" (with
+        # "manufacturer" kept only as a legacy fallback).
+        oui_mfr = oui_record.get("vendor") or oui_record.get("manufacturer") if oui_record else None
+        if not oui_mfr:
             continue
 
-        oui_mfr = oui_record["manufacturer"]
         dev_mfr = dev.manufacturer
 
         if oui_mfr.lower() in dev_mfr.lower() or dev_mfr.lower() in oui_mfr.lower():
@@ -153,7 +217,7 @@ validate_manufacturer_consistency = check_manufacturer_agreement
 
 async def check_stale_devices(db: Database, stale_days: int = 30) -> dict:
     """Identify devices that have not been observed within *stale_days*."""
-    all_devices = await db.list_devices()
+    all_devices = await _load_devices_for_validation(db)
     threshold = datetime.now(timezone.utc) - timedelta(days=stale_days)
 
     dormant: list[dict] = []

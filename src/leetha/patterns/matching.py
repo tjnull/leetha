@@ -990,6 +990,15 @@ def match_dns_query(query_name: str, query_type: int) -> Optional[Dict]:
 # Device types that should NOT be returned from partial matching.
 _MOBILE_DEVICE_TYPES = frozenset({"phone", "mobile", "tablet"})
 
+# Minimum option count for a pattern to be eligible for SUBSET (partial)
+# matching. Short option lists (e.g. "1,3,6,12,42" — the most common
+# subnet/router/DNS/hostname/NTP requests) are sent by a huge range of
+# devices, so subset-matching them produces confident-but-wrong attributions
+# (a Samsung TV mislabeled "Siemens HMI / Windows CE"). Such short patterns
+# still match EXACTLY; they just can't fingerprint a device by being a subset
+# of its (larger) request list.
+_MIN_SUBSET_OPT_COUNT = 6
+
 
 def _load_dhcp_patterns():
     """Load and convert DHCP patterns from JSON to lookup-friendly format."""
@@ -1076,6 +1085,8 @@ def match_dhcp_opt55(options: str) -> Optional[Dict]:
             except ValueError:
                 continue
             psize = len(pattern_set)
+            if psize < _MIN_SUBSET_OPT_COUNT:
+                continue  # too generic/short to fingerprint via subset
             if psize <= best_set_size:
                 continue
             if pattern_set.issubset(input_set) and pattern_set != input_set:
