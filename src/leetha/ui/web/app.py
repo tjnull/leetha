@@ -2733,13 +2733,13 @@ async def api_top_connections():
         conn = app_instance.store.connection
         cursor = await conn.execute(
             "SELECT "
-            "  COALESCE(json_extract(payload, '$.src_ip'), 'unknown') as src, "
-            "  COALESCE(json_extract(payload, '$.dst_ip'), json_extract(payload, '$.target_ip'), 'unknown') as dst, "
+            "  src_ip AS src, "
+            "  dst_ip AS dst, "
             "  COUNT(*) as cnt "
             "FROM sightings "
             "WHERE timestamp > datetime('now', '-24 hours') "
-            "  AND json_extract(payload, '$.src_ip') IS NOT NULL "
-            "  AND (json_extract(payload, '$.dst_ip') IS NOT NULL OR json_extract(payload, '$.target_ip') IS NOT NULL) "
+            "  AND src_ip IS NOT NULL "
+            "  AND dst_ip IS NOT NULL "
             "GROUP BY src, dst "
             "ORDER BY cnt DESC LIMIT 20"
         )
@@ -3249,6 +3249,7 @@ async def api_import_pcap(file: UploadFile = File(...)):
 @fastapi_app.get("/api/capture/status")
 async def api_capture_status():
     """Return detailed capture engine status for the console page."""
+    import os
     from leetha.capture.interfaces import classify_capture_mode
     engine = app_instance.capture_engine
     ifaces = []
@@ -3271,8 +3272,17 @@ async def api_capture_status():
     from leetha.capture.engine import _bpf_for_mode
     default_bpf = _bpf_for_mode("ethernet")
     active_bpf = ifaces[0]["bpf_filter"] if ifaces else default_bpf
+    rss_bytes = None
+    try:
+        with open("/proc/self/statm", encoding="ascii") as statm:
+            rss_bytes = int(statm.read().split()[1]) * os.sysconf("SC_PAGE_SIZE")
+    except (OSError, ValueError, IndexError):
+        pass
     return {
         "running": engine.is_running,
+        "process_rss_bytes": rss_bytes,
+        "pcap_buffer_bytes": engine._packet_buffer.bytes_used,
+        "pcap_buffer_packets": len(engine._packet_buffer),
         "queue_depth": app_instance.packet_queue.qsize(),
         "queue_capacity": app_instance.packet_queue.maxsize,
         "dropped_packets": engine.dropped_packets,
@@ -3666,8 +3676,6 @@ async def ws_remote_sensor(websocket: WebSocket):
     into the packet processing pipeline.
     """
     from leetha.capture.remote.server import SensorSession
-    from leetha.capture.remote.protocol import RemotePacketFrame
-    from leetha.capture.engine import PacketCapture
     from scapy.layers.l2 import Ether
 
     if not app_instance:
@@ -3733,17 +3741,22 @@ async def ws_remote_sensor(websocket: WebSocket):
             if not data:
                 continue
 
-            frames = session.feed(data)
-            for frame in frames:
-                try:
-                    pkt = Ether(frame.packet)
-                    iface_label = f"remote:{sensor_name}"
-                    result = app_instance.capture_engine._classify(pkt)
-                    if result is not None:
-                        result.interface = iface_label
-                        app_instance.packet_queue.put_nowait(result)
-                except Exception:
-                    pass
+            try:
+                frames = session.feed(data)
+            except ValueError:
+                logger.warning("sensor %s sent an oversized or malformed frame", sensor_name)
+                await websocket.close(code=1009, reason="Invalid packet frame")
+                break
+
+            def ingest_frames():
+                for frame in frames:
+                    try:
+                        pkt = Ether(frame.packet)
+                        app_instance.capture_engine._ingest(pkt, f"remote:{sensor_name}")
+                    except Exception:
+                        logger.debug("failed to parse remote packet", exc_info=True)
+
+            await asyncio.to_thread(ingest_frames)
     except WebSocketDisconnect:
         logger.info("remote sensor disconnected: %s", sensor_name)
     except Exception:

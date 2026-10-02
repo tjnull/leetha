@@ -27,6 +27,12 @@ class HostRepository:
         """)
         await self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_hosts_ip ON hosts(ip_addr)")
+        await self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_hosts_last_active "
+            "ON hosts(last_active DESC)")
+        await self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_hosts_discovered_at "
+            "ON hosts(discovered_at DESC)")
         # Migration: add identity_id column for existing databases
         try:
             await self._conn.execute(

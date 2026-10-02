@@ -10,6 +10,11 @@ from leetha.capture.remote.protocol import (
 )
 import struct
 
+# Ethernet jumbo frames can exceed the sensor's normal 16 KiB snaplen.
+# A corrupt length must never pin an unbounded reassembly buffer.
+MAX_REMOTE_FRAME_SIZE = 65_535
+MAX_REMOTE_MESSAGE_SIZE = 1_048_576
+
 
 @dataclass
 class SensorSession:
@@ -34,18 +39,29 @@ class SensorSession:
     websocket: object | None = field(default=None, repr=False)
 
     def feed(self, data: bytes) -> list[RemotePacketFrame]:
+        if len(data) > MAX_REMOTE_MESSAGE_SIZE:
+            raise ValueError("remote sensor message exceeded limit")
         self._buffer.extend(data)
         frames: list[RemotePacketFrame] = []
-        while len(self._buffer) >= FRAME_HEADER_SIZE:
-            pkt_len = struct.unpack_from("!I", self._buffer, 0)[0]
+        offset = 0
+        while len(self._buffer) - offset >= FRAME_HEADER_SIZE:
+            pkt_len = struct.unpack_from("!I", self._buffer, offset)[0]
+            if pkt_len > MAX_REMOTE_FRAME_SIZE:
+                self._buffer.clear()
+                raise ValueError(f"remote frame exceeds {MAX_REMOTE_FRAME_SIZE} bytes")
             total = FRAME_HEADER_SIZE + pkt_len
-            if len(self._buffer) < total:
+            if len(self._buffer) - offset < total:
                 break
-            frame = deserialize_frame(bytes(self._buffer[:total]))
+            frame = deserialize_frame(bytes(self._buffer[offset:offset + total]))
             frames.append(frame)
-            self._buffer = self._buffer[total:]
+            offset += total
             self._packet_count += 1
             self._byte_count += pkt_len
+        if offset:
+            del self._buffer[:offset]
+        if len(self._buffer) > MAX_REMOTE_FRAME_SIZE + FRAME_HEADER_SIZE:
+            self._buffer.clear()
+            raise ValueError("remote frame buffer exceeded limit")
         return frames
 
     def set_discovered_interfaces(self, interfaces: list[dict]) -> None:

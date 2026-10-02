@@ -1197,6 +1197,10 @@ class SignatureMatcher:
                     if len(val_lc) > winner_len and val_lc in opt60_lc:
                         winner = rec
                         winner_len = len(val_lc)
+            # Vendor classes are supplied by devices on the wire.  Keep the
+            # common ones hot without retaining every unique string forever.
+            if len(memo) >= 1024:
+                memo.pop(next(iter(memo)))
             memo[opt60] = winner
 
         if not winner:
@@ -1990,7 +1994,7 @@ class SignatureMatcher:
             try:
                 with open(filepath, "r", encoding="utf-8") as fh:
                     data = json.load(fh)
-                data = self._compact_cache(name, data)
+                data = self._compact_cache(name, data, self._relevant_device_ids() if name == "huginn_devices" else None)
                 self._store[name] = data
                 _log.debug("Sync-loaded WARM_ONLY cache: %s", name)
                 return data
@@ -2006,7 +2010,7 @@ class SignatureMatcher:
         try:
             with open(filepath, "r", encoding="utf-8") as fh:
                 parsed = json.load(fh)
-            parsed = self._compact_cache(name, parsed)
+            parsed = self._compact_cache(name, parsed, self._relevant_device_ids() if name == "huginn_devices" else None)
             self._store[name] = parsed
             return parsed
         except (json.JSONDecodeError, OSError) as err:
@@ -2014,9 +2018,44 @@ class SignatureMatcher:
             self._store[name] = None
             return None
 
+    def _relevant_device_ids(self) -> set[str]:
+        combos = self._fetch_json("huginn_combinations")
+        if not isinstance(combos, dict):
+            return set()
+        return {str(rec["device_id"])
+                for rows in combos.get("entries", {}).values()
+                for rec in rows if rec.get("device_id")}
+
     @staticmethod
-    def _compact_cache(name: str, data: dict) -> dict:
-        """Retain the cache loader hook for callers using the old API."""
+    def _compact_cache(name: str, data: dict, relevant_device_ids: set[str] | None = None) -> dict:
+        """Discard feed fields and rows that matching never reads."""
+        if not isinstance(data, dict) or not isinstance(data.get("entries"), dict):
+            return data
+        if name == "huginn_dhcp_vendor":
+            entries = {}
+            def score(row):
+                return sum(bool(row.get(key)) for key in
+                           ("vendor_hint", "device_type", "model"))
+
+            for rec in data["entries"].values():
+                if not isinstance(rec, dict) or not rec.get("value"):
+                    continue
+                if not any(rec.get(key) for key in ("vendor_hint", "device_type", "model")):
+                    continue
+                value = rec["value"].lower()
+                old = entries.get(value)
+                if old is None or score(rec) > score(old):
+                    entries[value] = {key: rec[key] for key in
+                                      ("value", "vendor_hint", "device_type", "model")
+                                      if key in rec}
+            return {"entries": entries}
+        if name == "huginn_devices":
+            return {"entries": {
+                key: {field: rec[field] for field in ("hierarchy_str", "hierarchy")
+                      if field in rec}
+                for key, rec in data["entries"].items()
+                if isinstance(rec, dict) and (relevant_device_ids is None or key in relevant_device_ids)
+            }}
         return data
 
     # Backward-compat alias for the internal cache loader

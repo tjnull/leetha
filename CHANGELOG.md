@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.2] - 2026-10-02 — Memory bounds and storage scaling
+
+### Added
+- Enterprise storage architecture for 10,000–100,000+ device deployments,
+  selecting PostgreSQL as the central store while retaining SQLite as a
+  standalone backend and bounded sensor spool.
+- A repeatable storage benchmark covering a 100,000-device inventory and the
+  dashboard's high-volume sighting queries.
+- Memory and Linux swap guidance, with process RSS and PCAP buffer usage in
+  capture status.
+
+### Changed
+- Add composite SQLite indexes for time-window dashboard queries, device
+  activity, interface filtering, inventory sorting, findings, and fingerprint
+  history so current installations remain responsive as retention fills.
+- Store source and destination addresses in indexed typed columns so the
+  top-connections dashboard no longer reparses every sighting's JSON payload.
+- Narrow local capture to protocols Leetha parses, reduce packet and sensor
+  channel capacity, and limit the PCAP export ring by bytes.
+- Keep only useful Huginn fingerprint entries in memory and bound lookup
+  signatures and tracked MAC history.
+
+### Fixed
+- Reject oversized remote frames and messages, and route both remote sensor
+  endpoints through worker-thread parsing and the same drop-accounted queue.
+- Discard sensor frames larger than its configured replay buffer.
+
 ## [1.5.1] - 2026-10-02 — Capture backpressure and gateway attribution
 
 ### Fixed

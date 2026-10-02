@@ -19,6 +19,9 @@ impl RingBuffer {
 
     pub fn push(&mut self, frame: Vec<u8>) {
         let frame_size = frame.len();
+        if frame_size > self.max_bytes {
+            return;
+        }
         while self.current_bytes + frame_size > self.max_bytes && !self.frames.is_empty() {
             if let Some(old) = self.frames.pop_front() {
                 self.current_bytes -= old.len();
@@ -80,6 +83,14 @@ mod tests {
     #[test]
     fn test_empty_buffer() {
         let buf = RingBuffer::new(1024);
+        assert!(buf.is_empty());
+        assert_eq!(buf.bytes_used(), 0);
+    }
+
+    #[test]
+    fn test_oversized_frame_is_discarded() {
+        let mut buf = RingBuffer::new(100);
+        buf.push(vec![1u8; 101]);
         assert!(buf.is_empty());
         assert_eq!(buf.bytes_used(), 0);
     }

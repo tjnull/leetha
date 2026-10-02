@@ -5,7 +5,7 @@
 ### Passive Network Fingerprinting and Analysis Engine
 
 [![CI](https://github.com/tjnull/leetha/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/tjnull/leetha/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-1.5.1-blue.svg)](https://github.com/tjnull/leetha/releases)
+[![Version](https://img.shields.io/badge/version-1.5.2-blue.svg)](https://github.com/tjnull/leetha/releases)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Tests](https://img.shields.io/badge/tests-850%20passing-brightgreen.svg)](#testing)
@@ -446,7 +446,7 @@ src/leetha/
   patterns/              JSON pattern loader, compiled regex matching, category index
   rules/                 Finding rules (new_host auth-graded, identity shift, presence, ...)
   probe/                 315 active service identification plugins
-  store/                 SQLite persistence with retention policies
+  store/                 Repository persistence; SQLite standalone backend
   inventory/             External inventory importers (scheduler, credentials, DHCP leases)
     base.py              BaseImporter + ImportedDevice dataclass
     registry.py          @register_importer decorator
@@ -477,7 +477,7 @@ src/leetha/
 | Packet dedup | TTL-based LRU cache (300s TTL, 50K entries) | Stable memory, no state loss |
 | Pattern matching | Pre-compiled regexes with category-indexed lookup | O(k) per match, not O(n) |
 | Evidence chains | Capped at 20 per source, 200 total per device | Bounded per host |
-| Database | Configurable retention (7d observations, 30d alerts) | Pruned periodically |
+| Database | SQLite WAL, time/host composite indexes, 7d sighting retention | Pruned periodically |
 | Sync downloads | Streaming JSON parsers (ijson support) | O(item) memory, not O(file) |
 | Batch writes | Grouped SQLite transactions (50 ops, 100ms window) | Amortized I/O |
 
@@ -509,6 +509,8 @@ See [docs/wiki/](docs/wiki/Home.md) for detailed guides:
 - [Presence Monitoring](docs/wiki/Presence-Monitoring.md)
 - [Inventory Sources](docs/wiki/Inventory-Sources.md)
 - [Remote Sensors](docs/wiki/Remote-Sensors.md)
+- [Memory Usage and Swap](docs/wiki/Memory-Usage.md)
+- [Enterprise Storage](docs/wiki/Enterprise-Storage.md)
 - [Attack Surface Analysis](docs/wiki/Attack-Surface-Analysis.md)
 - [Spoofing Detection](docs/wiki/Spoofing-Detection.md)
 

@@ -25,6 +25,9 @@ class SnapshotRepository:
         """)
         await self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_snapshots_hw ON fingerprint_snapshots(hw_addr)")
+        await self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_snapshots_hw_ts "
+            "ON fingerprint_snapshots(hw_addr, timestamp DESC)")
         await self._conn.commit()
 
     async def add(self, hw_addr: str, *, os_family: str | None = None,

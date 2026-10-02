@@ -150,7 +150,9 @@ class LeethaApp:
 
         self.capture_engine = CaptureEngine(interfaces=iface_configs)
         import queue as _queue_mod
-        self.packet_queue: _queue_mod.Queue = _queue_mod.Queue(maxsize=20_000)
+        # Bound backlog during bursts: packet count alone is only an
+        # approximation of memory, so keep this well below the old 20k cap.
+        self.packet_queue: _queue_mod.Queue = _queue_mod.Queue(maxsize=4_096)
         self.event_subscribers: list[asyncio.Queue] = []
         try:
             from leetha.notifications import NotificationDispatcher
@@ -674,7 +676,10 @@ class LeethaApp:
                 with open(path, "r", encoding="utf-8") as fh:
                     data = _json.load(fh)
                 from leetha.fingerprint.lookup import SignatureMatcher
-                data = SignatureMatcher._compact_cache(name, data)
+                data = SignatureMatcher._compact_cache(
+                    name, data,
+                    lookup._relevant_device_ids() if name == "huginn_devices" else None,
+                )
                 lookup._json_cache[name] = data
                 elapsed = _time.monotonic() - t1
                 logger.debug("Preloaded %s (%.1fs)", name, elapsed)

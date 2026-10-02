@@ -7,6 +7,7 @@ finding rules. Designed for concurrent execution.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from collections import defaultdict, OrderedDict
 from datetime import datetime, timezone
@@ -78,7 +79,7 @@ class Pipeline:
         self._lookup_done: dict[str, OrderedDict] = defaultdict(OrderedDict)
         self._batch_queue: list = []
         self._last_seen: dict[str, float] = {}  # MAC -> monotonic timestamp (for LRU)
-        self._max_tracked_macs = 20_000  # cleanup threshold
+        self._max_tracked_macs = 5_000  # persistent inventory remains in SQLite
         self._processor_instances: dict[str, object] = {}
         self._rule_instances: list = []
         self._running = False
@@ -186,11 +187,25 @@ class Pipeline:
         keys = Pipeline._LOOKUP_FIELDS.get(protocol)
         if not keys:
             return ()
-        values = tuple(str(fields.get(key) or "") for key in keys)
+        def compact(value) -> str:
+            text = str(value or "")
+            if len(text) > 256:
+                return "hash:" + hashlib.blake2b(
+                    text.encode("utf-8", errors="replace"), digest_size=16
+                ).hexdigest()
+            return text
+
+        values = tuple(compact(fields.get(key)) for key in keys)
         if protocol == "mdns":
             txt = fields.get("txt_records")
             if isinstance(txt, dict):
-                values += tuple(sorted((str(k), str(v)) for k, v in txt.items()))
+                digest = hashlib.blake2b(digest_size=16)
+                for key, value in sorted((str(k), str(v)) for k, v in txt.items()):
+                    digest.update(key.encode("utf-8", errors="replace"))
+                    digest.update(b"\0")
+                    digest.update(value.encode("utf-8", errors="replace"))
+                    digest.update(b"\0")
+                values += ("txt:" + digest.hexdigest(),)
         return values
 
     def _is_forwarded_identity(self, packet: CapturedPacket) -> bool:

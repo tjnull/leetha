@@ -72,18 +72,49 @@ _FULL_BPF = " or ".join([
 ])
 
 
+class PacketRingBuffer:
+    """Small PCAP history bounded by both frame count and byte size."""
+
+    def __init__(self, max_packets: int = 2_000, max_bytes: int = 8 * 1024 * 1024):
+        self._frames: deque[bytes] = deque()
+        self._max_packets = max_packets
+        self._max_bytes = max_bytes
+        self._bytes = 0
+        self._lock = threading.Lock()
+
+    def append(self, frame: bytes) -> None:
+        if len(frame) > self._max_bytes:
+            return
+        with self._lock:
+            while self._frames and (len(self._frames) >= self._max_packets or
+                                    self._bytes + len(frame) > self._max_bytes):
+                self._bytes -= len(self._frames.popleft())
+            self._frames.append(frame)
+            self._bytes += len(frame)
+
+    def __iter__(self):
+        with self._lock:
+            return iter(list(self._frames))
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._frames)
+
+    @property
+    def bytes_used(self) -> int:
+        with self._lock:
+            return self._bytes
+
+
 def _bpf_for_mode(mode: str) -> str:
     """Return a BPF expression appropriate for the interface capture mode.
 
-    Ethernet and tap interfaces get a broad filter that captures all IP,
-    ARP, and L2 protocol traffic — essential for passive fingerprinting
-    across VLANs. TUN interfaces only see layer 3.
+    Ethernet and tap interfaces capture the protocols consumed by the
+    parsers. TUN interfaces only see layer 3.
     """
     if mode == "tun":
         return "ip or ip6"
-    # Broad filter for ethernet/tap/bridge — capture everything useful
-    # including broadcast traffic from other VLANs visible on the wire
-    return "ip or ip6 or arp or " + _BPF_L2_PROTOS + " or ether proto 0x888e or igmp or ether proto 0x88b8 or ether proto 0x8892"
+    return _FULL_BPF
 
 
 # ---------------------------------------------------------------------------
@@ -109,7 +140,7 @@ class PacketCapture:
         self._event_loop: asyncio.AbstractEventLoop | None = None
 
         # ring buffer of raw bytes for PCAP export
-        self._packet_buffer: deque = deque(maxlen=2_000)
+        self._packet_buffer = PacketRingBuffer()
         self.dropped_packets = 0
 
         # TTL-based dedup caches (replace old class-level sets)
@@ -297,8 +328,7 @@ class PacketCapture:
     # ------------------------------------------------------------------
 
     def _ingest(self, frame, dev_name: str = "") -> None:
-        """Buffer raw bytes, classify the frame, and push to async queue."""
-        self._packet_buffer.append(bytes(frame))
+        """Classify the frame, retaining only useful packets for PCAP export."""
 
         result = self._classify(frame)
         if result is None:
@@ -317,6 +347,7 @@ class PacketCapture:
                 )
                 result.interface = dev_name
                 self._enqueue(result)
+                self._packet_buffer.append(bytes(frame))
             return
 
         # Suppress duplicate service banners -- only enqueue the first
@@ -337,6 +368,7 @@ class PacketCapture:
         result.interface = dev_name
 
         self._enqueue(result)
+        self._packet_buffer.append(bytes(frame))
 
     # ------------------------------------------------------------------
     # Classifier -- iterate PARSER_CHAIN for the first match

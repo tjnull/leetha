@@ -1,3 +1,3 @@
 """Leetha — network host identification and threat surface analysis engine."""
 
-__version__ = "1.5.1"
+__version__ = "1.5.2"

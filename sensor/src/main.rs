@@ -330,7 +330,7 @@ async fn run_legacy_mode(
     iface: &str,
     verbose: u8,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(10_000);
+    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(1_024);
     let ring = Arc::new(Mutex::new(RingBuffer::new(
         embedded::BUFFER_SIZE_MB * 1024 * 1024,
     )));
@@ -450,7 +450,7 @@ async fn connect_controlled(
     info!("reported {} interfaces to central", discovery.interfaces.len());
 
     // Shared state for capture threads
-    let (pkt_tx, mut pkt_rx) = mpsc::channel::<Vec<u8>>(10_000);
+    let (pkt_tx, mut pkt_rx) = mpsc::channel::<Vec<u8>>(1_024);
     let captures: Arc<Mutex<HashMap<String, CaptureHandle>>> =
         Arc::new(Mutex::new(HashMap::new()));
 

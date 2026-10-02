@@ -4,6 +4,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from leetha.capture.remote.server import RemoteSensorManager, SensorSession
 from leetha.capture.remote.protocol import serialize_frame
+from leetha.capture.remote.server import MAX_REMOTE_FRAME_SIZE, MAX_REMOTE_MESSAGE_SIZE
 
 
 @pytest.fixture
@@ -55,6 +56,29 @@ async def test_partial_frame_buffered(manager):
     frames2 = session.feed(frame_data[30:])
     assert len(frames2) == 1
     assert frames2[0].packet == raw_pkt
+
+
+def test_oversized_frame_header_rejected(manager):
+    session = manager.register("test", "10.0.0.1")
+    header = struct.pack("!IqI", MAX_REMOTE_FRAME_SIZE + 1, 0, 0)
+    with pytest.raises(ValueError, match="exceeds"):
+        session.feed(header)
+    assert not session._buffer
+
+
+def test_oversized_sensor_message_rejected_before_buffering(manager):
+    session = manager.register("test", "10.0.0.1")
+    with pytest.raises(ValueError, match="message exceeded"):
+        session.feed(b"x" * (MAX_REMOTE_MESSAGE_SIZE + 1))
+    assert not session._buffer
+
+
+def test_many_frames_leave_no_reassembly_backlog(manager):
+    session = manager.register("test", "10.0.0.1")
+    data = b"".join(serialize_frame(bytes([i]) * 60, i, 0) for i in range(100))
+    frames = session.feed(data)
+    assert len(frames) == 100
+    assert not session._buffer
 
 
 async def test_sensor_stats(manager):

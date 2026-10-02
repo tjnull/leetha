@@ -220,6 +220,8 @@ async def start_sensor_listener(
                 ssl=ssl_ctx,
                 logger=log,
                 ping_interval=None,
+                max_size=1_048_576,
+                max_queue=4,
             )
             log.info("sensor listener started on %s:%d (mTLS)", host, port)
             await _ws_server.serve_forever()

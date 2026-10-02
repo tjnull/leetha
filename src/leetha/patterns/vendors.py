@@ -13810,7 +13810,6 @@ def load_oui_data(cache_dir=None) -> Dict[str, Dict]:
                             "model": None,
                             "status": info.get("status", "current"),
                             "registrant_raw": info.get("registrant_raw"),
-                            "registrant_history": info.get("registrant_history"),
                             "deregistered_date": info.get("deregistered_date"),
                         }
                 logger.info(f"Loaded {len(oui_dict)} IEEE OUI entries from cache")
