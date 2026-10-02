@@ -150,7 +150,7 @@ class LeethaApp:
 
         self.capture_engine = CaptureEngine(interfaces=iface_configs)
         import queue as _queue_mod
-        self.packet_queue: _queue_mod.Queue = _queue_mod.Queue()
+        self.packet_queue: _queue_mod.Queue = _queue_mod.Queue(maxsize=20_000)
         self.event_subscribers: list[asyncio.Queue] = []
         try:
             from leetha.notifications import NotificationDispatcher
@@ -238,10 +238,7 @@ class LeethaApp:
         from leetha.rules.presence import handle_presence_transition as _presence_cb
 
         async def _on_presence(t):
-            try:
-                await _presence_cb(self.store, t)
-            except Exception:
-                logger.exception("presence callback failed for %s", t.mac)
+            await _presence_cb(self.store, t)
 
         self.presence_sweeper = PresenceSweeper(
             self.db, period_seconds=60.0, on_transition=_on_presence,
@@ -412,7 +409,7 @@ class LeethaApp:
 
             from leetha.store.store import Store
             from leetha.core.pipeline import Pipeline
-            thread_store = Store(self.config.db_path)
+            thread_store = Store(self.config.db_path, batch_sightings=True)
             loop.run_until_complete(thread_store.initialize())
             logger.info("Process thread initialized (db=%s)", self.config.db_path)
         except Exception as e:
@@ -433,6 +430,7 @@ class LeethaApp:
         thread_pipeline = Pipeline(
             store=thread_store,
             is_local_mac=self.is_local_device,
+            lookup=self.pipeline._lookup if self.pipeline else None,
         )
 
         # Reference to the main event loop for thread-safe event dispatch
@@ -552,6 +550,7 @@ class LeethaApp:
                 try:
                     pkt = self.packet_queue.get(timeout=0.25)
                 except _queue_mod.Empty:
+                    loop.run_until_complete(thread_store.sightings.flush())
                     continue
                 except Exception:
                     continue

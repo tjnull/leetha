@@ -15,6 +15,21 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
+// Capture the protocols consumed by the parser, including discovery and
+// service ports. Keep this in sync with capture/engine.py when adding parsers.
+const CAPTURE_FILTER: &str = "arp or icmp6 or ether proto 0x888e or ether proto 0x88cc \
+    or udp port 53 or udp port 67 or udp port 68 or udp port 546 or udp port 547 \
+    or udp port 5353 or udp port 1900 or udp port 5355 or udp port 137 \
+    or udp port 161 or udp port 162 or udp port 47808 or udp port 5683 \
+    or tcp[tcpflags] & tcp-syn != 0 \
+    or (tcp port 443 and tcp[((tcp[12] & 0xf0) >> 2)] = 0x16 \
+        and tcp[((tcp[12] & 0xf0) >> 2) + 5] = 0x01) \
+    or (ip6 and tcp port 443) or tcp port 80 \
+    or tcp port 22 or tcp port 21 or tcp port 23 or tcp port 25 \
+    or tcp port 445 or tcp port 139 or tcp port 3389 or tcp port 1883 \
+    or tcp port 9100 or tcp port 502 or tcp port 44818";
+const CAPTURE_SNAPLEN: i32 = 16384;
+
 #[derive(Parser, Debug)]
 #[command(
     name = "leetha-sensor",
@@ -110,6 +125,7 @@ struct HeartbeatMessage {
 struct InterfaceStats {
     packets: u64,
     bytes: u64,
+    dropped: u64,
 }
 
 #[derive(Serialize)]
@@ -135,6 +151,7 @@ struct CaptureHandle {
     thread: Option<std::thread::JoinHandle<()>>,
     packets: Arc<AtomicU64>,
     bytes: Arc<AtomicU64>,
+    dropped: Arc<AtomicU64>,
 }
 
 fn spawn_capture_thread(
@@ -145,11 +162,13 @@ fn spawn_capture_thread(
     let stop_flag = Arc::new(AtomicBool::new(false));
     let packets = Arc::new(AtomicU64::new(0));
     let bytes_count = Arc::new(AtomicU64::new(0));
+    let dropped = Arc::new(AtomicU64::new(0));
 
     let iface_name = iface.to_string();
     let flag = stop_flag.clone();
     let pkts = packets.clone();
     let byts = bytes_count.clone();
+    let drops = dropped.clone();
 
     let cap_device = Capture::from_device(iface_name.as_str())
         .map_err(|e| format!("{}", e))?;
@@ -157,10 +176,11 @@ fn spawn_capture_thread(
     let use_promisc = iface_name != "any";
     let mut cap = cap_device
         .promisc(use_promisc)
-        .snaplen(65535)
+        .snaplen(CAPTURE_SNAPLEN)
         .timeout(1000)
         .open()
         .map_err(|e| format!("{}", e))?;
+    cap.filter(CAPTURE_FILTER, true).map_err(|e| format!("capture filter: {}", e))?;
 
     let thread = std::thread::spawn(move || {
         if use_promisc {
@@ -186,8 +206,11 @@ fn spawn_capture_thread(
                         debug!("[{}] packet: {} bytes", iface_name, packet.data.len());
                     }
 
-                    if tx.blocking_send(frame).is_err() {
-                        warn!("[{}] channel full, dropping packet", iface_name);
+                    if tx.try_send(frame).is_err() {
+                        let total = drops.fetch_add(1, Ordering::Relaxed) + 1;
+                        if total == 1 || total % 1000 == 0 {
+                            warn!("[{}] dropped {} packets (send channel full)", iface_name, total);
+                        }
                     }
                 }
                 Err(pcap::Error::TimeoutExpired) => continue,
@@ -204,6 +227,7 @@ fn spawn_capture_thread(
         thread: Some(thread),
         packets,
         bytes: bytes_count,
+        dropped,
     })
 }
 
@@ -314,6 +338,7 @@ async fn run_legacy_mode(
     let iface_name = iface.to_string();
     let tx_clone = tx.clone();
     std::thread::spawn(move || {
+        let mut dropped = 0u64;
         let cap_device = match Capture::from_device(iface_name.as_str()) {
             Ok(c) => c,
             Err(e) => {
@@ -322,13 +347,17 @@ async fn run_legacy_mode(
             }
         };
         let use_promisc = iface_name != "any";
-        let mut cap = match cap_device.promisc(use_promisc).snaplen(65535).timeout(1000).open() {
+        let mut cap = match cap_device.promisc(use_promisc).snaplen(CAPTURE_SNAPLEN).timeout(1000).open() {
             Ok(c) => c,
             Err(e) => {
                 error!("cannot open {}: {}", iface_name, e);
                 std::process::exit(1);
             }
         };
+        if let Err(e) = cap.filter(CAPTURE_FILTER, true) {
+            error!("capture filter failed on {}: {}", iface_name, e);
+            std::process::exit(1);
+        }
         info!("capture started on {}", iface_name);
         loop {
             match cap.next_packet() {
@@ -336,8 +365,11 @@ async fn run_legacy_mode(
                     let ts_ns = packet.header.ts.tv_sec as i64 * 1_000_000_000
                         + packet.header.ts.tv_usec as i64 * 1_000;
                     let frame = serialize_frame(packet.data, ts_ns, 0);
-                    if tx_clone.blocking_send(frame).is_err() {
-                        warn!("channel full, dropping");
+                    if tx_clone.try_send(frame).is_err() {
+                        dropped += 1;
+                        if dropped == 1 || dropped % 1000 == 0 {
+                            warn!("channel full, dropped {} packets", dropped);
+                        }
                     }
                 }
                 Err(pcap::Error::TimeoutExpired) => continue,
@@ -523,6 +555,7 @@ async fn connect_controlled(
                     stats.insert(name.clone(), InterfaceStats {
                         packets: handle.packets.load(Ordering::Relaxed),
                         bytes: handle.bytes.load(Ordering::Relaxed),
+                        dropped: handle.dropped.load(Ordering::Relaxed),
                     });
                 }
                 drop(caps);

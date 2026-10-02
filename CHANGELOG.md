@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-10-02 — Capture backpressure and gateway attribution
+
+### Fixed
+- Bound the packet queue, count drops in capture status, filter remote sensor
+  traffic, and move remote frame parsing off the event loop.
+- Batch sightings and serialize SQLite writes across the application; retry
+  busy finding writes and pending presence transitions.
+- Restore OUI evidence for gateways first seen through DHCP or Router
+  Advertisements and reject forwarded host fingerprints from gateway verdicts.
+- Bound per-device fingerprint lookup history and backfill randomized MAC flags
+  for devices already in the database.
+
 ## [1.5.0] - 2026-10-01 — Fingerprint source refresh and packaged data
 
 ### Added

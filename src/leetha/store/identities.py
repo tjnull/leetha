@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from datetime import datetime, timezone
 from leetha.store.models import Identity
 
 
 class IdentityRepository:
-    def __init__(self, conn):
+    def __init__(self, conn, write_lock=None):
         self._conn = conn
+        self._mu = write_lock or asyncio.Lock()
 
     async def create_tables(self):
         await self._conn.execute("""
@@ -35,12 +37,13 @@ class IdentityRepository:
         # INSERT OR IGNORE avoids TOCTOU race: if two workers try to create
         # the same identity simultaneously, the second INSERT is a no-op
         # instead of a UNIQUE constraint violation.
-        await self._conn.execute("""
-            INSERT OR IGNORE INTO identities
-                (primary_mac, confidence, fingerprint, first_seen, last_seen)
-            VALUES (?, 0, '{}', ?, ?)
-        """, (primary_mac, now.isoformat(), now.isoformat()))
-        await self._conn.commit()
+        async with self._mu:
+            await self._conn.execute("""
+                INSERT OR IGNORE INTO identities
+                    (primary_mac, confidence, fingerprint, first_seen, last_seen)
+                VALUES (?, 0, '{}', ?, ?)
+            """, (primary_mac, now.isoformat(), now.isoformat()))
+            await self._conn.commit()
         return await self.find_by_mac(primary_mac)
 
     async def find_by_mac(self, primary_mac: str) -> Identity | None:
@@ -66,6 +69,10 @@ class IdentityRepository:
         return [self._row_to_identity(r) for r in rows]
 
     async def update(self, identity: Identity) -> None:
+        async with self._mu:
+            await self._update_locked(identity)
+
+    async def _update_locked(self, identity: Identity) -> None:
         await self._conn.execute("""
             UPDATE identities SET
                 manufacturer = COALESCE(?, manufacturer),

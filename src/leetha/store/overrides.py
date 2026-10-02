@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -20,8 +21,9 @@ ALLOWED_FIELDS: frozenset[str] = frozenset({
 
 
 class OverrideRepository:
-    def __init__(self, conn):
+    def __init__(self, conn, write_lock=None):
         self._conn = conn
+        self._mu = write_lock or asyncio.Lock()
 
     async def create_tables(self):
         await self._conn.execute("""
@@ -53,6 +55,11 @@ class OverrideRepository:
         # Build values: use provided value or NULL for each allowed field
         vals = {k: filtered.get(k) for k in ALLOWED_FIELDS}
 
+        async with self._mu:
+            await self._upsert_locked(hw_addr, vals, now)
+        return await self.find_by_addr(hw_addr)
+
+    async def _upsert_locked(self, hw_addr, vals, now):
         await self._conn.execute("""
             INSERT INTO device_overrides
                 (hw_addr, hostname, device_type, manufacturer, os_family,
@@ -73,7 +80,6 @@ class OverrideRepository:
               vals["os_family"], vals["os_version"], vals["model"],
               vals["connection_type"], vals["disposition"], vals["notes"], now))
         await self._conn.commit()
-        return await self.find_by_addr(hw_addr)
 
     async def find_by_addr(self, hw_addr: str) -> dict | None:
         cursor = await self._conn.execute(
@@ -85,10 +91,11 @@ class OverrideRepository:
         return self._row_to_dict(row)
 
     async def delete(self, hw_addr: str) -> None:
-        await self._conn.execute(
-            "DELETE FROM device_overrides WHERE hw_addr = ?", (hw_addr,)
-        )
-        await self._conn.commit()
+        async with self._mu:
+            await self._conn.execute(
+                "DELETE FROM device_overrides WHERE hw_addr = ?", (hw_addr,)
+            )
+            await self._conn.commit()
 
     async def find_all(self) -> list[dict]:
         cursor = await self._conn.execute("SELECT * FROM device_overrides")

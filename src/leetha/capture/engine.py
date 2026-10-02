@@ -12,6 +12,7 @@ import asyncio
 import logging
 import threading
 from collections import deque
+from queue import Full
 from typing import TYPE_CHECKING
 
 from leetha.capture.dedup import TTLDedup
@@ -109,10 +110,13 @@ class PacketCapture:
 
         # ring buffer of raw bytes for PCAP export
         self._packet_buffer: deque = deque(maxlen=2_000)
+        self.dropped_packets = 0
 
         # TTL-based dedup caches (replace old class-level sets)
         self._ip_observed_dedup = TTLDedup(max_entries=50_000, ttl_seconds=300.0)
         self._banner_dedup = TTLDedup(max_entries=50_000, ttl_seconds=300.0)
+        self._unclassified_dedup = TTLDedup(max_entries=50_000, ttl_seconds=60.0)
+        self._dns_dedup = TTLDedup(max_entries=50_000, ttl_seconds=60.0)
 
         # registered interfaces keyed by device name
         self.interfaces: dict[str, InterfaceConfig] = {}
@@ -302,6 +306,8 @@ class PacketCapture:
             # device still appears in the inventory even when no parser matches.
             hw = getattr(frame, "src", None)
             if hw and ":" in hw and hw != "00:00:00:00:00:00":
+                if self._unclassified_dedup.seen(hw):
+                    return
                 from leetha.capture.packets import CapturedPacket
                 result = CapturedPacket(
                     protocol="unclassified",
@@ -417,10 +423,20 @@ class PacketCapture:
         """
         if self._output is None:
             return
+        if item.protocol in ("dns", "dns_answer"):
+            if self._dns_dedup.seen(
+                item.hw_addr, item.protocol, item.fields.get("query_name"),
+                item.fields.get("record_type") or item.fields.get("query_type"),
+                item.fields.get("answer_ip") or item.fields.get("hostname"),
+            ):
+                return
+        # Parsers keep a copy of the full frame for the old decode API, but
+        # the live pipeline never reads it. The PCAP ring owns its own copy.
+        item.raw = None
         try:
             self._output.put_nowait(item)
-        except Exception:
-            pass  # queue full (shouldn't happen with unlimited queue)
+        except Full:
+            self.dropped_packets += 1
 
 
 # Backward-compatible alias so ``from leetha.capture.engine import CaptureEngine``

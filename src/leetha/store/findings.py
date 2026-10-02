@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from datetime import datetime, timezone
 from leetha.store.models import Finding, FindingRule, AlertSeverity
 
@@ -29,6 +30,12 @@ class FindingRepository:
         """)
         await self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_findings_dedup ON findings(hw_addr, rule, resolved)")
+        await self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_findings_active_ts "
+            "ON findings(resolved, timestamp DESC)")
+        await self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_findings_hw_ts "
+            "ON findings(hw_addr, timestamp DESC)")
         await self._conn.commit()
         # Migrate: add columns if they don't exist
         for col, default in [("status", "'new'"), ("disposition", "NULL"),
@@ -42,16 +49,25 @@ class FindingRepository:
 
     async def add(self, finding: Finding) -> int:
         async with self._mu:
-            cursor = await self._conn.execute("""
-                INSERT INTO findings (hw_addr, rule, severity, message, timestamp, resolved, status, disposition, snoozed_until, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (finding.hw_addr, finding.rule.value, finding.severity.value,
-                  finding.message, finding.timestamp.isoformat(), int(finding.resolved),
-                  finding.status, finding.disposition,
-                  finding.snoozed_until.isoformat() if finding.snoozed_until else None,
-                  finding.notes))
-            await self._conn.commit()
-            return cursor.lastrowid
+            for attempt in range(4):
+                try:
+                    cursor = await self._conn.execute("""
+                        INSERT INTO findings (hw_addr, rule, severity, message, timestamp, resolved, status, disposition, snoozed_until, notes)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (finding.hw_addr, finding.rule.value, finding.severity.value,
+                          finding.message, finding.timestamp.isoformat(), int(finding.resolved),
+                          finding.status, finding.disposition,
+                          finding.snoozed_until.isoformat() if finding.snoozed_until else None,
+                          finding.notes))
+                    await self._conn.commit()
+                    return cursor.lastrowid
+                except sqlite3.OperationalError as exc:
+                    code = getattr(exc, "sqlite_errorcode", None)
+                    locked = code in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+                    locked = locked or "locked" in str(exc).lower() or "busy" in str(exc).lower()
+                    if not locked or attempt == 3:
+                        raise
+                    await asyncio.sleep(0.2 * (2 ** attempt))
 
     async def list_active(self, limit: int = 100, offset: int = 0) -> list[Finding]:
         cursor = await self._conn.execute(

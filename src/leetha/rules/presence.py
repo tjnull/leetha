@@ -48,33 +48,26 @@ async def handle_presence_transition(store, transition: PresenceTransition) -> F
                 f"(no traffic for > {transition.threshold_seconds}s)"
             ),
         )
-        try:
-            await store.findings.add(finding)
-        except Exception:
-            log.exception("failed to persist device_went_offline finding")
+        await store.findings.add(finding)
         return finding
 
     if transition.new_state == "online":
         # Resolve any unresolved went_offline findings for this MAC
-        try:
+        async with store._write_lock:
             async with store.connection.execute(
                 "UPDATE findings SET resolved = 1 "
                 "WHERE hw_addr = ? AND rule = ? AND resolved = 0",
                 (transition.mac, FindingRule.DEVICE_WENT_OFFLINE.value),
             ) as _:
                 await store.connection.commit()
-        except Exception:
-            log.exception("failed to auto-resolve went_offline findings")
+
         finding = Finding(
             hw_addr=transition.mac,
             rule=FindingRule.DEVICE_CAME_ONLINE,
             severity=AlertSeverity.INFO,
             message=f"Device {transition.mac} came back online",
         )
-        try:
-            await store.findings.add(finding)
-        except Exception:
-            log.exception("failed to persist device_came_online finding")
+        await store.findings.add(finding)
         return finding
 
     return None

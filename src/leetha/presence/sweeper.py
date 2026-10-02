@@ -83,6 +83,7 @@ class PresenceSweeper:
         self._now_fn = now_fn or (lambda: datetime.now(timezone.utc))
         self._stop = asyncio.Event()
         self._task: asyncio.Task | None = None
+        self._pending_callbacks: dict[tuple[str, str], PresenceTransition] = {}
 
     async def sweep_once(self) -> list[PresenceTransition]:
         """Single pass. Returns transitions triggered this pass.
@@ -168,8 +169,11 @@ class PresenceSweeper:
 
         if self._callback is not None:
             for t in transitions:
+                self._pending_callbacks[(t.mac, t.new_state)] = t
+            for key, t in list(self._pending_callbacks.items()):
                 try:
                     await self._callback(t)
+                    self._pending_callbacks.pop(key, None)
                 except Exception:
                     log.exception("presence transition callback failed for %s", t.mac)
         return transitions

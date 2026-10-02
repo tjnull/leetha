@@ -161,16 +161,16 @@ async def start_sensor_listener(
                     log.debug("sensor %s: malformed frame data, skipping", sensor_name)
                     continue
 
-                for frame in frames:
-                    try:
-                        pkt = Ether(frame.packet)
-                        iface_label = f"remote:{sensor_name}"
-                        # Route through _ingest() so dedup filters
-                        # (ip_observed, banner) are applied the same
-                        # way as local captures.
-                        app.capture_engine._ingest(pkt, iface_label)
-                    except Exception:
-                        pass
+                def ingest_frames():
+                    for frame in frames:
+                        try:
+                            pkt = Ether(frame.packet)
+                            app.capture_engine._ingest(pkt, f"remote:{sensor_name}")
+                        except Exception:
+                            log.debug("sensor %s: failed to parse frame", sensor_name,
+                                      exc_info=True)
+
+                await asyncio.to_thread(ingest_frames)
         except Exception as exc:
             log.warning("sensor %s connection error: %s", sensor_name, exc)
         finally:

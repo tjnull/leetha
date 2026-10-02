@@ -3,14 +3,21 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import time
 from datetime import datetime
 from leetha.store.models import Sighting
 
+log = logging.getLogger(__name__)
+
 
 class SightingRepository:
-    def __init__(self, conn, write_lock=None):
+    def __init__(self, conn, write_lock=None, *, batch_size=1):
         self._conn = conn
         self._mu = write_lock or asyncio.Lock()
+        self._batch_size = batch_size
+        self._pending: list[tuple] = []
+        self._last_flush = time.monotonic()
 
     async def create_tables(self):
         await self._conn.execute("""
@@ -35,16 +42,36 @@ class SightingRepository:
         await self._conn.commit()
 
     async def record(self, sighting: Sighting) -> None:
+        if len(self._pending) >= 256:
+            self._pending.pop(0)
+            log.warning("sighting batch full after database write failure; discarding oldest sighting")
+        self._pending.append((sighting.hw_addr, sighting.source,
+                              json.dumps(sighting.payload), json.dumps(sighting.analysis),
+                              sighting.certainty, sighting.interface, sighting.network,
+                              sighting.timestamp.isoformat()))
+        if len(self._pending) >= self._batch_size or time.monotonic() - self._last_flush >= 1:
+            await self.flush()
+
+    async def flush(self) -> None:
+        if not self._pending:
+            return
         async with self._mu:
-            await self._conn.execute("""
-                INSERT INTO sightings (hw_addr, source, payload, analysis,
-                                       certainty, interface, network, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (sighting.hw_addr, sighting.source,
-                  json.dumps(sighting.payload), json.dumps(sighting.analysis),
-                  sighting.certainty, sighting.interface, sighting.network,
-                  sighting.timestamp.isoformat()))
-            await self._conn.commit()
+            if not self._pending:
+                return
+            batch = self._pending[:]
+            try:
+                await self._conn.execute("BEGIN IMMEDIATE")
+                await self._conn.executemany("""
+                    INSERT INTO sightings (hw_addr, source, payload, analysis,
+                                           certainty, interface, network, timestamp)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, batch)
+                await self._conn.commit()
+            except Exception:
+                await self._conn.rollback()
+                raise
+            del self._pending[:len(batch)]
+            self._last_flush = time.monotonic()
 
     async def for_host(self, hw_addr: str, limit: int = 50) -> list[Sighting]:
         cursor = await self._conn.execute(

@@ -1,12 +1,14 @@
 """Fingerprint snapshot repository -- point-in-time device fingerprints."""
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 
 class SnapshotRepository:
-    def __init__(self, conn):
+    def __init__(self, conn, write_lock=None):
         self._conn = conn
+        self._mu = write_lock or asyncio.Lock()
 
     async def create_tables(self):
         await self._conn.execute("""
@@ -29,6 +31,12 @@ class SnapshotRepository:
                   manufacturer: str | None = None, device_type: str | None = None,
                   hostname: str | None = None, oui_vendor: str | None = None) -> None:
         now = datetime.now(timezone.utc)
+        async with self._mu:
+            await self._add_locked(hw_addr, now, os_family, manufacturer,
+                                   device_type, hostname, oui_vendor)
+
+    async def _add_locked(self, hw_addr, now, os_family, manufacturer,
+                          device_type, hostname, oui_vendor):
         await self._conn.execute("""
             INSERT INTO fingerprint_snapshots
                 (hw_addr, timestamp, os_family, manufacturer, device_type, hostname, oui_vendor)
@@ -48,6 +56,10 @@ class SnapshotRepository:
         return [dict(row) for row in rows]
 
     async def prune(self, max_per_mac: int = 50) -> int:
+        async with self._mu:
+            return await self._prune_locked(max_per_mac)
+
+    async def _prune_locked(self, max_per_mac: int) -> int:
         cursor = await self._conn.execute("""
             DELETE FROM fingerprint_snapshots
             WHERE id IN (

@@ -3273,6 +3273,9 @@ async def api_capture_status():
     active_bpf = ifaces[0]["bpf_filter"] if ifaces else default_bpf
     return {
         "running": engine.is_running,
+        "queue_depth": app_instance.packet_queue.qsize(),
+        "queue_capacity": app_instance.packet_queue.maxsize,
+        "dropped_packets": engine.dropped_packets,
         "interfaces": ifaces,
         "default_bpf": default_bpf,
         "scapy_command": f"sniff(iface=[{', '.join(repr(i['name']) for i in ifaces)}], filter='{active_bpf}', prn=callback, store=0)" if ifaces else None,

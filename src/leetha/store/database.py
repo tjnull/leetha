@@ -400,7 +400,8 @@ class Database:
     def __init__(self, db_path: Path) -> None:
         self._path = db_path
         self._conn: aiosqlite.Connection | None = None
-        self._mu = asyncio.Lock()  # serialises writes
+        from leetha.store.write_lock import write_lock_for
+        self._mu = write_lock_for(db_path)
         # MACs already in the devices table. Loaded lazily on first device
         # write so "is this a new discovery?" costs a set lookup rather than a
         # query on the hot path. Rebuilt per process, so a restart does not
@@ -427,6 +428,30 @@ class Database:
         # Schema migrations MUST run before index creation — migrations
         # add columns (interface, network, identity_id) that indexes reference.
         await self._apply_migrations()
+        # v1.5 began detecting locally administered MACs during capture.
+        # Apply the same rule to devices already present before that upgrade.
+        await self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS leetha_migrations (name TEXT PRIMARY KEY)"
+        )
+        async with self._conn.execute(
+            "SELECT 1 FROM leetha_migrations WHERE name = 'randomized_devices_v1'"
+        ) as cur:
+            done = await cur.fetchone()
+        if not done:
+            from leetha.fingerprint.mac_intel import is_randomized_mac
+            async with self._conn.execute(
+                "SELECT mac FROM devices WHERE is_randomized_mac = 0"
+            ) as cur:
+                old_macs = await cur.fetchall()
+            randomized = [(row[0],) for row in old_macs if is_randomized_mac(row[0])]
+            if randomized:
+                await self._conn.executemany(
+                    "UPDATE devices SET is_randomized_mac = 1 WHERE mac = ?",
+                    randomized,
+                )
+            await self._conn.execute(
+                "INSERT INTO leetha_migrations(name) VALUES ('randomized_devices_v1')"
+            )
 
         # Indexes -- observations
         for idx_sql in (

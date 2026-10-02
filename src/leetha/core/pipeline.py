@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from datetime import datetime, timezone
 
 from leetha.capture.packets import CapturedPacket
@@ -59,7 +59,7 @@ class Pipeline:
 
     def __init__(self, store, verdict_engine: VerdictEngine | None = None,
                  on_verdict=None, on_arp=None, on_dhcp=None, on_gateway_hint=None,
-                 is_local_mac=None, on_new_host=None):
+                 is_local_mac=None, on_new_host=None, lookup=None):
         self.store = store
         self.verdict_engine = verdict_engine or VerdictEngine()
         self._on_verdict = on_verdict          # async(hw_addr, verdict, packet)
@@ -68,12 +68,14 @@ class Pipeline:
         self._on_gateway_hint = on_gateway_hint  # async(mac, ip, source, interface)
         self._is_local_mac = is_local_mac      # callable(mac) -> bool
         self._on_new_host = on_new_host        # async(hw_addr, host, packet)
-        self._lookup = FingerprintLookup()
+        self._lookup = lookup if lookup is not None else FingerprintLookup()
         self._evidence_buffer: dict[str, list[Evidence]] = defaultdict(list)
         self._oui_vendors: dict[str, str] = {}  # MAC -> OUI vendor name
         self._oui_device_types: dict[str, str] = {}  # MAC -> OUI device type
         self._gateway_macs: set[str] = set()  # MACs known to be gateways/routers
-        self._lookup_done: set = set()  # (MAC, protocol, relevant signature) lookups
+        self._gateway_ips: dict[str, set[str]] = defaultdict(set)
+        self._oui_checked: set[str] = set()
+        self._lookup_done: dict[str, OrderedDict] = defaultdict(OrderedDict)
         self._batch_queue: list = []
         self._last_seen: dict[str, float] = {}  # MAC -> monotonic timestamp (for LRU)
         self._max_tracked_macs = 20_000  # cleanup threshold
@@ -105,6 +107,14 @@ class Pipeline:
         "mdns_txt", "mdns_name", "mdns_srv", "mdns_apple_model",
         "dns_answer",
     ))
+    _HOST_IDENTITY_PROTOCOLS = frozenset((
+        "tcp_syn", "tls", "http_useragent", "service_banner", "ip_observed",
+    ))
+    _HOST_IDENTITY_SOURCES = frozenset((
+        "tcp_syn_ttl", "tcp_syn_sig", "ip_observed_ttl", "ip_observed_port",
+        "tls_ja3", "tls_ja4", "tls_sni", "http_useragent", "http_host",
+        "passive_banner", "quic_sni",
+    ))
     _LOOKUP_FIELDS = {
         "dhcpv4": ("opt55", "opt60", "hostname"),
         "dhcpv6": ("oro", "vendor_class", "enterprise_id", "duid_mac"),
@@ -130,10 +140,10 @@ class Pipeline:
             return
         ref_vendor = self._oui_vendors.get(hw_addr)
         for ev in buf:
-            if ev.source not in self._FORWARDED_EVIDENCE_SOURCES:
+            if ev.source not in (self._FORWARDED_EVIDENCE_SOURCES | self._HOST_IDENTITY_SOURCES):
                 continue
             # Keep mDNS evidence that matches the device's own vendor
-            if ref_vendor and ev.vendor:
+            if ev.source in self._FORWARDED_EVIDENCE_SOURCES and ref_vendor and ev.vendor:
                 if (ev.vendor == ref_vendor
                         or ref_vendor.lower() in ev.vendor.lower()
                         or ev.vendor.lower() in ref_vendor.lower()):
@@ -152,7 +162,7 @@ class Pipeline:
         threshold.  Keeps memory bounded on long-running deployments with
         large networks."""
         import time as _time
-        if len(self._evidence_buffer) <= self._max_tracked_macs:
+        if len(self._last_seen) <= self._max_tracked_macs:
             return
         # Sort by last-seen time, evict oldest half
         sorted_macs = sorted(self._last_seen, key=self._last_seen.get)
@@ -163,8 +173,10 @@ class Pipeline:
             self._oui_device_types.pop(mac, None)
             self._last_seen.pop(mac, None)
             # Remove all (mac, proto) tuples from _lookup_done
-            self._lookup_done -= {k for k in self._lookup_done if k[0] == mac}
-        # Don't evict _gateway_macs — those are small and important
+            self._lookup_done.pop(mac, None)
+            self._oui_checked.discard(mac)
+            self._gateway_ips.pop(mac, None)
+            self._gateway_macs.discard(mac)
         logger.info("Evicted %d stale MACs from pipeline cache (%d remaining)",
                      len(evict), len(self._evidence_buffer))
 
@@ -180,6 +192,32 @@ class Pipeline:
             if isinstance(txt, dict):
                 values += tuple(sorted((str(k), str(v)) for k, v in txt.items()))
         return values
+
+    def _is_forwarded_identity(self, packet: CapturedPacket) -> bool:
+        """Recognize an L3 sender reached through the observed L2 MAC."""
+        if packet.protocol not in self._HOST_IDENTITY_PROTOCOLS:
+            return False
+        ip = packet.ip_addr
+        if not ip:
+            return False
+        try:
+            source = _ipaddress.ip_address(ip)
+            if packet.network and source not in _ipaddress.ip_network(packet.network, strict=False):
+                return True
+            if packet.hw_addr in self._gateway_macs:
+                own_ips = self._gateway_ips.get(packet.hw_addr)
+                if own_ips and ip not in own_ips:
+                    return True
+                if not own_ips and source.is_global:
+                    return True
+        except ValueError:
+            pass
+        ttl = packet.fields.get("ttl")
+        if isinstance(ttl, int) and 0 < ttl <= 255:
+            initial = next((n for n in (32, 64, 128, 255) if n >= ttl), 255)
+            if initial - ttl > 1:
+                return True
+        return False
 
     async def process(self, packet: CapturedPacket) -> None:
         """Process a single captured packet through the full pipeline."""
@@ -213,8 +251,11 @@ class Pipeline:
             raw_opts = packet.fields.get("raw_options", {})
             msg_type = raw_opts.get("message-type")
             if msg_type in (2, 5) and packet.ip_addr:
+                newly_gateway = packet.hw_addr not in self._gateway_macs
                 self._gateway_macs.add(packet.hw_addr)
-                self._scrub_infra_mdns(packet.hw_addr)
+                self._gateway_ips[packet.hw_addr].add(packet.ip_addr)
+                if newly_gateway:
+                    self._scrub_infra_mdns(packet.hw_addr)
                 self._evidence_buffer[packet.hw_addr].append(Evidence(
                     source="dhcp_server", method="observed",
                     certainty=0.95, category="router",
@@ -229,8 +270,11 @@ class Pipeline:
                         logger.debug("Gateway hint callback failed for %s", packet.hw_addr, exc_info=True)
         elif packet.protocol == "icmpv6":
             if packet.fields.get("icmpv6_type") == "router_advertisement" and packet.ip_addr:
+                newly_gateway = packet.hw_addr not in self._gateway_macs
                 self._gateway_macs.add(packet.hw_addr)
-                self._scrub_infra_mdns(packet.hw_addr)
+                self._gateway_ips[packet.hw_addr].add(packet.ip_addr)
+                if newly_gateway:
+                    self._scrub_infra_mdns(packet.hw_addr)
                 self._evidence_buffer[packet.hw_addr].append(Evidence(
                     source="icmpv6", method="observed",
                     certainty=0.95, category="router",
@@ -278,8 +322,9 @@ class Pipeline:
         self._evict_stale_macs()
 
         # Enrich with MAC OUI lookup (only on first sighting per MAC)
-        if hw_addr not in self._evidence_buffer:
+        if hw_addr not in self._oui_checked:
             mac_matches = self._lookup.match_mac(hw_addr)
+            self._oui_checked.add(hw_addr)
             for match in mac_matches:
                 evidence_list.append(self._match_to_evidence(match))
             # Cache OUI vendor and device type for cross-validation
@@ -295,19 +340,31 @@ class Pipeline:
                     "router", "switch", "gateway", "firewall",
                     "access_point", "ap", "bridge", "mesh_router",
                 ):
+                    newly_gateway = hw_addr not in self._gateway_macs
                     self._gateway_macs.add(hw_addr)
-                    self._scrub_infra_mdns(hw_addr)
+                    if newly_gateway:
+                        self._scrub_infra_mdns(hw_addr)
+
+        if protocol == "arp" and hw_addr in self._gateway_macs and packet.ip_addr:
+            self._gateway_ips[hw_addr].add(packet.ip_addr)
 
         # Protocol-specific fingerprint lookups (once per protocol per MAC)
-        lookup_key = (hw_addr, protocol, self._lookup_signature(protocol, packet.fields))
-        if lookup_key not in self._lookup_done:
-            self._lookup_done.add(lookup_key)
+        forwarded_identity = self._is_forwarded_identity(packet)
+        lookup_key = (protocol, self._lookup_signature(protocol, packet.fields))
+        mac_lookups = self._lookup_done[hw_addr]
+        if not forwarded_identity and lookup_key not in mac_lookups:
+            mac_lookups[lookup_key] = None
+            if len(mac_lookups) > 64:
+                mac_lookups.popitem(last=False)
             try:
                 fp_matches = self._fingerprint_lookup(protocol, packet)
                 for match in fp_matches:
                     evidence_list.append(self._match_to_evidence(match))
             except Exception:
                 logger.debug("Fingerprint lookup failed for %s", protocol, exc_info=True)
+
+        if forwarded_identity:
+            evidence_list = []
 
         # Cross-validate: mDNS traffic is unreliable for source attribution
         # because routers/gateways/APs forward multicast, rewriting the

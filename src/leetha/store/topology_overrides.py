@@ -1,12 +1,14 @@
 """Topology override repository -- manual parent connection overrides."""
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 
 class TopologyOverrideRepository:
-    def __init__(self, conn):
+    def __init__(self, conn, write_lock=None):
         self._conn = conn
+        self._mu = write_lock or asyncio.Lock()
 
     async def create_tables(self):
         await self._conn.execute("""
@@ -19,6 +21,10 @@ class TopologyOverrideRepository:
         await self._conn.commit()
 
     async def upsert(self, child_mac: str, parent_mac: str) -> None:
+        async with self._mu:
+            await self._upsert_locked(child_mac, parent_mac)
+
+    async def _upsert_locked(self, child_mac, parent_mac):
         await self._conn.execute("""
             INSERT INTO topology_overrides (child_mac, parent_mac, created_at)
             VALUES (?, ?, ?)
@@ -29,10 +35,11 @@ class TopologyOverrideRepository:
         await self._conn.commit()
 
     async def delete(self, child_mac: str) -> bool:
-        cursor = await self._conn.execute(
-            "DELETE FROM topology_overrides WHERE child_mac = ?", (child_mac,))
-        await self._conn.commit()
-        return cursor.rowcount > 0
+        async with self._mu:
+            cursor = await self._conn.execute(
+                "DELETE FROM topology_overrides WHERE child_mac = ?", (child_mac,))
+            await self._conn.commit()
+            return cursor.rowcount > 0
 
     async def find_all(self) -> dict[str, str]:
         """Return {child_mac: parent_mac} for all overrides."""

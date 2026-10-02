@@ -5,7 +5,7 @@
 ### Passive Network Fingerprinting and Analysis Engine
 
 [![CI](https://github.com/tjnull/leetha/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/tjnull/leetha/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-1.5.0-blue.svg)](https://github.com/tjnull/leetha/releases)
+[![Version](https://img.shields.io/badge/version-1.5.1-blue.svg)](https://github.com/tjnull/leetha/releases)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Tests](https://img.shields.io/badge/tests-850%20passing-brightgreen.svg)](#testing)
