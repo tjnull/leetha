@@ -214,10 +214,8 @@ class LeethaApp:
         self._running = True
         self._app_loop = asyncio.get_running_loop()
 
-        # Fire-and-forget: preload smaller Huginn caches in a background
-        # thread.  Not awaited so the pipeline starts immediately.
-        # huginn_dhcp (138 MB) is NOT preloaded — loaded on-demand only
-        # when needed.
+        # Fire-and-forget: preload fingerprint caches in a background
+        # thread. Not awaited so the pipeline starts immediately.
         loop = asyncio.get_running_loop()
         loop.run_in_executor(None, self._preload_caches)
 
@@ -658,14 +656,12 @@ class LeethaApp:
         t0 = _time.monotonic()
 
         for name in (
-            "p0f", "ja3", "ja4", "iana_enterprise",  # tiny files first
+            "p0f", "ja3", "ja4", "iana_enterprise", "apple_devices",
             "satori_dhcp", "satori_useragent", "satori_tcp",  # Satori (all <1MB)
             "satori_smb", "satori_ssh", "satori_web",
-            "satori_sip",
-            "huginn_combinations", "huginn_dhcpv6",
-            "huginn_dhcp_vendor", "huginn_dhcpv6_enterprise",
+            "satori_sip", "recog",
+            "huginn_combinations", "huginn_dhcp_vendor",
             "huginn_devices",
-            # huginn_dhcp (138 MB) loaded on-demand only
             # MAC lookups are served entirely by the IEEE OUI index
         ):
             if name in lookup._json_cache:
@@ -689,7 +685,7 @@ class LeethaApp:
                 lookup._json_cache[name] = None
 
         total = _time.monotonic() - t0
-        logger.info("Huginn cache preload complete (%.1fs)", total)
+        logger.info("Fingerprint cache preload complete (%.1fs)", total)
 
     def _detect_local_macs(self):
         """Detect MAC addresses of local capture interfaces for self-tagging."""
@@ -942,14 +938,14 @@ class LeethaApp:
         from pathlib import Path
         from leetha.store.models import Finding, FindingRule, AlertSeverity
 
-        data_dir = Path(self.config.data_dir)
-        if not data_dir.exists():
+        cache_dir = Path(self.config.cache_dir)
+        if not cache_dir.exists():
             return
         max_age_days = self.config.sync_interval_days * 4
         max_age_seconds = max_age_days * 86400
         now = _time.time()
 
-        for filepath in data_dir.iterdir():
+        for filepath in cache_dir.iterdir():
             if not filepath.suffix == ".json":
                 continue
             age = now - filepath.stat().st_mtime
@@ -1404,5 +1400,3 @@ class LeethaApp:
         verdict = self.pipeline.verdict_engine.compute(
             mac, self.pipeline._evidence_buffer[mac])
         await self.store.verdicts.upsert(verdict)
-
-

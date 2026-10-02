@@ -65,12 +65,13 @@ def detect_randomised_mac(addr: str | None) -> bool:
         if upper.startswith(pfx.upper()):
             return False
 
-    first_hex = addr.split(":")[0].split("-")[0]
-    if not first_hex:
+    cleaned = upper.replace(":", "").replace(".", "")
+    if len(cleaned) != 12:
         return False
 
     try:
-        octet = int(first_hex, 16)
+        octet = int(cleaned[:2], 16)
+        int(cleaned, 16)
     except ValueError:
         return False
 

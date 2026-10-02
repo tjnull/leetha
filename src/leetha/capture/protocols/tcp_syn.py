@@ -42,6 +42,7 @@ def parse_tcp_syn(packet) -> CapturedPacket | None:
     is_synack = bool(tcp.flags & 0x10)
 
     options = []
+    p0f_options = []
     options_detailed = []
     mss = None
     window_scale = None
@@ -49,25 +50,32 @@ def parse_tcp_syn(packet) -> CapturedPacket | None:
         if opt_name == "MSS":
             mss = opt_val
             options.append("M")
+            p0f_options.append("mss")
             options_detailed.append(f"M{opt_val}")
         elif opt_name == "NOP":
             options.append("N")
+            p0f_options.append("nop")
             options_detailed.append("N")
         elif opt_name == "WScale":
             window_scale = opt_val
             options.append("W")
+            p0f_options.append("ws")
             options_detailed.append(f"W{opt_val}")
         elif opt_name == "Timestamp":
             options.append("T")
+            p0f_options.append("ts")
             options_detailed.append("T")
         elif opt_name == "SAckOK":
             options.append("S")
+            p0f_options.append("sok")
             options_detailed.append("S")
         elif opt_name == "EOL":
             options.append("E")
+            p0f_options.append("eol")
             options_detailed.append("E")
         else:
             options.append("?")
+            p0f_options.append("?")
             options_detailed.append("?")
 
     return CapturedPacket(
@@ -81,10 +89,20 @@ def parse_tcp_syn(packet) -> CapturedPacket | None:
             "window_size": tcp.window,
             "mss": mss,
             "tcp_options": ",".join(options),
+            "p0f_options": ",".join(p0f_options),
             "window_scale": window_scale,
             "tcp_flags": "SA" if is_synack else "S",
             "df": 1 if (int(ip.flags) & 0x02) else 0,
             "ip_len": ip.len,
+            "ip_options_len": max(0, ((ip.ihl or 5) - 5) * 4),
+            "ip_id": int(ip.id),
+            "tcp_seq": int(tcp.seq),
+            "tcp_ack": int(tcp.ack),
+            "tcp_urgptr": int(tcp.urgptr),
+            "tcp_flags_int": int(tcp.flags),
+            "tcp_payload_len": len(bytes(tcp.payload)),
+            "tcp_timestamps": next((value for name, value in tcp.options
+                                    if name == "Timestamp"), None),
             "satori_sig": _satori_signature(ip, tcp, options_detailed),
         },
         raw=bytes(packet) if hasattr(packet, '__bytes__') else None,

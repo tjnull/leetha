@@ -130,7 +130,8 @@ jobs:
           path: src/leetha/ui/web/dist/
       - run: |
           pip install . pyinstaller
-          pyinstaller --onefile --name leetha src/leetha/cli.py
+          pyinstaller --onefile --name leetha --collect-data leetha src/leetha/cli.py
+          dist/leetha check-bundle
       - uses: actions/upload-artifact@v6
         with:
           name: macos-binary
@@ -151,7 +152,8 @@ jobs:
           path: src/leetha/ui/web/dist/
       - run: |
           pip install . pyinstaller
-          pyinstaller --onefile --name leetha src/leetha/cli.py
+          pyinstaller --onefile --name leetha --collect-data leetha src/leetha/cli.py
+          .\dist\leetha.exe check-bundle
       - uses: actions/upload-artifact@v6
         with:
           name: windows-binary

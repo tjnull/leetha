@@ -20,7 +20,6 @@ _TRUST_TIER_1 = {
     "active_probe": 0.85,
     "oui": 0.90,
     "dns_server": 0.50,
-    "huginn_dhcp": 0.80,
 }
 
 _TRUST_TIER_2 = {
@@ -47,8 +46,6 @@ _TRUST_TIER_2 = {
 _TRUST_TIER_3 = {
     # Complementary / lower-fidelity signals
     "mdns_txt": 0.75,
-    "huginn_dhcpv6": 0.75,
-    "huginn_dhcpv6_enterprise": 0.75,
     "mdns_service": 0.65,
     "netbios": 0.60,
     "hostname": 0.65,

@@ -260,10 +260,8 @@ PARSER_MAP = {
     "p0f": "parse_p0f",
     "huginn_devices": "parse_huginn_devices",
     "huginn_combinations": "parse_huginn_combinations",
-    "huginn_dhcp": "parse_huginn_dhcp",
+    "apple_devices": "parse_apple_devices",
     "huginn_dhcp_vendor": "parse_huginn_dhcp_vendor",
-    "huginn_dhcpv6": "parse_huginn_dhcpv6",
-    "huginn_dhcpv6_enterprise": "parse_huginn_dhcpv6_enterprise",
     "iana_enterprise": "parse_iana_enterprise",
     "ja3_fingerprints": "parse_ja3_database",
     "ja4_fingerprints": "parse_ja4_csv",
@@ -372,8 +370,10 @@ async def sync_source_with_progress(source_name: str) -> AsyncGenerator[dict, No
                 yield {"event": "error", "source": src.name, "error": progress["error"]}
                 return
 
-        if not file_data:
-            yield {"event": "error", "source": src.name, "error": "Multifile download returned no data"}
+        missing = [name for name in filenames if name not in file_data]
+        if missing:
+            yield {"event": "error", "source": src.name,
+                   "error": f"Missing {len(missing)} source files: {', '.join(missing)}"}
             return
 
         yield {"event": "parsing", "source": src.name}
@@ -400,6 +400,8 @@ async def sync_source_with_progress(source_name: str) -> AsyncGenerator[dict, No
                         else:
                             merged[key] = value
 
+            if not merged:
+                raise ValueError(f"{src.name} produced no usable entries")
             cache_name = CACHE_NAMES.get(src.name, src.name)
             cache_file = config.cache_dir / f"{cache_name}.json"
             with open(cache_file, "w") as f:
@@ -461,11 +463,21 @@ async def sync_source_with_progress(source_name: str) -> AsyncGenerator[dict, No
     try:
         parser_fn = getattr(parsers, parser_fn_name)
         data = parser_fn(content)
+        if not data:
+            raise ValueError(f"{src.name} produced no usable entries")
 
         cache_name = CACHE_NAMES.get(src.name, src.name)
         cache_file = config.cache_dir / f"{cache_name}.json"
-        with open(cache_file, "w") as f:
-            json.dump({"source": src.name, "entries": data}, f)
+        import os
+        with _tf.NamedTemporaryFile(mode="w", encoding="utf-8", dir=config.cache_dir,
+                                    prefix=f".{cache_name}.", suffix=".tmp", delete=False) as f:
+            tmp_name = f.name
+            try:
+                json.dump({"source": src.name, "entries": data}, f)
+            except BaseException:
+                os.unlink(tmp_name)
+                raise
+        os.replace(tmp_name, cache_file)
 
         count = len(data) if isinstance(data, (dict, list)) else 0
         yield {

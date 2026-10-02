@@ -196,6 +196,10 @@ def parse_mdns(packet) -> CapturedPacket | None:
             fields['friendly_name'] = txt_records['fn']
         if 'am' in txt_records:
             fields['apple_model'] = txt_records['am']
+        elif 'model' in txt_records and str(txt_records['model']).startswith(
+            ('iPhone', 'iPad', 'Mac', 'iMac', 'AppleTV', 'AudioAccessory', 'Watch')
+        ):
+            fields['apple_model'] = txt_records['model']
         if 'manufacturer' in txt_records:
             fields['txt_manufacturer'] = txt_records['manufacturer']
 

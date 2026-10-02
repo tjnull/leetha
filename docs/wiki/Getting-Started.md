@@ -6,7 +6,7 @@ This guide walks through installation, initial database sync, launching your fir
 
 ## 1. Requirements
 
-Leetha needs **Python 3.11+** running on **Linux**. Packet capture relies on scapy's raw socket access; Leetha handles privilege escalation internally, so you do not need to prefix commands with `sudo`.
+Leetha needs **Python 3.11+** for Python installations. On Windows, install Npcap before capturing packets; Linux and macOS need packet-capture privileges.
 
 ---
 
@@ -28,6 +28,13 @@ Confirm the binary is available:
 
 ```bash
 leetha --version
+```
+
+On Windows, the released `.exe` includes Python. Verify its packaged resources before starting the dashboard:
+
+```powershell
+.\leetha.exe check-bundle
+.\leetha.exe --web
 ```
 
 ### Key Dependencies
@@ -55,7 +62,7 @@ Leetha ships with built-in patterns under `patterns/data/`, but accuracy improve
 leetha sync
 ```
 
-This pulls 12 sources (~880 MB) into `~/.leetha/cache/`. View what is available and its freshness:
+This pulls 17 sources (about 84 MB) into leetha's cache directory. List the configured feeds:
 
 ```bash
 leetha sync --list

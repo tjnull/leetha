@@ -72,16 +72,7 @@ def test_classify_frame_keeps_non_empty_lists(monkeypatch):
 
 @pytest.fixture
 def enterprise_cache(tmp_path):
-    """Cache shaped like the real feeds: Huginn keys by row id, IANA by value."""
-    (tmp_path / "huginn_dhcpv6_enterprise.json").write_text(json.dumps({
-        "source": "huginn_dhcpv6_enterprise",
-        "entries": {
-            # row id 2 holds enterprise number 311 (Microsoft)
-            "2": {"value": "311", "organization": "Microsoft"},
-            # row id 311 is a different vendor entirely -- the trap
-            "311": {"value": "303", "organization": "Hughes Communications, Inc."},
-        },
-    }))
+    """The official IANA feed maps enterprise numbers directly to names."""
     (tmp_path / "iana_enterprise.json").write_text(json.dumps({
         "source": "iana_enterprise",
         # parse_iana_enterprise emits plain strings, not dicts
@@ -90,17 +81,18 @@ def enterprise_cache(tmp_path):
     return tmp_path
 
 
-def test_dhcpv6_enterprise_resolves_by_number_not_row_id(enterprise_cache):
-    """Enterprise 311 is Microsoft, not whatever sits at row id 311."""
+def test_dhcpv6_enterprise_resolves_from_iana(enterprise_cache):
+    """The official registry supplies the device's manufacturer."""
     matcher = SignatureMatcher(enterprise_cache)
-    hit = matcher._resolve_huginn_dhcpv6_enterprise(311)
-    assert hit is not None
-    assert hit.manufacturer == "Microsoft"
+    hits = matcher.match_dhcpv6(enterprise_id=311)
+    assert any(hit.source == "iana_enterprise" and hit.manufacturer == "Microsoft"
+               for hit in hits)
 
 
 def test_dhcpv6_enterprise_misses_unknown_number(enterprise_cache):
     matcher = SignatureMatcher(enterprise_cache)
-    assert matcher._resolve_huginn_dhcpv6_enterprise(999999) is None
+    assert not any(hit.source == "iana_enterprise"
+                   for hit in matcher.match_dhcpv6(enterprise_id=999999))
 
 
 def test_iana_enterprise_accepts_plain_string_entries(enterprise_cache):

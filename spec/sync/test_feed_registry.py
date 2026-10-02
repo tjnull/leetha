@@ -4,10 +4,7 @@ These guard against the upstream Huginn-Muninn repo reorganizing its
 JSON exports out from under us, and pin the feed URLs to the layout that
 actually exists in the repo today:
 
-  - DHCP_Signatures/json/dhcp_signature.json   (single file)
   - DHCP_Vendors/json/dhcp_vendor.json         (single file)
-  - DHCPv6_Signatures/json/dhcp6_signature.json
-  - DHCPv6_Enterprise/json/dhcp6_enterprise.json
 
 The MAC_Vendors feed was intentionally dropped -- upstream's export is
 99.7% "Unknown MAC Vendor (xxxxxx)" placeholder rows and added only 5
@@ -72,30 +69,15 @@ def test_single_file_github_feeds_point_at_a_file():
             )
 
 
-def test_huginn_dhcp_feeds_use_upstream_filenames():
-    """Pin the DHCP/DHCPv6 feeds to the filenames that exist upstream so a
-    mistaken rename (e.g. dhcp6_ -> dhcpv6_, or a non-existent _partNN
-    split) can't silently 404 us again."""
+def test_huginn_dhcp_vendor_uses_upstream_filename():
+    """Pin the retained vendor-class feed to its upstream JSON export."""
     cat = FeedCatalog()
     by_key = {f.key: f for f in cat.enumerate()}
-
-    assert by_key["huginn_dhcp"].endpoint.endswith(
-        "/DHCP_Signatures/json/dhcp_signature.json"
-    )
-    assert by_key["huginn_dhcp"].kind == "json"
 
     assert by_key["huginn_dhcp_vendor"].endpoint.endswith(
         "/DHCP_Vendors/json/dhcp_vendor.json"
     )
     assert by_key["huginn_dhcp_vendor"].kind == "json"
-
-    assert by_key["huginn_dhcpv6"].endpoint.endswith(
-        "/DHCPv6_Signatures/json/dhcp6_signature.json"
-    )
-    assert by_key["huginn_dhcpv6_enterprise"].endpoint.endswith(
-        "/DHCPv6_Enterprise/json/dhcp6_enterprise.json"
-    )
-
 
 def test_mac_vendors_feed_is_removed():
     """huginn_mac_vendors was dropped (99.7% placeholder junk); it must
@@ -106,10 +88,11 @@ def test_mac_vendors_feed_is_removed():
     assert "huginn_mac_vendors" not in MULTIFILE_MANIFESTS
 
 
-def test_dhcpv6_enterprise_uses_dedicated_parser():
-    """The enterprise feed must use the enterprise parser (which keeps
-    the ``organization`` field), not the plain dhcpv6 signature parser."""
-    assert PARSER_MAP["huginn_dhcpv6_enterprise"] == "parse_huginn_dhcpv6_enterprise"
+def test_retired_duplicate_feeds_are_absent():
+    active = {f.key for f in FeedCatalog().enumerate()}
+    for key in ("huginn_dhcp", "huginn_dhcpv6", "huginn_dhcpv6_enterprise"):
+        assert key not in active
+        assert key not in PARSER_MAP
 
 
 @pytest.mark.network

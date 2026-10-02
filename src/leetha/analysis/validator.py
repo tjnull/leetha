@@ -46,6 +46,16 @@ def _extract_oui_prefix(mac: str) -> str:
     return mac.replace(":", "").replace("-", "").upper()[:6]
 
 
+def _matching_oui(mac: str, table: dict[str, dict]) -> tuple[str, dict] | None:
+    """Return the most specific registered block covering a MAC."""
+    cleaned = mac.replace(":", "").replace("-", "").replace(".", "").upper()
+    for size in (9, 8, 7, 6, 4):
+        prefix = cleaned[:size]
+        if prefix in table:
+            return prefix, table[prefix]
+    return None
+
+
 def _is_locally_administered(mac: str) -> bool:
     """True if the MAC has the locally-administered (U/L) bit set.
 
@@ -152,7 +162,7 @@ async def check_oui_coverage(db: Database, cache_dir: Path) -> dict:
             continue
 
         pfx = _extract_oui_prefix(dev.mac)
-        if pfx in oui_table:
+        if _matching_oui(dev.mac, oui_table):
             ok_count += 1
         else:
             fail_count += 1
@@ -186,8 +196,8 @@ async def check_manufacturer_agreement(db: Database, cache_dir: Path) -> dict:
         if _skip_for_manufacturer(dev) or not dev.manufacturer:
             continue
 
-        pfx = _extract_oui_prefix(dev.mac)
-        oui_record = oui_table.get(pfx)
+        match = _matching_oui(dev.mac, oui_table)
+        oui_record = match[1] if match else None
 
         # The IEEE OUI cache stores the vendor under "vendor" (with
         # "manufacturer" kept only as a legacy fallback).

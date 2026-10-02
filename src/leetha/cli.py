@@ -186,6 +186,8 @@ console commands:
 
     sub = parser.add_subparsers(dest="command")
 
+    sub.add_parser("check-bundle", help="Verify bundled patterns, dashboard, and documentation")
+
     sync_parser = sub.add_parser("sync", help="Update fingerprint databases")
     sync_parser.add_argument(
         "--list",
@@ -450,6 +452,22 @@ def main():
         )
     except Exception:
         pass
+
+    if args.command == "check-bundle":
+        from leetha.patterns.loader import available_patterns
+        from leetha.ui.web.app import _find_wiki_dir, web_dir
+
+        required = {"banners", "dhcp_opt55", "dhcp_opt60", "dhcpv6",
+                    "hostname", "icmpv6", "mdns", "ssdp"}
+        missing = required - set(available_patterns())
+        if missing:
+            raise SystemExit(f"Missing bundled pattern files: {', '.join(sorted(missing))}")
+        if not (web_dir / "dist" / "index.html").is_file():
+            raise SystemExit("Missing bundled dashboard: dist/index.html")
+        if not (_find_wiki_dir() / "Home.md").is_file():
+            raise SystemExit("Missing bundled wiki: Home.md")
+        print("Leetha bundle OK: patterns, dashboard, and wiki are available")
+        return
 
     # --auth/--no-auth is a tri-state (True/False/None) so it can't live in
     # _env_default; apply LEETHA_AUTH here when neither flag was passed.

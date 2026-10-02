@@ -58,3 +58,22 @@ class TestPipelineHooks:
             await pipeline.process(pkt)
             # Should not crash
         self.loop.run_until_complete(_test())
+
+    def test_changed_dhcp_signature_is_looked_up(self):
+        async def _test():
+            import leetha.processors
+            pipeline = Pipeline(self._make_mock_store())
+            pipeline._fingerprint_lookup = MagicMock(return_value=[])
+            for opt55 in ("1,3,6", "1,3,6", "1,3,6,15"):
+                await pipeline.process(CapturedPacket(
+                    protocol="dhcpv4", hw_addr="aa:bb:cc:dd:ee:ff",
+                    ip_addr="192.168.1.100", fields={"opt55": opt55}))
+            assert pipeline._fingerprint_lookup.call_count == 2
+        self.loop.run_until_complete(_test())
+
+    def test_distinct_mdns_models_have_distinct_lookup_keys(self):
+        first = Pipeline._lookup_signature("mdns", {
+            "service_type": "_device-info._tcp", "txt_records": {"model": "iPhone15,2"}})
+        second = Pipeline._lookup_signature("mdns", {
+            "service_type": "_device-info._tcp", "txt_records": {"model": "iPhone16,1"}})
+        assert first != second

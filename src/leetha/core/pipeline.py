@@ -73,7 +73,7 @@ class Pipeline:
         self._oui_vendors: dict[str, str] = {}  # MAC -> OUI vendor name
         self._oui_device_types: dict[str, str] = {}  # MAC -> OUI device type
         self._gateway_macs: set[str] = set()  # MACs known to be gateways/routers
-        self._lookup_done: set = set()  # (MAC, protocol) pairs already looked up
+        self._lookup_done: set = set()  # (MAC, protocol, relevant signature) lookups
         self._batch_queue: list = []
         self._last_seen: dict[str, float] = {}  # MAC -> monotonic timestamp (for LRU)
         self._max_tracked_macs = 20_000  # cleanup threshold
@@ -105,6 +105,17 @@ class Pipeline:
         "mdns_txt", "mdns_name", "mdns_srv", "mdns_apple_model",
         "dns_answer",
     ))
+    _LOOKUP_FIELDS = {
+        "dhcpv4": ("opt55", "opt60", "hostname"),
+        "dhcpv6": ("oro", "vendor_class", "enterprise_id", "duid_mac"),
+        "mdns": ("service_type", "name", "model", "apple_model"),
+        "ssdp": ("server", "st"),
+        "http_useragent": ("user_agent",),
+        "tcp_syn": ("tcp_flags", "ttl", "window_size", "mss", "tcp_options",
+                    "p0f_options", "window_scale", "df", "satori_sig"),
+        "service_banner": ("service", "raw_banner", "server", "software", "native_os", "native_lanman"),
+        "tls": ("ja3_hash", "ja4", "sni"),
+    }
 
     def _scrub_infra_mdns(self, hw_addr: str) -> None:
         """Retroactively strip mDNS hostnames/vendors from evidence buffer
@@ -156,6 +167,19 @@ class Pipeline:
         # Don't evict _gateway_macs — those are small and important
         logger.info("Evicted %d stale MACs from pipeline cache (%d remaining)",
                      len(evict), len(self._evidence_buffer))
+
+    @staticmethod
+    def _lookup_signature(protocol: str, fields: dict) -> tuple:
+        """Deduplicate identical observations while accepting new signatures."""
+        keys = Pipeline._LOOKUP_FIELDS.get(protocol)
+        if not keys:
+            return ()
+        values = tuple(str(fields.get(key) or "") for key in keys)
+        if protocol == "mdns":
+            txt = fields.get("txt_records")
+            if isinstance(txt, dict):
+                values += tuple(sorted((str(k), str(v)) for k, v in txt.items()))
+        return values
 
     async def process(self, packet: CapturedPacket) -> None:
         """Process a single captured packet through the full pipeline."""
@@ -275,7 +299,7 @@ class Pipeline:
                     self._scrub_infra_mdns(hw_addr)
 
         # Protocol-specific fingerprint lookups (once per protocol per MAC)
-        lookup_key = (hw_addr, protocol)
+        lookup_key = (hw_addr, protocol, self._lookup_signature(protocol, packet.fields))
         if lookup_key not in self._lookup_done:
             self._lookup_done.add(lookup_key)
             try:
@@ -630,13 +654,11 @@ class Pipeline:
                 m = self._lookup.match_ttl(ttl)
                 if m:
                     hits.append(m)
-            # p0f's tables here are client-request signatures, so only feed
-            # them pure SYNs -- a SYN-ACK would match the wrong stack.
-            if tcp_flags == "S":
-                sig = f"{data.get('ttl', 0)}:{data.get('window_size', 0)}:{data.get('mss', '*')}:{data.get('tcp_options', '')}"
-                m = self._lookup.match_tcp_signature(sig)
-                if m:
-                    hits.append(m)
+            # p0f has distinct request and response signatures; match its
+            # native fields against the corresponding SYN or SYN-ACK table.
+            m = self._lookup.match_p0f_packet(data)
+            if m:
+                hits.append(m)
             # Satori indexes both directions, and its ICS/PLC coverage is
             # entirely SYN-ACK.
             satori_sig = data.get("satori_sig")

@@ -1,6 +1,6 @@
 # Fingerprint Sources
 
-Leetha's device identification accuracy depends on 12 community-maintained reference databases plus built-in JSON pattern files. The `PatternLoader` reads synced databases from the cache directory (`~/.leetha/cache/`) at runtime, loading each source on demand when a lookup is first requested.
+Leetha syncs community reference feeds into its cache directory (`~/.leetha/cache/`) and loads them for device matching.
 
 ---
 
@@ -8,7 +8,7 @@ Leetha's device identification accuracy depends on 12 community-maintained refer
 
 ```bash
 leetha sync                      # refresh every source
-leetha sync --list               # print source names, ages, and record counts
+leetha sync --list               # print configured source names and descriptions
 leetha sync --source ieee_oui   # update a single source
 ```
 
@@ -20,33 +20,33 @@ The React dashboard exposes the same functionality at `/sync` with real-time dow
 
 ### Vendor and OUI Resolution
 
-**IEEE OUI Master Registry** -- 86,000+ records mapping 3-byte MAC prefixes to registered manufacturers. Built from the IEEE MA-L, MA-M, and MA-S registries. This is the authoritative layer for manufacturer attribution.
+**OUI Master Database** -- one row per assignment block, including MA-L, MA-M, and MA-S prefixes. The cached record retains its canonical manufacturer, curated device type, raw registrant, registration status, deregistration date, and registrant history.
 
 > **Note:** A separate Huginn-Muninn MAC vendor feed was evaluated and removed. Its upstream export was 99.7% `Unknown MAC Vendor (xxxxxx)` placeholder rows (a full 24-bit prefix enumeration) and contributed only 5 real vendors beyond the IEEE OUI registry, at a 700 MB+ cost. MAC-to-vendor resolution relies solely on the IEEE OUI registry.
 
-*PatternLoader pipeline:* On every observed MAC, the OUI processor first checks the 1,900+ curated vendor entries in `patterns/data/` (which include device type, category, and model hints). If no curated match exists, the IEEE OUI table provides a manufacturer-only fallback.
+*Matching:* The OUI table supplies the manufacturer and curated device type. Built-in entries supplement category and model hints. The longest matching block wins.
 
 ### DHCPv4 Analysis
 
-**Huginn-Muninn DHCP Signatures** -- 368,000+ fingerprints keyed by the ordered DHCP Option 55 parameter request list. Each entry maps to an OS family and device type.
+**Huginn-Muninn DHCP Vendor Strings** -- Option 60 (Vendor Class Identifier) values. Leetha uses entries whose strings reveal a manufacturer, model, or device type.
 
-**Huginn-Muninn DHCP Vendor Strings** -- 425,000+ Option 60 (Vendor Class Identifier) values that directly name the manufacturer, model, or firmware.
-
-*PatternLoader pipeline:* When a DHCPv4 Discover or Request enters the PARSER_CHAIN, the DHCP processor extracts Option 55 and Option 60. The Option 55 sequence acts as a behavioral fingerprint -- Windows, macOS, Linux, and embedded systems each request different parameters in a characteristic order. Option 60 provides an explicit vendor declaration (e.g. `MSFT 5.0`, `udhcp 1.33.2`).
+*Matching:* The DHCP processor extracts Option 55 and Option 60. Option 55 is matched against annotated Huginn combinations, Satori DHCP, and built-in patterns. Option 60 is matched against the Huginn vendor table and built-in vendor patterns.
 
 ### DHCPv6 Analysis
 
-**Huginn-Muninn DHCPv6 Signatures** -- 1,600+ fingerprints derived from the DHCPv6 Option Request Option (ORO), the IPv6 analog of DHCP Option 55.
+**IANA Private Enterprise Number Registry** -- 67,000+ official enterprise-to-organization mappings used to resolve DUID-EN identifiers and vendor options.
 
-**Huginn-Muninn DHCPv6 Enterprise IDs** -- 58,000+ enterprise numbers extracted from vendor-specific DHCPv6 options.
-
-**IANA Private Enterprise Number Registry** -- 65,000+ official IANA enterprise-to-organization mappings used to resolve DUID-EN identifiers and vendor options.
-
-*PatternLoader pipeline:* DHCPv6 Solicit and Request frames carry an ORO that the DHCPv6 processor matches against the Huginn signatures. Enterprise IDs embedded in DUID-EN fields are resolved through both the Huginn enterprise table and the IANA registry.
+*Matching:* DHCPv6 Solicit and Request frames carry an ORO that the DHCPv6 processor checks against built-in annotated patterns. Enterprise IDs embedded in DUID-EN fields are resolved through IANA.
 
 ### Comprehensive Device Profiles
 
-**Huginn-Muninn Device Database** -- 116,000+ hierarchical profiles linking manufacturer, device type, model, and OS family. Used as a cross-referencing layer: once initial signals (OUI + DHCP + mDNS) are collected, the device database narrows identification from a generic vendor to a specific product and firmware revision.
+**Huginn-Muninn Device Database** -- 122,000+ hierarchical profiles. Profiles enrich matching DHCP combinations with hierarchy and, when available, a device type.
+
+**DHCP Combinations** -- links Option 55 patterns to device profiles. Where several devices share a pattern, `device_match` ranks exact names ahead of OS names and April mappings. This is still supporting evidence; a shared DHCP option list alone cannot uniquely identify a device.
+
+**AppleDB Models** -- maps model identifiers advertised in mDNS `am=` or `model=` TXT records to product names. This also works with private MAC addresses, where OUI lookup is unavailable.
+
+The lean DHCP signature feed contains only IDs and option strings, with no device attribution; leetha does not sync it. Timestamp sidecars and the full master database are not required for device matching.
 
 ### TCP/IP Stack Identification
 
@@ -76,15 +76,14 @@ Trisul ships no explicit OS field, so leetha infers one from each description --
 ## Sync-to-Lookup Data Flow
 
 ```
-  Upstream Format              PatternLoader Cache
+  Upstream Format              Leetha Cache
   ---------------              -------------------
   IEEE OUI CSV          -->    ieee_oui.json
   p0f.fp plaintext      -->    p0f.json
   Huginn devices JSON   -->    huginn_devices.json
-  Huginn dhcp JSON      -->    huginn_dhcp.json
+  Huginn combinations   -->    huginn_combinations.json
+  AppleDB JSON          -->    apple_devices.json
   Huginn dhcp_vendor    -->    huginn_dhcp_vendor.json
-  Huginn dhcpv6 JSON    -->    huginn_dhcpv6.json
-  Huginn dhcpv6_ent     -->    huginn_dhcpv6_enterprise.json
   IANA enterprise-num   -->    iana_enterprise.json
   Satori JSON (x7)      -->    satori_*.json
   Recog XML (19 files)  -->    recog.json
@@ -92,11 +91,11 @@ Trisul ships no explicit OS field, so leetha infers one from each description --
   JA4 mapping CSV       -->    ja4.json
                                     |
                                     v
-                              PatternLoader
-                              (lazy init per source)
+                              SignatureMatcher
+                              (preloaded or lazy per source)
 ```
 
-Each upstream format has a dedicated parser in `src/leetha/sync/parsers.py`. Parsers normalize data into a uniform JSON structure: `{"source": "<name>", "entries": {<key>: <value>}}`. The `PatternLoader` in `src/leetha/patterns/loader.py` reads these cached JSON files the first time a lookup is performed.
+Each upstream format has a parser in `src/leetha/sync/parsers.py`. Parsers normalize data into a JSON cache. `SignatureMatcher` in `src/leetha/fingerprint/lookup.py` reads the caches; the app preloads the larger and commonly used feeds in a background thread.
 
 ---
 
@@ -126,7 +125,7 @@ The 1,900+ curated vendor patterns in `patterns/data/` have been verified agains
 - Every prefix is confirmed to match the IEEE registrant
 - Corporate acquisitions are mapped (Nest -> Google, Ring -> Amazon, Beats -> Apple)
 - Enriched fields (device type, category, model hints) supplement what the IEEE data alone cannot provide
-- The IEEE OUI dataset (86K+ entries) serves as a broad catch-all behind the curated layer
+- The OUI Master Database contains roughly 59,000 unique assignment blocks; its canonical registrant takes precedence over built-in vendor names
 
 Run integrity checks at any time:
 
@@ -148,6 +147,9 @@ does not linger on disk.
 | Feed | Why it was removed |
 |---|---|
 | `huginn_mac_vendors` | 99.7% `Unknown MAC Vendor (xxxxxx)` placeholder rows -- a full 24-bit enumeration adding only 5 real vendors beyond the IEEE OUI database, at a 700 MB cost. |
+| `huginn_dhcp` | The lean export contains only fingerprint IDs and option strings. Its match supplied no manufacturer, device type, or OS; annotated combinations and Satori DHCP provide usable attribution. |
+| `huginn_dhcpv6` | The lean ORO export supplied only a raw fingerprint ID. Built-in annotated DHCPv6 patterns remain. |
+| `huginn_dhcpv6_enterprise` | IANA covers every named enterprise ID in the Huginn copy and thousands more; the Huginn copy could also mask an IANA name when its organization field was empty. |
 | `satori_ntp` | Its lookup key encodes Satori's own undocumented timestamp heuristics (`set`/`unset`, `current`/`random`) and the field count is inconsistent (7 vs 8), so the key cannot be reconstructed from an observed NTP header. Its 25 identities are covered more reliably by DHCP, mDNS, OUI, and TCP fingerprints. |
 
 Retired caches are pruned only after a **full** sync that completed without

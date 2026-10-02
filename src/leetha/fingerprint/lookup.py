@@ -489,6 +489,9 @@ class SignatureMatcher:
                             "source_db": "IEEE OUI Master Database",
                             "source_file": "~/.leetha/cache/ieee_oui/master_oui.csv",
                             "matched_key": f"OUI prefix {pfx}",
+                            "registration_status": info.get("status"),
+                            "registrant_raw": info.get("registrant_raw"),
+                            "deregistered_date": info.get("deregistered_date"),
                         },
                     ))
                     break
@@ -550,6 +553,40 @@ class SignatureMatcher:
 
     # Backward-compat alias
     lookup_tcp = match_tcp_signature
+
+    def match_p0f_packet(self, fields: dict) -> FingerprintMatch | None:
+        """Match the captured TCP header to p0f's native v3 signature format."""
+        from leetha.fingerprint.p0f import match_score
+
+        blob = self._fetch_json("p0f")
+        if not blob:
+            return None
+        direction = "tcp:response" if fields.get("tcp_flags") == "SA" else "tcp:request"
+        candidates = []
+        for rec in blob.get("entries", []):
+            if rec.get("class") != direction or not rec.get("os_family"):
+                continue
+            score = match_score(rec.get("signature", ""), fields)
+            if score is not None:
+                candidates.append((score, rec))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda pair: pair[0], reverse=True)
+        score, best = candidates[0]
+        # Avoid attributing a shared header shape to the wrong OS family.
+        if any(other_score >= score - 1 and
+               other.get("os_family") != best.get("os_family")
+               for other_score, other in candidates[1:]):
+            return None
+        same_family = [rec for _, rec in candidates
+                       if rec.get("os_family") == best.get("os_family")]
+        version = best.get("os_version") if len({r.get("os_version") for r in same_family}) == 1 else None
+        return FingerprintMatch(
+            source="tcp", match_type="p0f", confidence=0.72,
+            os_family=best["os_family"], os_version=version,
+            raw_data={"source_db": "p0f TCP/IP Fingerprints",
+                      "signature": best["signature"], "match_score": score},
+        )
 
     # ------------------------------------------------------------------
 
@@ -912,7 +949,9 @@ class SignatureMatcher:
         # Apple model code (am field)
         if "apple_model" in packet_data:
             a_code = packet_data["apple_model"]
-            a_name = self.APPLE_MODEL_MAP.get(a_code, a_code)
+            apple_blob = self._fetch_json("apple_devices")
+            apple_record = ((apple_blob or {}).get("entries") or {}).get(a_code, {})
+            a_name = apple_record.get("name") or self.APPLE_MODEL_MAP.get(a_code, a_code)
             a_dtype = "media_player"
             if a_code.startswith("AudioAccessory"):
                 a_dtype = "smart_speaker"
@@ -937,6 +976,8 @@ class SignatureMatcher:
                 os_family="iOS" if a_code.startswith("iPhone") else None,
                 raw_data={
                     "apple_model_code": a_code,
+                    "soc": apple_record.get("soc"),
+                    "release": apple_record.get("release"),
                     "friendly_name": packet_data.get("friendly_name"),
                 },
             ))
@@ -953,9 +994,8 @@ class SignatureMatcher:
     ) -> list[FingerprintMatch]:
         """Collect evidence from DHCP Option 55 and Option 60.
 
-        Consults built-in patterns, Huginn combination tables, Huginn
-        DHCP signature tables, and Huginn vendor-class tables in
-        parallel. All hits are returned for the evidence aggregator.
+        Consults built-in patterns, Huginn combination tables, and Huginn
+        vendor-class tables. All hits are returned for the evidence aggregator.
 
         Parameters
         ----------
@@ -1017,12 +1057,6 @@ class SignatureMatcher:
             if combo:
                 hits.append(combo)
 
-        # Option 55 -- Huginn DHCP signatures
-        if opt55:
-            sig_hit = self._resolve_huginn_dhcp_sig(opt55)
-            if sig_hit:
-                hits.append(sig_hit)
-
         # Option 55 -- built-in patterns
         if opt55:
             res = match_dhcp_opt55(opt55)
@@ -1065,7 +1099,12 @@ class SignatureMatcher:
         if not candidates:
             return None
 
-        best = max(candidates, key=lambda c: len(c.get("satori_name", "")))
+        quality = {"exact-name": 3, "os-name": 2, "april-map": 1}
+        best = max(candidates, key=lambda c: (
+            quality.get(c.get("device_match", ""), 0),
+            len(c.get("satori_name") or ""),
+        ))
+        match_quality = best.get("device_match", "")
 
         satori_label = best.get("satori_name", "")
         dtype = _translate_huginn_type(best.get("device_type", ""))
@@ -1093,7 +1132,8 @@ class SignatureMatcher:
         return FingerprintMatch(
             source="huginn_device",
             match_type="exact",
-            confidence=0.90,
+            confidence={"exact-name": 0.90, "os-name": 0.78,
+                        "april-map": 0.65}.get(match_quality, 0.75),
             device_type=dtype or None,
             manufacturer=vendor or None,
             os_family=os_fam,
@@ -1103,55 +1143,14 @@ class SignatureMatcher:
                 "huginn_device_id": dev_id,
                 "satori_name": satori_label,
                 "hierarchy_str": hier_display,
+                "device_match": match_quality,
             },
         )
 
-    def _resolve_huginn_dhcp_sig(self, opt55: str) -> FingerprintMatch | None:
-        """Match opt55 against the Huginn DHCP signature table."""
-        idx = self._dhcp_opt55_index()
-        if idx is None:
-            return None
+    def _dhcp_vendor_candidates(self) -> dict[str, dict] | None:
+        """Prepared vendor-class index for exact and substring matching.
 
-        found_id = idx.get(opt55)
-        if not found_id:
-            return None
-
-        return FingerprintMatch(
-            source="huginn_dhcp",
-            match_type="exact",
-            confidence=0.82,
-            raw_data={
-                "source_db": "Huginn-Muninn DHCP Signatures",
-                "source_file": "~/.leetha/cache/huginn_dhcp/dhcp_signature.json",
-                "matched_key": f"DHCP Option 55: {opt55[:60]}",
-                "huginn_fingerprint_id": found_id,
-            },
-        )
-
-    def _dhcp_opt55_index(self) -> dict[str, str] | None:
-        """Return (and lazily build) a reverse index: opt55_value -> fingerprint_id."""
-        key = "_dhcp_opt55_idx"
-        if key in self._store:
-            return self._store[key]
-
-        blob = self._fetch_json("huginn_dhcp")
-        if not blob:
-            return None
-
-        rows = blob.get("entries", {})
-        idx: dict[str, str] = {}
-        for fid, rec in rows.items():
-            val = rec.get("value")
-            if val:
-                idx[val] = fid
-        self._store[key] = idx
-        return idx
-
-    def _dhcp_vendor_candidates(self) -> list[tuple[str, dict]] | None:
-        """Prepared ``(value_lower, record)`` pairs for vendor-class matching.
-
-        Built once: the table has ~450K rows, so lowercasing every value on
-        each lookup dominated the cost of this hot path.
+        Deduplicate repeated values and lowercase once when the feed loads.
         """
         key = "_dhcp_vendor_prepared"
         if key in self._store:
@@ -1161,11 +1160,20 @@ class SignatureMatcher:
         if not blob:
             return None
 
-        prepared = [
-            (rec["value"].lower(), rec)
-            for rec in blob.get("entries", {}).values()
-            if isinstance(rec, dict) and rec.get("value")
-        ]
+        prepared: dict[str, dict] = {}
+        for rec in blob.get("entries", {}).values():
+            if (not isinstance(rec, dict) or not rec.get("value") or not any(
+                rec.get(k) for k in ("vendor_hint", "device_type", "model")
+            )):
+                continue
+            key_lc = rec["value"].lower()
+            previous = prepared.get(key_lc)
+            # Keep the better-attributed row when duplicate values disagree.
+            if previous is None or sum(bool(rec.get(k)) for k in
+                                       ("vendor_hint", "device_type", "model")) > sum(
+                bool(previous.get(k)) for k in ("vendor_hint", "device_type", "model")
+            ):
+                prepared[key_lc] = rec
         self._store[key] = prepared
         return prepared
 
@@ -1182,14 +1190,13 @@ class SignatureMatcher:
             winner = memo[opt60]
         else:
             opt60_lc = opt60.lower()
-            winner = None
-            winner_len = 0
-            for val_lc, rec in prepared:
-                if len(val_lc) > winner_len and (
-                    opt60_lc.startswith(val_lc) or val_lc in opt60_lc
-                ):
-                    winner = rec
-                    winner_len = len(val_lc)
+            winner = prepared.get(opt60_lc)
+            if winner is None:
+                winner_len = 0
+                for val_lc, rec in prepared.items():
+                    if len(val_lc) > winner_len and val_lc in opt60_lc:
+                        winner = rec
+                        winner_len = len(val_lc)
             memo[opt60] = winner
 
         if not winner:
@@ -1246,12 +1253,6 @@ class SignatureMatcher:
                     raw_data={"oro": oro, "match_source": res.get("match_source")},
                 ))
 
-        # ORO Huginn DHCPv6 signatures
-        if oro:
-            hm = self._resolve_huginn_dhcpv6(oro)
-            if hm:
-                hits.append(hm)
-
         # Vendor class built-in
         if vendor_class:
             res = match_dhcpv6_vendor_class(vendor_class)
@@ -1279,14 +1280,9 @@ class SignatureMatcher:
                     raw_data={"enterprise_id": enterprise_id, "device_types": res.get("device_types"), "match_source": res.get("match_source")},
                 ))
 
-        # Enterprise ID Huginn
+        # Official IANA enterprise registry covers all named IDs from the
+        # retired Huginn copy and includes newer assignments.
         if enterprise_id is not None:
-            he = self._resolve_huginn_dhcpv6_enterprise(enterprise_id)
-            if he:
-                hits.append(he)
-
-        # Enterprise ID IANA fallback
-        if enterprise_id is not None and not any(h.source == "huginn_dhcpv6_enterprise" for h in hits):
             ie = self._resolve_iana_enterprise(enterprise_id)
             if ie:
                 hits.append(ie)
@@ -1297,64 +1293,6 @@ class SignatureMatcher:
     lookup_dhcpv6 = match_dhcpv6
 
     # ------------------------------------------------------------------
-
-    def _resolve_huginn_dhcpv6(self, oro: str) -> FingerprintMatch | None:
-        """Check the Huginn DHCPv6 signature table."""
-        blob = self._fetch_json("huginn_dhcpv6")
-        if not blob:
-            return None
-        for fid, rec in blob.get("entries", {}).items():
-            if rec.get("value") == oro:
-                return FingerprintMatch(
-                    source="huginn_dhcpv6",
-                    match_type="exact",
-                    confidence=0.70,
-                    raw_data={"oro": oro, "huginn_fingerprint_id": fid},
-                )
-        return None
-
-    def _dhcpv6_enterprise_index(self) -> dict[str, dict] | None:
-        """Reverse index: enterprise number -> record.
-
-        The cache is keyed by Huginn's internal row id, with the actual
-        IANA enterprise number in each record's ``value`` field. Looking
-        up by row id silently returns a different vendor entirely, so
-        index on ``value`` instead.
-        """
-        key = "_dhcpv6_ent_idx"
-        if key in self._store:
-            return self._store[key]
-
-        blob = self._fetch_json("huginn_dhcpv6_enterprise")
-        if not blob:
-            return None
-
-        idx: dict[str, dict] = {}
-        for rec in blob.get("entries", {}).values():
-            if not isinstance(rec, dict):
-                continue
-            num = rec.get("value")
-            if num:
-                idx.setdefault(str(num), rec)
-        self._store[key] = idx
-        return idx
-
-    def _resolve_huginn_dhcpv6_enterprise(self, eid: int) -> FingerprintMatch | None:
-        """Check the Huginn DHCPv6 enterprise table."""
-        idx = self._dhcpv6_enterprise_index()
-        if not idx:
-            return None
-        rec = idx.get(str(eid))
-        if not rec:
-            return None
-        org = rec.get("organization", "")
-        return FingerprintMatch(
-            source="huginn_dhcpv6_enterprise",
-            match_type="exact",
-            confidence=0.70,
-            manufacturer=org or None,
-            raw_data={"enterprise_id": eid, "organization": org},
-        )
 
     def _resolve_iana_enterprise(self, eid: int) -> FingerprintMatch | None:
         """Check IANA Enterprise Numbers registry for vendor name."""
@@ -2030,10 +1968,8 @@ class SignatureMatcher:
     # Caches too large for on-demand loading -- only available after the
     # background warm-up task populates ``_store``.
     _WARM_ONLY_STORES = frozenset({
-        "huginn_dhcp",
         "huginn_devices",
         "huginn_dhcp_vendor",
-        "huginn_dhcpv6_enterprise",
     })
 
     def _fetch_json(self, name: str) -> dict | list | None:
@@ -2080,20 +2016,7 @@ class SignatureMatcher:
 
     @staticmethod
     def _compact_cache(name: str, data: dict) -> dict:
-        """Reduce memory footprint of loaded caches.
-
-        - huginn_dhcp: drop redundant 'options' lists and 'options_hash'
-        """
-        entries = data.get("entries") if isinstance(data, dict) else None
-        if not isinstance(entries, dict):
-            return data
-
-        if name == "huginn_dhcp":
-            for rec in entries.values():
-                if isinstance(rec, dict):
-                    rec.pop("options", None)
-                    rec.pop("options_hash", None)
-
+        """Retain the cache loader hook for callers using the old API."""
         return data
 
     # Backward-compat alias for the internal cache loader

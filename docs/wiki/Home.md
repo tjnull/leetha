@@ -12,7 +12,7 @@ Beyond identification, Leetha applies `FindingRule` evaluations (registered via 
 
 ```bash
 pipx install leetha                # pull the package
-leetha sync                        # fetch reference databases (~880 MB, optional)
+leetha sync                        # fetch 17 reference feeds (~84 MB, optional)
 leetha start web                   # open the React dashboard at https://localhost
 ```
 
@@ -25,7 +25,7 @@ Detailed walkthrough: [Getting Started](Getting-Started.md)
 - [Getting Started](Getting-Started.md) -- Setup, first capture, adapter selection, configuration knobs
 - [CLI Reference](CLI-Reference.md) -- Every command, flag, and subcommand with usage examples
 - [How It Works](How-It-Works.md) -- PacketCapture, PARSER_CHAIN, ProcessorRegistry, VerdictEngine, Store
-- [Fingerprint Sources](Fingerprint-Sources.md) -- The 12 upstream databases and the PatternLoader pipeline
+- [Fingerprint Sources](Fingerprint-Sources.md) -- The 17 upstream feeds and their match paths
 - [Passive Network Discovery](Passive-Network-Discovery.md) -- Processor-based evidence extraction from ambient traffic
 - [Active Probing](Active-Probing.md) -- ServiceProbe interface, ServiceConnection, identify() method
 - [PCAP Import](PCAP-Import.md) -- Import captured traffic for offline analysis through the fingerprinting pipeline
@@ -49,7 +49,7 @@ Detailed walkthrough: [Getting Started](Getting-Started.md)
 
 **Processor architecture** -- Every analysis step is a processor registered with `@register_processor` in the `ProcessorRegistry`. Processors emit `Evidence` objects that the `VerdictEngine` fuses into a final `Verdict` per host.
 
-**Reference data** -- 12 community databases (IEEE OUI, Huginn-Muninn, p0f, JA3, JA4+) totaling ~880 MB, loaded on demand by `PatternLoader` from JSON files under `patterns/data/`.
+**Reference data** -- 17 synced feeds (OUI, Huginn-Muninn, Satori, AppleDB, p0f, Recog, IANA, JA3/JA4) totaling about 84 MB. Their parsed caches live under `~/.leetha/cache/`; built-in patterns are bundled separately under `leetha/patterns/data/`.
 
 **Service identification** -- 300+ `ServiceProbe` plugins connect via `ServiceConnection` and call `identify(conn)` to return a `ServiceIdentity` with version strings and protocol metadata.
 
@@ -57,7 +57,7 @@ Detailed walkthrough: [Getting Started](Getting-Started.md)
 
 **Persistent storage** -- The `Store` facade exposes `HostRepository`, `FindingRepository`, and other repositories backed by async SQLite.
 
-**Vendor enrichment** -- 86,000+ IEEE OUI records plus 1,900+ curated vendor patterns with device type, category, and model metadata.
+**Vendor enrichment** -- about 59,000 OUI assignment blocks plus curated vendor patterns with device type, category, and model metadata.
 
 **MAC randomization handling** -- Locally-administered bit detection with behavioral correlation to group multiple random addresses belonging to the same physical device. mDNS exclusive services and DHCP Option 61 (Client-ID) provide vendor identification even when the OUI is randomized.
 

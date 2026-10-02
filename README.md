@@ -5,7 +5,7 @@
 ### Passive Network Fingerprinting and Analysis Engine
 
 [![CI](https://github.com/tjnull/leetha/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/tjnull/leetha/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](https://github.com/tjnull/leetha/releases)
+[![Version](https://img.shields.io/badge/version-1.5.0-blue.svg)](https://github.com/tjnull/leetha/releases)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Tests](https://img.shields.io/badge/tests-850%20passing-brightgreen.svg)](#testing)
@@ -26,7 +26,7 @@
 - **Infrastructure-aware mDNS filtering** -- automatically detects routers/gateways/APs and suppresses forwarded multicast that would pollute device identity
 - **30 protocol banner matchers** -- passively reads service banners (SSH, MySQL, SMB, RDP, MQTT, RTSP, and more) from observed traffic
 - **315 active probe plugins** -- protocol-specific request/response parsing, not just banner grabs
-- **1.2 million fingerprint signatures** -- synced from 19 upstream feeds including IEEE OUI, Huginn-Muninn, Satori, p0f, Rapid7 Recog, JA3/JA4
+- **Fingerprint databases** -- synced from 17 upstream feeds including OUI Master Database, Huginn-Muninn, AppleDB, Satori, p0f, Rapid7 Recog, and JA3/JA4
 - **Real-time web dashboard** -- host inventory with numeric IP sorting, live packet stream, network topology, and attack surface analysis via WebSocket
 - **PCAP import** -- import captured traffic from Wireshark or tcpdump for offline analysis through the full fingerprinting pipeline
 - **Behavioral detection** -- DNS vendor affinity drift, identity shift alerts, MAC spoofing detection, DHCP anomaly analysis
@@ -84,7 +84,7 @@ Requires **Python 3.11+** and packet capture privileges (root, sudo, or `CAP_NET
 # Install (dashboard included — no build step)
 pipx install git+https://github.com/tjnull/leetha.git
 
-# Sync fingerprint databases (recommended, ~880 MB)
+# Sync the 17 fingerprint feeds (recommended, about 84 MB)
 leetha sync
 
 # Launch the web dashboard
@@ -327,7 +327,7 @@ sudo chmod g+r /dev/bpf*
 
 ### Windows
 
-Windows requires [Npcap](https://npcap.com) installed for packet capture. Download and install Npcap, then run leetha from an Administrator command prompt. The live terminal viewer is not available on Windows -- use `--web` for the dashboard.
+Windows requires [Npcap](https://npcap.com) installed for packet capture. Download and install Npcap, then run leetha from an Administrator command prompt. The live terminal viewer is not available on Windows -- use `--web` for the dashboard. For a downloaded `.exe`, run `leetha.exe check-bundle` first to verify that its pattern data, dashboard, and wiki are present.
 
 ## Network Stack Analysis
 
@@ -411,13 +411,13 @@ Leetha passively captures service banners from observed TCP traffic without send
 
 | Source | Records | Data Provided |
 |--------|---------|---------------|
-| Huginn DHCP Vendors | 446K | DHCP vendor class identifiers |
-| Huginn DHCP Signatures | 456K | DHCP option fingerprints |
-| Huginn-Muninn Devices | 119K | Device profiles (model, category, OS) |
-| IEEE OUI | 88K+ | MAC manufacturer lookup (authoritative MAC→vendor source) |
-| IANA Enterprise Numbers | 66K | SNMP/protocol enterprise OIDs |
-| Huginn DHCPv6 Enterprise | 58K | DHCPv6 enterprise identifiers |
-| Huginn DHCPv6 | 1.6K | DHCPv6 fingerprints |
+| Huginn DHCP Vendors | 460K | DHCP vendor class identifiers with usable attribution |
+| Huginn DHCP Combinations | 317 option lists | Option 55 links to annotated device profiles |
+| Huginn-Muninn Devices | 122K | Device hierarchy used to enrich combination matches |
+| AppleDB | 661 model identifiers | Product names for private-MAC Apple devices |
+| Satori (7 feeds) | 1,812 | DHCP, User-Agent, TCP, SMB, SSH, HTTP, and SIP device signatures |
+| IEEE OUI | 59K | MAC manufacturer lookup (authoritative MAC→vendor source) |
+| IANA Enterprise Numbers | 67K | DHCPv6 enterprise ID to organization |
 | JA3 TLS Fingerprints | Database | TLS client identification with matching |
 | JA4+ TLS Fingerprints | Database | Modern TLS client identification with matching |
 | p0f TCP Signatures | Database | TCP/IP stack OS fingerprinting |
@@ -527,7 +527,7 @@ Leetha is a passive network analysis tool intended for **authorized use only** o
 
 Leetha's fingerprinting accuracy depends on data generously maintained by these projects:
 
-- **[Huginn-Muninn](https://github.com/Ringmast4r/Huginn-Muninn)** by **[Ringmast4r](https://github.com/Ringmast4r)** -- MAC vendor database, DHCP fingerprints, device hierarchy, and DHCPv6 patterns. The backbone of leetha's device identification.
+- **[Huginn-Muninn](https://github.com/Ringmast4r/Huginn-Muninn)** by **[Ringmast4r](https://github.com/Ringmast4r)** -- DHCP vendor classes, annotated DHCP combinations, Satori fingerprints, AppleDB models, and device hierarchy.
 - **[IEEE OUI Registry](https://standards-oui.ieee.org/)** -- Official MAC address manufacturer assignments.
 - **[p0f](https://lcamtuf.coredump.cx/p0f3/)** -- TCP/IP stack fingerprinting signatures by Michal Zalewski. The foundation for passive OS detection.
 - **[JA3](https://github.com/salesforce/ja3)** -- TLS client fingerprinting method by Salesforce.

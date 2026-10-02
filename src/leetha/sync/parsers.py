@@ -160,7 +160,7 @@ def _normalise_oui(raw: str) -> str:
 
 def ingest_oui(content: str) -> dict:
     """Ingest OUI data (CSV or IEEE hex-text) into ``{prefix: info}``."""
-    if content.startswith("oui,manufacturer"):
+    if content.lstrip("\ufeff \t\r\n").startswith("oui,manufacturer"):
         return _ingest_oui_csv(content)
     return _ingest_oui_hex_text(content)
 
@@ -169,7 +169,7 @@ def _ingest_oui_csv(content: str) -> dict:
     """Handle OUI-Master-Database CSV rows."""
     result: dict[str, dict] = {}
     try:
-        rdr = csv.DictReader(StringIO(content))
+        rdr = csv.DictReader(StringIO(content.lstrip("\ufeff")))
         for row in rdr:
             raw_oui = row.get("oui", "").strip()
             if not raw_oui:
@@ -191,6 +191,11 @@ def _ingest_oui_csv(content: str) -> dict:
                 rec["registry"] = reg
             if src:
                 rec["sources"] = src
+            for field in ("registrant_raw", "status", "deregistered_date", "registrant_history",
+                          "registered_date", "country", "address"):
+                value = (row.get(field) or "").strip()
+                if value:
+                    rec[field] = value
             result[prefix] = rec
         log.info("Ingested %d OUI entries from CSV", len(result))
     except Exception as exc:
@@ -367,28 +372,6 @@ def ingest_huginn_devices(content: str) -> dict:
     return profiles
 
 
-def ingest_huginn_dhcp(content: str) -> dict:
-    """Ingest Huginn-Muninn DHCP signature JSON into a lookup table."""
-    table: dict[str, dict] = {}
-    try:
-        records = json.loads(content)
-        for rec in records:
-            rid = str(rec.get("id", ""))
-            if not rid or rec.get("ignored", 0):
-                continue
-            val = rec.get("value", "")
-            opts = [o.strip() for o in val.split(",") if o.strip()] if val else []
-            table[rid] = {
-                "value": val,
-                "options": opts,
-                "options_hash": _fingerprint_dhcp_opts(val),
-            }
-        log.info("Ingested %d Huginn-Muninn DHCP signatures", len(table))
-    except Exception as exc:
-        log.error("Huginn-Muninn DHCP ingestion failed: %s", exc)
-    return table
-
-
 def ingest_huginn_dhcp_vendor(content: str) -> dict:
     """Ingest Huginn-Muninn DHCP vendor-class JSON."""
     table: dict[str, dict] = {}
@@ -396,7 +379,7 @@ def ingest_huginn_dhcp_vendor(content: str) -> dict:
         records = json.loads(content)
         for rec in records:
             vid = str(rec.get("id", ""))
-            if not vid:
+            if not vid or rec.get("ignored", 0):
                 continue
             val = rec.get("value", "")
             row: dict[str, str] = {"value": val}
@@ -435,6 +418,7 @@ def ingest_huginn_combinations(content: str) -> dict:
                 "satori_name": rec.get("satori_name", ""),
                 "device_type": rec.get("device_type", ""),
                 "device_vendor": rec.get("device_vendor", ""),
+                "device_match": rec.get("device_match", ""),
             }
             opt55_map.setdefault(o55, []).append(descriptor)
 
@@ -448,45 +432,40 @@ def ingest_huginn_combinations(content: str) -> dict:
     return opt55_map
 
 
-def ingest_huginn_dhcpv6(content: str) -> dict:
-    """Ingest Huginn-Muninn DHCPv6 signature JSON."""
-    table: dict[str, dict] = {}
-    try:
-        records = json.loads(content)
-        for rec in records:
-            rid = str(rec.get("id", ""))
-            if not rid:
-                continue
-            val = rec.get("value", "")
-            opts = [o.strip() for o in val.split(",") if o.strip()] if val else []
-            table[rid] = {
-                "value": val,
-                "options": opts,
-                "options_hash": _fingerprint_dhcp_opts(val),
-            }
-        log.info("Ingested %d Huginn-Muninn DHCPv6 signatures", len(table))
-    except Exception as exc:
-        log.error("Huginn-Muninn DHCPv6 ingestion failed: %s", exc)
-    return table
+def ingest_apple_devices(content: str) -> dict:
+    """Index AppleDB records by advertised hardware model identifier."""
+    result: dict[str, dict] = {}
+    records = json.loads(content)
+    if isinstance(records, dict):
+        records = records.get("devices", records.get("entries", records))
+    if isinstance(records, dict):
+        records = [dict(rec, identifier=key) if isinstance(rec, dict) and not any(
+            rec.get(field) for field in ("identifiers", "identifier", "model_identifier", "model_id")
+        ) else rec for key, rec in records.items()]
+    if not isinstance(records, list):
+        return result
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        identifiers = (rec.get("identifiers") or rec.get("identifier")
+                       or rec.get("model_identifiers") or rec.get("model_identifier")
+                       or rec.get("model_id") or rec.get("model"))
+        if isinstance(identifiers, str):
+            identifiers = [identifiers]
+        if not isinstance(identifiers, list):
+            continue
+        name = rec.get("name") or rec.get("marketing_name")
+        if not name:
+            continue
+        for identifier in identifiers:
+            if isinstance(identifier, str) and identifier.strip():
+                result[identifier.strip()] = {
+                    "name": name,
+                    "soc": rec.get("soc") or rec.get("chip"),
+                    "release": rec.get("release") or rec.get("release_date"),
+                }
+    return result
 
-
-def ingest_huginn_dhcpv6_enterprise(content: str) -> dict:
-    """Ingest Huginn-Muninn DHCPv6 enterprise IDs JSON."""
-    table: dict[str, dict] = {}
-    try:
-        records = json.loads(content)
-        for rec in records:
-            eid = str(rec.get("id", ""))
-            if not eid:
-                continue
-            table[eid] = {
-                "value": rec.get("value", ""),
-                "organization": rec.get("organization", ""),
-            }
-        log.info("Ingested %d Huginn-Muninn DHCPv6 enterprise entries", len(table))
-    except Exception as exc:
-        log.error("Huginn-Muninn DHCPv6 enterprise ingestion failed: %s", exc)
-    return table
 
 
 def ingest_iana_enterprise(content: str) -> dict:
@@ -768,11 +747,9 @@ def ingest_ja4_csv(content: str) -> dict:
 parse_oui_csv = ingest_oui
 parse_p0f = ingest_p0f
 parse_huginn_devices = ingest_huginn_devices
-parse_huginn_dhcp = ingest_huginn_dhcp
 parse_huginn_dhcp_vendor = ingest_huginn_dhcp_vendor
 parse_huginn_combinations = ingest_huginn_combinations
-parse_huginn_dhcpv6 = ingest_huginn_dhcpv6
-parse_huginn_dhcpv6_enterprise = ingest_huginn_dhcpv6_enterprise
+parse_apple_devices = ingest_apple_devices
 parse_iana_enterprise = ingest_iana_enterprise
 parse_ja3_database = ingest_ja3
 parse_ja4_database = ingest_ja4

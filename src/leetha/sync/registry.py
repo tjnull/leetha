@@ -63,7 +63,7 @@ def _build_default_feeds() -> list[FeedSource]:
             kind="csv",
             summary=(
                 "IEEE OUI Master Database -- MAC-address to manufacturer"
-                " mapping with 86K+ entries including device types"
+                " mapping with curated device types and registration status"
             ),
         ),
         FeedSource(
@@ -83,7 +83,7 @@ def _build_default_feeds() -> list[FeedSource]:
             kind="json",
             summary=(
                 "Huginn-Muninn hierarchical device classification"
-                " profiles (116K records)"
+                " profiles"
             ),
         ),
         FeedSource(
@@ -97,14 +97,11 @@ def _build_default_feeds() -> list[FeedSource]:
             ),
         ),
         FeedSource(
-            key="huginn_dhcp",
-            title="Huginn-Muninn DHCP Signatures",
-            endpoint="https://raw.githubusercontent.com/Ringmast4r/Huginn-Muninn/main/DHCP_Signatures/json/dhcp_signature.json",
+            key="apple_devices",
+            title="AppleDB Device Models",
+            endpoint="https://raw.githubusercontent.com/Ringmast4r/Huginn-Muninn/main/AppleDB/json/devices.json",
             kind="json",
-            summary=(
-                "Huginn-Muninn DHCP Option 55 fingerprints for"
-                " device identification"
-            ),
+            summary="Apple model identifiers advertised over mDNS mapped to product names",
         ),
         FeedSource(
             key="huginn_dhcp_vendor",
@@ -114,26 +111,6 @@ def _build_default_feeds() -> list[FeedSource]:
             summary=(
                 "Huginn-Muninn DHCP vendor class identifiers for"
                 " device attribution"
-            ),
-        ),
-        FeedSource(
-            key="huginn_dhcpv6",
-            title="Huginn-Muninn DHCPv6 Signatures",
-            endpoint="https://raw.githubusercontent.com/Ringmast4r/Huginn-Muninn/main/DHCPv6_Signatures/json/dhcp6_signature.json",
-            kind="json",
-            summary=(
-                "Huginn-Muninn DHCPv6 option request patterns for"
-                " IPv6 fingerprinting"
-            ),
-        ),
-        FeedSource(
-            key="huginn_dhcpv6_enterprise",
-            title="Huginn-Muninn DHCPv6 Enterprise",
-            endpoint="https://raw.githubusercontent.com/Ringmast4r/Huginn-Muninn/main/DHCPv6_Enterprise/json/dhcp6_enterprise.json",
-            kind="json",
-            summary=(
-                "Huginn-Muninn DHCPv6 enterprise identifiers --"
-                " vendor IDs for IPv6"
             ),
         ),
         # NOTE: huginn_mac_vendors was removed -- the upstream MAC_Vendors
@@ -158,13 +135,12 @@ def _build_default_feeds() -> list[FeedSource]:
             # archived and the list only covered 157 macOS/Linux desktop
             # apps. Trisul's set is actively maintained and a near-superset:
             # it carries 155 of those 157 hashes plus mobile-app, browser,
-            # and malware fingerprints, for 609 total.
+            # and malware fingerprints.
             endpoint="https://raw.githubusercontent.com/trisulnsm/trisul-scripts/master/lua/frontend_scripts/reassembly/ja3/prints/ja3fingerprint.json",
             kind="json",
             summary=(
                 "Trisul JA3 TLS Client Hello fingerprints -- browsers,"
                 " mobile apps, desktop clients, and malware families"
-                " (609 entries)"
             ),
         ),
         FeedSource(

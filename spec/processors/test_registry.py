@@ -15,7 +15,10 @@ def _reload_all_processors():
     import leetha.processors.infrastructure
     import leetha.processors.iot_scada
     import leetha.processors.passive
+    import leetha.processors.banner
+    import leetha.processors.behavioral
     import leetha.processors.active
+    import leetha.processors.discovery_enhanced
 
     importlib.reload(leetha.processors.network)
     importlib.reload(leetha.processors.services)
@@ -23,7 +26,10 @@ def _reload_all_processors():
     importlib.reload(leetha.processors.infrastructure)
     importlib.reload(leetha.processors.iot_scada)
     importlib.reload(leetha.processors.passive)
+    importlib.reload(leetha.processors.banner)
+    importlib.reload(leetha.processors.behavioral)
     importlib.reload(leetha.processors.active)
+    importlib.reload(leetha.processors.discovery_enhanced)
 
 
 class TestRegistry:

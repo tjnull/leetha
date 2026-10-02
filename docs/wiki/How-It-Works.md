@@ -93,9 +93,9 @@ When a `CapturedPacket` arrives, the `ProcessorRegistry` dispatches it to every 
 
 ### Key Processors
 
-**OUI Resolver** -- Resolves the first 3 bytes of the source MAC against (a) 1,900+ curated vendor records with device type and model hints, and (b) the 86,000-entry IEEE OUI table as a fallback. Emits an `Evidence` with manufacturer, and optionally device_type.
+**OUI Resolver** -- Resolves the longest matching MAC assignment block against about 59,000 canonical OUI records, with curated device-type and model hints. Emits manufacturer evidence and, when available, a device type.
 
-**DHCP Option 55 Matcher** -- Converts the ordered parameter request list into a lookup key and searches the Huginn-Muninn DHCP database (368K+ signatures). Different operating systems request different DHCP options in different orders, making this a strong OS fingerprint. For example, the sequence `[1,3,6,15,26,28,51,58,59]` resolves to Windows 10, while `[1,121,3,6,15,119,252]` indicates macOS.
+**DHCP Option 55 Matcher** -- Converts the ordered parameter request list into a lookup key and checks annotated Huginn combinations, Satori DHCP signatures, and built-in patterns. Shared option lists are treated as supporting evidence rather than a unique device identity.
 
 **DHCP Vendor Class Analyzer** -- Extracts the Option 60 string (e.g. `dhcpcd-9.4.1:Linux-6.1.0`, `MSFT 5.0`, `udhcp 1.33.2`) and maps it to a vendor and OS family.
 

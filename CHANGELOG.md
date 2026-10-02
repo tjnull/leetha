@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-01 — Fingerprint source refresh and packaged data
+
+### Added
+- AppleDB model identifiers for identifying Apple devices from mDNS even when
+  they use private MAC addresses.
+- Native matching for p0f TCP signatures and corrected JA4 matching against
+  the current upstream format.
+- A packaged-data check for standalone binaries, run in CI and release builds
+  on Windows and macOS. This guards the missing fingerprint data reported in
+  [issue #4](https://github.com/tjnull/leetha/issues/4).
+
+### Changed
+- Refresh the source registry to 17 feeds and use the current Huginn-Muninn
+  DHCP combinations and Satori exports. Prefer stronger bridge matches over
+  fallback device mappings.
+- Parse the OUI Master's status, deregistration, and registrant history fields
+  and retain canonical manufacturer attribution.
+- Update the README and wiki source documentation to match the feeds and
+  runtime lookup paths.
+
+### Fixed
+- Prevent forwarded traffic from contaminating host identity and correct
+  gateway OUI handling and randomized MAC detection.
+- Reduce SQLite lock-related capture drops and avoid binding the listener
+  twice.
+
+### Removed
+- Redundant Huginn exports whose data was already covered by active sources.
+
 ## [1.4.0] - 2026-08-11 — Automatic Baseline
 
 ### Changed

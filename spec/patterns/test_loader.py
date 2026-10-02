@@ -35,6 +35,11 @@ class TestLoad:
         result = load("nonexistent_pattern_xyz")
         assert result == []
 
+    def test_missing_required_dataset_reports_bundle_error(self, tmp_path):
+        with patch("leetha.patterns.loader._DATA_DIR", tmp_path):
+            with pytest.raises(FileNotFoundError, match="rebuild the executable"):
+                load("mdns")
+
     def test_load_banners_returns_dict(self):
         if not (_DATA_DIR / "banners.json").exists():
             pytest.skip("banners.json not yet created")

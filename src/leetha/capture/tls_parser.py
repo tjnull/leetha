@@ -8,7 +8,7 @@ SNI hostname, and ALPN protocol from a TLS 1.x ClientHello record.
 from __future__ import annotations
 
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 # ---------------------------------------------------------------------------
@@ -21,6 +21,8 @@ _EXT_SNI = 0x0000
 _EXT_SUPPORTED_GROUPS = 0x000A
 _EXT_EC_POINT_FORMATS = 0x000B
 _EXT_ALPN = 0x0010
+_EXT_SIGNATURE_ALGORITHMS = 0x000D
+_EXT_SUPPORTED_VERSIONS = 0x002B
 _RANDOM_BYTES_LEN = 32
 
 
@@ -38,6 +40,8 @@ class TlsHandshakeData:
     ec_point_formats: list[int]
     sni: str | None = None
     alpn: str | None = None
+    supported_versions: list[int] = field(default_factory=list)
+    signature_algorithms: list[int] = field(default_factory=list)
 
 
 # Backward-compatible alias used by other modules
@@ -120,26 +124,41 @@ def _extract_alpn(ext_body: bytes) -> str | None:
         return None
 
 
+def _extract_uint16_list(ext_body: bytes, length_size: int) -> list[int]:
+    """Decode a length-prefixed list of two-byte TLS identifiers."""
+    if len(ext_body) < length_size:
+        return []
+    count = ext_body[0] if length_size == 1 else _read_uint16(ext_body, 0)
+    end = min(len(ext_body), length_size + count)
+    return [_read_uint16(ext_body, pos)
+            for pos in range(length_size, end - 1, 2)]
+
+
 def _walk_extensions(
     raw: bytes,
     cursor: int,
-) -> tuple[list[int], list[int], list[int], str | None, str | None]:
+) -> tuple[list[int], list[int], list[int], str | None, str | None,
+           list[int], list[int]]:
     """Iterate through the extensions block, collecting IDs and known fields.
 
-    Returns (ext_ids, groups, ec_fmts, sni_hostname, alpn_proto).
+    Returns extension IDs, JA3 groups/formats, SNI/ALPN, supported versions,
+    and signature algorithms.
     """
     ext_ids: list[int] = []
     groups: list[int] = []
     ec_fmts: list[int] = []
     sni_hostname: str | None = None
     alpn_proto: str | None = None
+    supported_versions: list[int] = []
+    signature_algorithms: list[int] = []
 
     if cursor + 2 > len(raw):
-        return ext_ids, groups, ec_fmts, sni_hostname, alpn_proto
+        return (ext_ids, groups, ec_fmts, sni_hostname, alpn_proto,
+                supported_versions, signature_algorithms)
 
     block_len = _read_uint16(raw, cursor)
     cursor += 2
-    block_end = cursor + block_len
+    block_end = min(len(raw), cursor + block_len)
 
     while cursor + 4 <= block_end:
         eid = _read_uint16(raw, cursor)
@@ -155,10 +174,15 @@ def _walk_extensions(
             ec_fmts = _extract_ec_formats(body)
         elif eid == _EXT_ALPN:
             alpn_proto = _extract_alpn(body)
+        elif eid == _EXT_SUPPORTED_VERSIONS:
+            supported_versions = _extract_uint16_list(body, 1)
+        elif eid == _EXT_SIGNATURE_ALGORITHMS:
+            signature_algorithms = _extract_uint16_list(body, 2)
 
         cursor += 4 + elen
 
-    return ext_ids, groups, ec_fmts, sni_hostname, alpn_proto
+    return (ext_ids, groups, ec_fmts, sni_hostname, alpn_proto,
+            supported_versions, signature_algorithms)
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +250,8 @@ def extract_client_hello(raw_payload: bytes) -> TlsHandshakeData | None:
     cursor += 1 + comp_count
 
     # -- Extensions (variable) ----------------------------------------------
-    ext_ids, groups, ec_fmts, sni_hostname, alpn_proto = _walk_extensions(
+    (ext_ids, groups, ec_fmts, sni_hostname, alpn_proto,
+     supported_versions, signature_algorithms) = _walk_extensions(
         buf, cursor,
     )
 
@@ -238,6 +263,8 @@ def extract_client_hello(raw_payload: bytes) -> TlsHandshakeData | None:
         ec_point_formats=ec_fmts,
         sni=sni_hostname,
         alpn=alpn_proto,
+        supported_versions=supported_versions,
+        signature_algorithms=signature_algorithms,
     )
 
 

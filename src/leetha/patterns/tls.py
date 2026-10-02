@@ -63,16 +63,11 @@ KNOWN_JA3: Dict[str, dict] = {
 # JA4 Version and ALPN Mappings
 
 _JA4_VERSION_MAP: Dict[int, str] = {
+    0x0300: "s3",  # SSL 3.0
     0x0301: "10",  # TLS 1.0
     0x0302: "11",  # TLS 1.1
     0x0303: "12",  # TLS 1.2
     0x0304: "13",  # TLS 1.3
-}
-
-_JA4_ALPN_MAP: Dict[str, str] = {
-    "h2": "h2",
-    "http/1.1": "h1",
-    "h3": "h3",
 }
 
 
@@ -146,69 +141,41 @@ def compute_ja4(
     extensions: List[int],
     sni: Optional[str] = None,
     alpn: Optional[str] = None,
+    supported_versions: Optional[List[int]] = None,
+    signature_algorithms: Optional[List[int]] = None,
+    sni_present: Optional[bool] = None,
 ) -> str:
-    """Compute a JA4 fingerprint string from TLS ClientHello parameters.
-
-    JA4 format: {proto}{version}{sni_flag}{cipher_count}{ext_count}{alpn_first}_{cipher_hash}_{ext_hash}
-
-    Where:
-        - proto: "t" for TLS
-        - version: "10"/"11"/"12"/"13" from TLS version
-        - sni_flag: "d" if SNI present, "i" if absent
-        - cipher_count: 2-digit zero-padded count (max 99)
-        - ext_count: 2-digit zero-padded count (max 99)
-        - alpn_first: ALPN shorthand ("h2", "h1", "h3", first 2 chars, or "00")
-        - cipher_hash: first 12 hex chars of SHA-256 of sorted cipher values
-        - ext_hash: first 12 hex chars of SHA-256 of sorted extension values
-
-    GREASE values are filtered from ciphers and extensions before computation.
-
-    Args:
-        tls_version: TLS version as integer (e.g. 0x0303 for TLS 1.2).
-        ciphers: List of cipher suite values from ClientHello.
-        extensions: List of extension type values from ClientHello.
-        sni: Server Name Indication value, or None if absent.
-        alpn: Application-Layer Protocol Negotiation value, or None.
-
-    Returns:
-        JA4 fingerprint string with three underscore-separated sections.
-    """
+    """Compute a FoxIO-compatible JA4 fingerprint for a TLS ClientHello."""
     filtered_ciphers = _filter_grease(ciphers)
     filtered_extensions = _filter_grease(extensions)
-
-    # Protocol
-    proto = "t"
-
-    # Version
-    version = _JA4_VERSION_MAP.get(tls_version, "00")
-
-    # SNI flag
-    sni_flag = "d" if sni else "i"
-
-    # Counts (2-digit zero-padded, capped at 99)
+    versions = _filter_grease(supported_versions or [])
+    version = _JA4_VERSION_MAP.get(max(versions) if versions else tls_version, "00")
+    sni_flag = "d" if (bool(sni) if sni_present is None else sni_present) else "i"
     cipher_count = f"{min(len(filtered_ciphers), 99):02d}"
     ext_count = f"{min(len(filtered_extensions), 99):02d}"
-
-    # ALPN first
-    if alpn is None:
-        alpn_first = "00"
-    elif alpn in _JA4_ALPN_MAP:
-        alpn_first = _JA4_ALPN_MAP[alpn]
+    if not alpn:
+        alpn_code = "00"
+    elif alpn[0].isascii() and alpn[0].isalnum() and alpn[-1].isascii() and alpn[-1].isalnum():
+        alpn_code = alpn[0] + alpn[-1]
     else:
-        alpn_first = alpn[:2] if len(alpn) >= 2 else alpn.ljust(2, "0")
+        alpn_hex = alpn.encode("utf-8").hex()
+        alpn_code = alpn_hex[0] + alpn_hex[-1]
 
-    # Cipher hash: SHA-256 of sorted comma-separated cipher values, truncated to 12 hex chars
-    sorted_ciphers = sorted(filtered_ciphers)
-    cipher_str = ",".join(str(c) for c in sorted_ciphers)
-    cipher_hash = hashlib.sha256(cipher_str.encode("ascii")).hexdigest()[:12]
+    cipher_str = ",".join(f"{value:04x}" for value in sorted(filtered_ciphers))
+    cipher_hash = (hashlib.sha256(cipher_str.encode("ascii")).hexdigest()[:12]
+                   if cipher_str else "000000000000")
 
-    # Extension hash: SHA-256 of sorted comma-separated extension values, truncated to 12 hex chars
-    sorted_extensions = sorted(filtered_extensions)
-    ext_str = ",".join(str(e) for e in sorted_extensions)
-    ext_hash = hashlib.sha256(ext_str.encode("ascii")).hexdigest()[:12]
+    # SNI and ALPN are represented in section A, so they are excluded here.
+    ext_str = ",".join(f"{value:04x}" for value in sorted(
+        value for value in filtered_extensions if value not in (0, 16)))
+    if ext_str and signature_algorithms:
+        sigalgs = ",".join(f"{value:04x}" for value in _filter_grease(signature_algorithms))
+        if sigalgs:
+            ext_str += "_" + sigalgs
+    ext_hash = (hashlib.sha256(ext_str.encode("ascii")).hexdigest()[:12]
+                if ext_str else "000000000000")
 
-    # Build JA4 string
-    section_a = f"{proto}{version}{sni_flag}{cipher_count}{ext_count}{alpn_first}"
+    section_a = f"t{version}{sni_flag}{cipher_count}{ext_count}{alpn_code}"
     return f"{section_a}_{cipher_hash}_{ext_hash}"
 
 

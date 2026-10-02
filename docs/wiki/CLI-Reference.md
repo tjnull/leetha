@@ -66,10 +66,18 @@ leetha start cli --filter mac=00:1A:2B
 ### `sync` -- Refresh Fingerprint Databases
 
 ```bash
-leetha sync                        # pull all 12 sources
-leetha sync --list                 # display each source with age and record count
-leetha sync --source ja4           # update one source only
+leetha sync                        # pull all 17 configured feeds
+leetha sync --list                 # display configured sources and descriptions
+leetha sync --source ja4_fingerprints  # update one source only
 ```
+
+### `check-bundle` -- Verify a Packaged Executable
+
+```powershell
+.\leetha.exe check-bundle
+```
+
+Checks that required pattern JSON, the dashboard, and bundled wiki pages are present. Release builds run this check before publishing the executable.
 
 ### `probe` -- Interrogate a Single Endpoint
 

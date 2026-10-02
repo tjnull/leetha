@@ -39,7 +39,7 @@ jobs:
       - name: Run tests
         env:
           PYTHONPATH: src
-        run: python -m pytest spec/ -v --tb=short
+        run: python -m pytest spec/ -m "not network" -v --tb=short
 
   test-macos:
     runs-on: macos-latest
@@ -59,7 +59,7 @@ jobs:
       - name: Run tests
         env:
           PYTHONPATH: src
-        run: python -m pytest spec/ -v --tb=short
+        run: python -m pytest spec/ -m "not network" -v --tb=short
 
   test-windows:
     runs-on: windows-latest
@@ -79,8 +79,14 @@ jobs:
       - name: Run tests
         env:
           PYTHONPATH: src
-        run: python -m pytest spec/ -v --tb=short
+        run: python -m pytest spec/ -m "not network" -v --tb=short
         shell: bash
+      - name: Build and smoke-test Windows executable
+        run: |
+          python -m pip install pyinstaller
+          python -m pip install --force-reinstall --no-deps .
+          pyinstaller --onefile --name leetha --collect-data leetha src/leetha/cli.py
+          .\dist\leetha.exe check-bundle
 
   build-frontend:
     runs-on: ubuntu-latest

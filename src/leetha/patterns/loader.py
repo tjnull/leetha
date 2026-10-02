@@ -17,6 +17,10 @@ _DATA_DIR = Path(__file__).parent / "data"
 _cache: dict[str, list | dict] = {}
 _compiled_patterns: dict[str, list[tuple[re.Pattern, dict]]] = {}
 _lock = Lock()
+_REQUIRED_DATASETS = frozenset({
+    "banners", "dhcp_opt55", "dhcp_opt60", "dhcpv6",
+    "hostname", "icmpv6", "mdns", "ssdp",
+})
 
 
 def load(name: str) -> list | dict:
@@ -34,6 +38,11 @@ def load(name: str) -> list | dict:
 
     path = _DATA_DIR / f"{name}.json"
     if not path.exists():
+        if name in _REQUIRED_DATASETS:
+            raise FileNotFoundError(
+                f"Required Leetha pattern data is missing: {path}. "
+                "Reinstall Leetha or rebuild the executable with package data."
+            )
         logger.warning("Pattern file not found: %s", path)
         return [] if name != "banners" else {}
 

@@ -517,6 +517,9 @@ def parse_tls_client_hello(packet) -> ParsedPacket | None:
         extensions=fields.extensions,
         sni=fields.sni,
         alpn=fields.alpn,
+        supported_versions=fields.supported_versions,
+        signature_algorithms=fields.signature_algorithms,
+        sni_present=0 in fields.extensions,
     )
 
     return ParsedPacket(

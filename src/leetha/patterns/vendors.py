@@ -13808,19 +13808,30 @@ def load_oui_data(cache_dir=None) -> Dict[str, Dict]:
                             "device_type": raw_dtype.lower() if raw_dtype else "unknown",
                             "category": "unknown",
                             "model": None,
+                            "status": info.get("status", "current"),
+                            "registrant_raw": info.get("registrant_raw"),
+                            "registrant_history": info.get("registrant_history"),
+                            "deregistered_date": info.get("deregistered_date"),
                         }
                 logger.info(f"Loaded {len(oui_dict)} IEEE OUI entries from cache")
             except Exception as exc:
                 logger.warning(f"Failed to load IEEE OUI cache: {exc}")
 
-    # Layer 2: Built-in vendor patterns override IEEE data (richer metadata)
+    # Layer 2: retain local hints without replacing a canonical upstream owner.
     for vendor_name, prefix_dict in all_vendors:
         for prefix, (device_type, category, model_hint) in prefix_dict.items():
-            oui_dict[prefix] = {
-                "manufacturer": vendor_name,
-                "device_type": device_type,
-                "category": category,
-                "model": model_hint,
-            }
+            upstream = oui_dict.get(prefix)
+            if upstream:
+                if upstream.get("device_type") in (None, "", "unknown"):
+                    upstream["device_type"] = device_type
+                upstream["category"] = category
+                upstream["model"] = model_hint
+            else:
+                oui_dict[prefix] = {
+                    "manufacturer": vendor_name,
+                    "device_type": device_type,
+                    "category": category,
+                    "model": model_hint,
+                }
 
     return oui_dict
