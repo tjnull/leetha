@@ -13531,11 +13531,8 @@ def load_oui_data(cache_dir=None) -> Dict[str, Dict]:
     """
     Load all OUI/MAC prefix data into a unified dict.
 
-    Merges two sources:
-    1. Built-in vendor patterns (higher priority — richer metadata with
-       device_type, category, and model hints).
-    2. IEEE OUI cache from ``cache_dir/ieee_oui.json`` (86K+ entries
-       providing broad manufacturer coverage as a fallback).
+    Assignments come from the OUI Master cache. Built-in patterns
+    supply local category and model hints.
 
     Args:
         cache_dir: Optional path to JSON cache directory (``~/.leetha/cache/``).
@@ -13787,7 +13784,7 @@ def load_oui_data(cache_dir=None) -> Dict[str, Dict]:
 
     oui_dict = {}
 
-    # Layer 1: Load IEEE OUI cache as broad fallback (86K+ entries)
+    # Load upstream registrants and provenance.
     if cache_dir is not None:
         import json
         import logging
@@ -13801,16 +13798,18 @@ def load_oui_data(cache_dir=None) -> Dict[str, Dict]:
                     ieee_data = json.load(fh)
                 entries = ieee_data.get("entries", {})
                 for prefix, info in entries.items():
-                    if isinstance(info, dict) and info.get("vendor"):
-                        raw_dtype = info.get("device_type", "unknown")
+                    if isinstance(info, dict) and info.get("vendor") and info.get("registry") != "CID":
+                        raw_dtype = info.get("device_type") or "unknown"
                         oui_dict[prefix] = {
-                            "manufacturer": info.get("vendor") or info.get("vendor_short"),
-                            "device_type": raw_dtype.lower() if raw_dtype else "unknown",
+                            "manufacturer": info["vendor"],
+                            "source_db": "OUI Master Database",
+                            "device_type": "_".join(raw_dtype.lower().split()),
                             "category": "unknown",
                             "model": None,
-                            "status": info.get("status", "current"),
-                            "registrant_raw": info.get("registrant_raw"),
-                            "deregistered_date": info.get("deregistered_date"),
+                            **{field: info[field] for field in (
+                                "status", "registry", "sources", "registrant_raw",
+                                "deregistered_date", "registered_date", "registrant_history",
+                            ) if info.get(field)},
                         }
                 logger.info(f"Loaded {len(oui_dict)} IEEE OUI entries from cache")
             except Exception as exc:

@@ -148,10 +148,8 @@ def _guess_vendor_from_class(vc_string: str) -> str | None:
 
 def _normalise_oui(raw: str) -> str:
     """Normalise an OUI string to upper-case colon-separated form."""
-    oui = raw.upper().replace("-", ":").replace(".", ":")
-    if len(oui) == 6:
-        oui = f"{oui[0:2]}:{oui[2:4]}:{oui[4:6]}"
-    return oui
+    oui = raw.upper().replace("-", "").replace(".", "").replace(":", "")
+    return ":".join(oui[i:i + 2] for i in range(0, len(oui), 2))
 
 
 # ===================================================================
@@ -160,7 +158,9 @@ def _normalise_oui(raw: str) -> str:
 
 def ingest_oui(content: str) -> dict:
     """Ingest OUI data (CSV or IEEE hex-text) into ``{prefix: info}``."""
-    if content.lstrip("\ufeff \t\r\n").startswith("oui,manufacturer"):
+    content = content.lstrip("\ufeff \t\r\n")
+    header = next(csv.reader(StringIO(content)), [])
+    if {"oui", "manufacturer"} <= {field.strip().lower() for field in header}:
         return _ingest_oui_csv(content)
     return _ingest_oui_hex_text(content)
 
@@ -168,38 +168,30 @@ def ingest_oui(content: str) -> dict:
 def _ingest_oui_csv(content: str) -> dict:
     """Handle OUI-Master-Database CSV rows."""
     result: dict[str, dict] = {}
-    try:
-        rdr = csv.DictReader(StringIO(content.lstrip("\ufeff")))
-        for row in rdr:
-            raw_oui = row.get("oui", "").strip()
-            if not raw_oui:
-                continue
-            prefix = _normalise_oui(raw_oui)
-            mfr = row.get("manufacturer", "").strip()
-            short = row.get("short_name", "").strip()
-            dev_type = row.get("device_type", "").strip()
-            reg = row.get("registry", "").strip()
-            src = row.get("sources", "").strip()
-
-            rec: dict[str, str] = {
-                "vendor": mfr,
-                "vendor_short": short if short else _shorten_vendor(mfr),
-            }
-            if dev_type:
-                rec["device_type"] = dev_type
-            if reg:
-                rec["registry"] = reg
-            if src:
-                rec["sources"] = src
-            for field in ("registrant_raw", "status", "deregistered_date", "registrant_history",
-                          "registered_date", "country", "address"):
-                value = (row.get(field) or "").strip()
-                if value:
-                    rec[field] = value
-            result[prefix] = rec
-        log.info("Ingested %d OUI entries from CSV", len(result))
-    except Exception as exc:
-        log.error("OUI CSV ingestion failed: %s", exc)
+    rdr = csv.DictReader(StringIO(content), strict=True)
+    rdr.fieldnames = [field.strip().lower() for field in rdr.fieldnames or []]
+    for row in rdr:
+        if None in row or None in row.values():
+            raise ValueError(f"Malformed OUI CSV row at line {rdr.line_num}")
+        raw_oui = row["oui"].strip()
+        mfr = row["manufacturer"].strip()
+        if not raw_oui or not mfr:
+            raise ValueError(f"Missing prefix or manufacturer at line {rdr.line_num}")
+        prefix = _normalise_oui(raw_oui)
+        if not re.fullmatch(r"[0-9A-F]{6,9}", prefix.replace(":", "")):
+            raise ValueError(f"Invalid OUI prefix at line {rdr.line_num}")
+        rec: dict[str, str] = {
+            "vendor": mfr,
+            "vendor_short": row.get("short_name", "").strip() or _shorten_vendor(mfr),
+        }
+        for field in ("device_type", "registry", "sources", "registrant_raw", "status",
+                      "deregistered_date", "registrant_history", "registered_date",
+                      "country", "address"):
+            value = row.get(field, "").strip()
+            if value:
+                rec[field] = value
+        result[prefix] = rec
+    log.info("Ingested %d OUI entries from CSV", len(result))
     return result
 
 

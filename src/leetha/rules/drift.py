@@ -7,6 +7,7 @@ from leetha.rules.registry import register_rule
 from leetha.rules.base import FindingRule as RuleBase
 from leetha.store.models import Host, Finding, FindingRule, AlertSeverity
 from leetha.evidence.models import Verdict
+from leetha.fingerprint.oui import is_registry_placeholder
 
 _MIN_CERTAINTY = 50
 _MIN_EVIDENCE_COUNT = 3
@@ -14,6 +15,13 @@ _GRACE_PERIOD_SECONDS = 60
 _COOLDOWN_SECONDS = 300
 
 _last_fired: dict[str, float] = {}
+
+def _oui_facets(verdict: Verdict) -> tuple[str | None, str | None]:
+    for item in verdict.evidence_chain:
+        if item.source == "oui" and item.raw.get("source_db") and not item.raw.get("from"):
+            category = "_".join((item.category or "").lower().split()) or None
+            return item.vendor, category
+    return None, None
 
 
 @register_rule("identity_shift")
@@ -48,10 +56,20 @@ class IdentityShiftRule(RuleBase):
         if now - last < _COOLDOWN_SECONDS:
             return None
 
-        cat_changed = (existing.category and verdict.category
-                       and existing.category != verdict.category)
-        vendor_changed = (existing.vendor and verdict.vendor
-                          and existing.vendor != verdict.vendor)
+        old_oui_vendor, old_oui_category = _oui_facets(existing)
+        new_oui_vendor, new_oui_category = _oui_facets(verdict)
+        old_category = "_".join((existing.category or "").lower().split())
+        new_category = "_".join((verdict.category or "").lower().split())
+        cat_changed = (
+            old_category and new_category and old_category != new_category
+            and (old_category, new_category) != (old_oui_category, new_oui_category)
+        )
+        vendor_changed = (
+            existing.vendor and verdict.vendor and existing.vendor != verdict.vendor
+            and not is_registry_placeholder(existing.vendor)
+            and not is_registry_placeholder(verdict.vendor)
+            and (existing.vendor, verdict.vendor) != (old_oui_vendor, new_oui_vendor)
+        )
         platform_changed = (existing.platform and verdict.platform
                             and existing.platform != verdict.platform)
         version_changed = (existing.platform_version and verdict.platform_version

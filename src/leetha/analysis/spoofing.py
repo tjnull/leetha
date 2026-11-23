@@ -16,6 +16,7 @@ import logging
 import time
 from collections import defaultdict, deque
 
+from leetha.fingerprint.oui import is_current_assignment, is_registry_placeholder, matches_registrant
 from leetha.store.database import Database
 from leetha.store.models import Alert, AlertType, AlertSeverity, Device
 
@@ -378,9 +379,15 @@ class AddressVerifier:
         oui_vendor: str | None = None,
         snapshot_reader=None,
         snapshot_writer=None,
+        *,
+        oui_record: dict | None = None,
     ) -> list[Alert]:
         """Evaluate a device record change for signs of MAC cloning."""
         findings: list[Alert] = []
+        if is_registry_placeholder(oui_vendor):
+            oui_vendor = None
+        registration = oui_record or {}
+        current_oui = is_current_assignment(registration) and not registration.get("registry_only")
 
         # Randomized MACs shift fingerprints routinely -- skip alerting
         if device.is_randomized_mac:
@@ -423,11 +430,23 @@ class AddressVerifier:
             prior_snapshots = await self._db.get_fingerprint_history(device.mac, limit=1)
         if prior_snapshots:
             prev = prior_snapshots[0]
+            # A feed update can change both the OUI and the fused manufacturer
+            # for the same MAC. The manufacturer delta then tracks the feed.
+            follows_assignment = (
+                oui_record is not None
+                and oui_vendor and device.manufacturer
+                and prev.get("oui_vendor") and prev.get("manufacturer")
+                and matches_registrant(device.manufacturer, oui_vendor, oui_record)
+                and matches_registrant(prev["manufacturer"], prev["oui_vendor"], {})
+            )
             deltas = []
             # Only flag OS drift for non-infrastructure devices
             if not is_infra and prev["os_family"] and device.os_family and prev["os_family"] != device.os_family:
                 deltas.append(f"OS: {prev['os_family']} \u2192 {device.os_family}")
-            if prev["manufacturer"] and device.manufacturer and prev["manufacturer"] != device.manufacturer:
+            if (prev["manufacturer"] and device.manufacturer
+                    and not is_registry_placeholder(prev["manufacturer"])
+                    and not is_registry_placeholder(device.manufacturer)
+                    and prev["manufacturer"] != device.manufacturer and not follows_assignment):
                 # Ignore manufacturer "drift" that is really the fusion engine
                 # alternating between the hardware/OUI vendor and an OS-derived
                 # vendor (e.g. ASUS <-> Microsoft on an ASUS PC running
@@ -499,7 +518,9 @@ class AddressVerifier:
         )
         if (
             oui_vendor
+            and current_oui
             and device.manufacturer
+            and not is_registry_placeholder(device.manufacturer)
             and device.confidence is not None and device.confidence >= 60
             and not device.is_randomized_mac
             and not _os_derived
@@ -513,7 +534,9 @@ class AddressVerifier:
                 oui_key in oui_norm and any(mfg in mfg_norm or mfg_norm in mfg for mfg in allowed_mfgs)
                 for oui_key, allowed_mfgs in _KNOWN_OUI_VENDOR_PAIRS.items()
             )
-            if not is_known_pair and oui_norm not in mfg_norm and mfg_norm not in oui_norm:
+            if not is_known_pair and not matches_registrant(
+                device.manufacturer, oui_vendor, registration
+            ):
                 rl_key = f"oui_mismatch:{device.mac}"
                 if self._rate_limit_ok(rl_key) and not self.is_suppressed(device.mac, device.ip_v4, "oui_mismatch"):
                     id_parts = [device.mac]
@@ -534,19 +557,23 @@ class AddressVerifier:
                     ))
 
         # --- Check 7: Explicit MAC spoofing detection ---
-        # If a non-randomized MAC has BOTH OUI mismatch AND fingerprint drift,
-        # or if the OUI vendor changed entirely (device swap behind same MAC),
-        # flag as MAC spoofing — a stronger, dedicated alert.
+        # Registry-backed OUI names can change during a feed refresh. Require
+        # behavioral change when the caller provides assignment metadata.
         if not device.is_randomized_mac and prior_snapshots:
             prev = prior_snapshots[0]
             oui_changed = (
-                oui_vendor
+                oui_record is None
+                and oui_vendor
                 and prev.get("oui_vendor")
+                and not is_registry_placeholder(prev["oui_vendor"])
                 and oui_vendor.lower() != prev["oui_vendor"].lower()
             )
             identity_changed = (
                 prev.get("manufacturer")
+                and not follows_assignment
                 and device.manufacturer
+                and not is_registry_placeholder(prev["manufacturer"])
+                and not is_registry_placeholder(device.manufacturer)
                 and prev["manufacturer"].lower() != device.manufacturer.lower()
                 and prev.get("os_family")
                 and device.os_family

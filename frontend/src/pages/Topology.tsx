@@ -125,8 +125,8 @@ function TopologyInner({ subscribe }: TopologyInnerProps) {
     refetchInterval: 15000,
   });
 
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [drawerMac, setDrawerMac] = useState<string | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);

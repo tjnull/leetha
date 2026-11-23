@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import { getDeviceTypeColor } from "@/lib/constants";
 import { toast } from "sonner";
 import { X, ChevronDown } from "lucide-react";
-import { authHeaders, fetchDeviceTimeline, type TimelineEvent } from "@/lib/api";
+import { authHeaders, fetchDeviceTimeline } from "@/lib/api";
 import { CustomProperties, type CustomPropsValues } from "@/components/shared/CustomProperties";
 import { CriticalityPill, type Criticality } from "@/components/CriticalityPill";
 import { AuthorizationBadge, type AuthorizationState } from "@/components/AuthorizationBadge";
@@ -49,7 +49,18 @@ interface DeviceInfo {
   offline_since?: string | null;
   presence_threshold_seconds?: number;
 }
-interface DeviceDetailResponse { device: DeviceInfo; evidence: Array<Record<string, unknown>>; }
+interface FingerprintEvidence {
+  source: string;
+  method: string;
+  certainty: number;
+  vendor?: string | null;
+  category?: string | null;
+  platform?: string | null;
+  platform_version?: string | null;
+  model?: string | null;
+  raw?: Record<string, unknown>;
+}
+interface DeviceDetailResponse { device: DeviceInfo; evidence: { chain?: FingerprintEvidence[] }; }
 interface Observation { id: number; timestamp: string; source_type: string; confidence: number | null; }
 interface ServiceResult {
   port?: number; protocol: string; result?: string | Record<string, unknown>;
@@ -131,7 +142,7 @@ export function DeviceDrawer({ mac, open, onClose }: DeviceDrawerProps) {
   });
 
   const device = detailData?.device;
-  const evidence = detailData?.evidence ?? [];
+  const evidence = detailData?.evidence?.chain ?? [];
   const observations = obsData?.observations ?? [];
   const services = svcData?.services ?? [];
   const hourly = activityData?.hourly_counts ?? [];
@@ -637,27 +648,45 @@ export function DeviceDrawer({ mac, open, onClose }: DeviceDrawerProps) {
               {evidence.length > 0 && (
                 <Section title={`Fingerprint Evidence (${evidence.length})`}>
                   <div className="space-y-3 max-h-[400px] overflow-y-auto">
-                    {evidence.map((ev, i) => {
-                      const e = ev as Record<string, unknown>;
-                      const rd = (e.raw_data ?? {}) as Record<string, unknown>;
-                      const source = String(e.source ?? ""); const conf = Number(e.confidence ?? 0);
-                      const matchType = String(e.match_type ?? "");
+                    {evidence.map((e, i) => {
+                      const rd = e.raw ?? {};
+                      const conf = Math.round(e.certainty * 100);
+                      const registryOnly = e.source === "oui" && rd.registry_only === true;
                       const sourceDb = String(rd.source_db ?? "");
                       const sourceFile = String(rd.source_file ?? "");
                       const matchedKey = String(rd.matched_key ?? "");
 
                       const fields: Array<[string, string]> = [];
-                      if (e.manufacturer) fields.push(["Vendor", String(e.manufacturer)]);
-                      if (e.device_type) fields.push(["Host Category", String(e.device_type)]);
-                      if (e.os_family) fields.push(["Platform", String(e.os_family)]);
-                      if (e.os_version) fields.push(["Platform Version", String(e.os_version)]);
-                      if (e.model) fields.push(["Model", String(e.model)]);
-                      if (matchType) fields.push(["Match Type", matchType]);
+                      if (e.vendor) fields.push(["Vendor", e.vendor]);
+                      if (e.category) fields.push(["Host Category", e.category]);
+                      if (e.platform) fields.push(["Platform", e.platform]);
+                      if (e.platform_version) fields.push(["Platform Version", e.platform_version]);
+                      if (e.model) fields.push(["Model", e.model]);
+                      if (e.method) fields.push(["Match Type", e.method]);
+                      if (e.source === "oui") {
+                        const ouiFields = [
+                          ["Registry", "registry"],
+                          ["Sources", "sources"],
+                          ["Registration status", "registration_status"],
+                          ["Raw registrant", "registrant_raw"],
+                          ["Registered", "registered_date"],
+                          ["Deregistered", "deregistered_date"],
+                          ["Registrant history", "registrant_history"],
+                        ] as const;
+                        for (const [label, key] of ouiFields) {
+                          const value = rd[key];
+                          if (typeof value === "string" && value) fields.push([label, value]);
+                        }
+                      }
                       return (
                         <div key={i} className="rounded-lg bg-card border border-border p-4">
                           <div className="flex items-center justify-between mb-1">
-                            <span className="text-sm font-semibold text-cyan-400">{source}</span>
-                            <span className="text-sm font-bold" style={{ color: confColor(conf) }}>{conf}%</span>
+                            <span className="text-sm font-semibold text-cyan-400">{e.source}</span>
+                            {registryOnly ? (
+                              <span className="text-xs text-muted-foreground">Registry match only</span>
+                            ) : (
+                              <span className="text-sm font-bold" style={{ color: confColor(conf) }}>{conf}%</span>
+                            )}
                           </div>
                           {/* Source attribution */}
                           {(sourceDb || sourceFile || matchedKey) && (

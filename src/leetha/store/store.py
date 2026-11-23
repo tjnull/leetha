@@ -82,6 +82,7 @@ class Store:
         await self.sightings.create_tables()
         await self.verdicts.create_tables()
         await self.identities.create_tables()
+        await self.verdicts.repair_oui_placeholders()
         await self.snapshots.create_tables()
         # Phase A.1: ensure devices table exists so verdicts.list_devices's
         # LEFT JOIN to custom-property columns works even when Store is used

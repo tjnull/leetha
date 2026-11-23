@@ -3314,8 +3314,12 @@ async def api_capture_restart(bpf_filter: str = ""):
 @fastapi_app.get("/api/sync/sources")
 async def api_sync_sources():
     """Return the list of available fingerprint data sources."""
+    from leetha.config import get_config
+    from leetha.sync import CACHE_NAMES
+    from leetha.sync.cache import read_feed_freshness
     from leetha.sync.registry import SourceRegistry
     registry = SourceRegistry()
+    cache_dir = get_config().cache_dir
     return {
         "sources": [
             {
@@ -3324,6 +3328,7 @@ async def api_sync_sources():
                 "url": s.url,
                 "source_type": s.source_type,
                 "description": s.description,
+                "freshness": read_feed_freshness(cache_dir / f"{CACHE_NAMES.get(s.name, s.name)}.json"),
             }
             for s in registry.list_sources()
         ]
@@ -3334,7 +3339,8 @@ async def api_sync_sources():
 async def api_sync_source(source_name: str):
     from leetha.sync import run_sync
     try:
-        await run_sync(source=source_name)
+        if not await run_sync(source=source_name):
+            return JSONResponse(status_code=502, content={"error": f"Could not sync {source_name}"})
         return {"status": "ok", "source": source_name}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -3344,7 +3350,8 @@ async def api_sync_source(source_name: str):
 async def api_sync_all():
     from leetha.sync import run_sync
     try:
-        await run_sync()
+        if not await run_sync():
+            return JSONResponse(status_code=502, content={"error": "One or more sources could not sync"})
         return {"status": "ok"}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})

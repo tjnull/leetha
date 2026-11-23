@@ -8,7 +8,7 @@ import {
   exportFindingsUrl,
   fetchTrustedBindings, addTrustedBinding, removeTrustedBinding,
   fetchSuppressionRules, addSuppressionRule, removeSuppressionRule,
-  type Incident, type IncidentDetail, type IncidentStats, type TopDevice,
+  type Incident, type IncidentDetail,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,7 +26,7 @@ import {
   AlertTriangle, Info, ChevronDown,
   TrendingUp, TrendingDown, Minus,
   Trash2, LayoutDashboard,
-  ListFilter, Ban, Target, X,
+  ListFilter, Ban, X,
   Download,
 } from "lucide-react";
 import {
@@ -58,7 +58,7 @@ const SUBTYPE_LABELS: Record<string, string> = {
   other: "Network Anomaly",
 };
 
-const SEVERITY_COLORS: Record<string, { border: string; bg: string; text: string; chart: string }> = {
+const SEVERITY_COLORS = {
   threat: { border: "border-l-red-500", bg: "bg-red-500/10", text: "text-red-400", chart: "#ef4444" },
   suspicious: { border: "border-l-yellow-500", bg: "bg-yellow-500/10", text: "text-yellow-400", chart: "#eab308" },
   informational: { border: "border-l-blue-500", bg: "bg-blue-500/10", text: "text-blue-400", chart: "#3b82f6" },
@@ -82,21 +82,6 @@ const TABS = [
   { id: "findings", label: "Findings", icon: ListFilter },
   { id: "exclusions", label: "Exclusions", icon: Ban },
 ] as const;
-
-// ═══════════════════════════════════════════
-//  Sparkline (inline SVG)
-// ═══════════════════════════════════════════
-
-function Sparkline({ data, width = 48, height = 16, color = "#3b82f6" }: { data: number[]; width?: number; height?: number; color?: string }) {
-  if (!data.length || data.every(d => d === 0)) return null;
-  const max = Math.max(...data, 1);
-  const points = data.map((v, i) => `${(i / (data.length - 1)) * width},${height - (v / max) * height}`).join(" ");
-  return (
-    <svg width={width} height={height} className="shrink-0">
-      <polyline points={points} fill="none" stroke={color} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
 
 // ═══════════════════════════════════════════
 //  Relative Time Helper
@@ -135,269 +120,12 @@ function ChartTooltip({ active, payload, label }: any) {
 //  Severity Badge
 // ═══════════════════════════════════════════
 
-function SeverityBadge({ severity }: { severity: string }) {
+function SeverityBadge({ severity }: { severity: Incident["severity"] }) {
   const colors = SEVERITY_COLORS[severity] ?? SEVERITY_COLORS.informational;
   return (
     <Badge className={cn("text-[10px] uppercase font-semibold", colors.bg, colors.text, "border-0")}>
       {severity}
     </Badge>
-  );
-}
-
-// ═══════════════════════════════════════════
-//  Collapsible Finding Card
-// ═══════════════════════════════════════════
-
-function CollapsibleFindingCard({
-  incident,
-  expanded,
-  onToggle,
-  selected,
-  onSelect,
-  detail,
-  onDismiss,
-  onSuppress,
-}: {
-  incident: Incident;
-  expanded: boolean;
-  onToggle: () => void;
-  selected: boolean;
-  onSelect: (checked: boolean) => void;
-  detail: IncidentDetail | null;
-  onDismiss: () => void;
-  onSuppress: () => void;
-}) {
-  const colors = SEVERITY_COLORS[incident.severity] ?? SEVERITY_COLORS.informational;
-
-  // Parse a cleaner summary — extract device name from raw message
-  const deviceLabel = incident.manufacturer
-    ? `${incident.manufacturer}${incident.device_ip ? ` (${incident.device_ip})` : ""}`
-    : incident.device_ip ?? incident.device_mac;
-
-  // Relative time
-  const timeAgo = incident.last_seen
-    ? (() => {
-        const diff = Date.now() - new Date(incident.last_seen).getTime();
-        const mins = Math.floor(diff / 60000);
-        if (mins < 1) return "just now";
-        if (mins < 60) return `${mins}m ago`;
-        const hrs = Math.floor(mins / 60);
-        if (hrs < 24) return `${hrs}h ago`;
-        return `${Math.floor(hrs / 24)}d ago`;
-      })()
-    : null;
-
-  // Deduplicate fingerprint history — combine entries with same source+category+vendor
-  const deduplicateFpHistory = (entries: any[]) => {
-    const seen = new Map<string, any>();
-    for (const fp of entries) {
-      const key = `${fp.source}|${fp.device_type || ""}|${fp.manufacturer || ""}|${fp.os_family || ""}`;
-      if (!seen.has(key) || (fp.device_type || fp.manufacturer || fp.os_family)) {
-        seen.set(key, fp);
-      }
-    }
-    return Array.from(seen.values()).filter(
-      (fp) => fp.device_type || fp.manufacturer || fp.os_family || fp.hostname
-    );
-  };
-
-  // Format observation data — parse JSON strings into readable text
-  const formatObsData = (obs: any): string => {
-    try {
-      const data = typeof obs.raw_data === "string" ? JSON.parse(obs.raw_data) : obs.raw_data;
-      if (typeof data === "object" && data !== null) {
-        const parts: string[] = [];
-        if (data.ip) parts.push(`IP: ${data.ip}`);
-        if (data.hostname) parts.push(`Host: ${data.hostname}`);
-        if (data.vendor_class) parts.push(`DHCP: ${data.vendor_class}`);
-        if (data.op) parts.push(`Op: ${data.op}`);
-        if (data.evidence_count) parts.push(`${data.evidence_count} evidence`);
-        return parts.length > 0 ? parts.join(" · ") : "";
-      }
-      return String(data);
-    } catch {
-      return obs.raw_data || "";
-    }
-  };
-
-  // Deduplicate observations — group by source type and show count
-  const deduplicateObs = (entries: any[]) => {
-    const grouped = new Map<string, { count: number; latest: any; maxConfidence: number }>();
-    for (const obs of entries) {
-      const key = obs.source_type;
-      const existing = grouped.get(key);
-      if (!existing) {
-        grouped.set(key, { count: 1, latest: obs, maxConfidence: obs.confidence });
-      } else {
-        existing.count++;
-        existing.maxConfidence = Math.max(existing.maxConfidence, obs.confidence);
-        if (obs.timestamp > (existing.latest.timestamp || "")) {
-          existing.latest = obs;
-        }
-      }
-    }
-    return Array.from(grouped.values());
-  };
-
-  return (
-    <div>
-      {/* Detail panel only — header row is rendered by the parent */}
-      {expanded && (
-        <div>
-          {detail ? (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 divide-y lg:divide-y-0 lg:divide-x divide-border">
-              {/* Left column: context + recommendation */}
-              <div className="p-5 space-y-4">
-                {/* Recommendation first — most actionable */}
-                {detail.detection_context?.recommendation && (
-                  <div className="rounded-lg bg-primary/[0.04] border border-primary/20 p-3">
-                    <p className="text-xs leading-relaxed">
-                      <span className="font-semibold">Action:</span>{" "}
-                      {detail.detection_context.recommendation.replace(/^(CRITICAL|HIGH|WARNING|INFO):\s*/i, "")}
-                    </p>
-                  </div>
-                )}
-
-                {/* Detection context */}
-                {detail.detection_context && (
-                  <div className="space-y-2">
-                    <h4 className="text-[11px] font-semibold text-muted-foreground flex items-center gap-2">
-                      <Target size={12} />
-                      How This Was Detected
-                    </h4>
-                    <div className="rounded-lg bg-muted/20 p-3 space-y-2 text-xs">
-                      <p><span className="text-muted-foreground">Trigger:</span> {detail.detection_context.trigger}</p>
-                      <p className="text-muted-foreground leading-relaxed">{detail.detection_context.method}</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* ARP History — only show rows with data */}
-                {detail.arp_history && detail.arp_history.length > 0 && (
-                  <div className="space-y-2">
-                    <h4 className="text-[11px] font-semibold text-muted-foreground">ARP Bindings</h4>
-                    <div className="space-y-1">
-                      {detail.arp_history.map((h: any, i: number) => (
-                        <div key={i} className="flex items-center gap-3 text-xs rounded-lg bg-muted/20 px-3 py-2">
-                          <span className="font-mono font-medium">{h.ip}</span>
-                          {h.interface && <span className="text-muted-foreground">{h.interface}</span>}
-                          {h.packets && <span className="text-muted-foreground">{h.packets} pkts</span>}
-                          {h.last_seen && (
-                            <span className="ml-auto text-[10px] text-muted-foreground">
-                              {new Date(h.last_seen).toLocaleString()}
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Actions */}
-                <div className="flex gap-2 pt-2">
-                  <Button size="sm" variant="outline" className="text-xs h-7" onClick={onDismiss}>Resolve</Button>
-                  <Button size="sm" variant="outline" className="text-xs h-7" onClick={onSuppress}>Suppress</Button>
-                </div>
-              </div>
-
-              {/* Right column: evidence timeline */}
-              <div className="p-5 space-y-4">
-                {/* Fingerprint evidence — deduplicated */}
-                {detail.fingerprint_history && detail.fingerprint_history.length > 0 && (() => {
-                  const deduped = deduplicateFpHistory(detail.fingerprint_history);
-                  if (deduped.length === 0) return null;
-                  return (
-                    <div className="space-y-2">
-                      <h4 className="text-[11px] font-semibold text-muted-foreground">Fingerprint Evidence</h4>
-                      <div className="space-y-1.5">
-                        {deduped.map((fp: any, i: number) => (
-                          <div key={i} className="rounded-lg border border-border bg-muted/10 px-3 py-2">
-                            <div className="flex items-center gap-2 mb-1">
-                              <Badge variant="outline" className="text-[9px] font-mono">{fp.source}</Badge>
-                              {fp.timestamp && (
-                                <span className="text-[10px] text-muted-foreground ml-auto">
-                                  {new Date(fp.timestamp).toLocaleString()}
-                                </span>
-                              )}
-                            </div>
-                            <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
-                              {fp.device_type && <><span className="text-muted-foreground">Category:</span><span>{fp.device_type}</span></>}
-                              {fp.manufacturer && <><span className="text-muted-foreground">Vendor:</span><span>{fp.manufacturer}</span></>}
-                              {fp.os_family && <><span className="text-muted-foreground">OS:</span><span>{fp.os_family}</span></>}
-                              {fp.hostname && <><span className="text-muted-foreground">Hostname:</span><span className="font-mono">{fp.hostname}</span></>}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* Recent observations — deduplicated by source */}
-                {detail.recent_observations && detail.recent_observations.length > 0 && (() => {
-                  const deduped = deduplicateObs(detail.recent_observations);
-                  return (
-                    <div className="space-y-2">
-                      <h4 className="text-[11px] font-semibold text-muted-foreground">
-                        Observation Sources ({detail.recent_observations.length} total)
-                      </h4>
-                      <div className="space-y-1">
-                        {deduped.map((group, i) => (
-                          <div key={i} className="flex items-center gap-3 text-xs rounded-lg bg-muted/20 px-3 py-2">
-                            <Badge variant="outline" className="text-[9px] font-mono shrink-0">{group.latest.source_type}</Badge>
-                            <span className="flex-1 truncate text-muted-foreground">
-                              {formatObsData(group.latest) || `${group.count} observation${group.count !== 1 ? "s" : ""}`}
-                            </span>
-                            <Badge
-                              variant="secondary"
-                              className={cn(
-                                "text-[9px] shrink-0",
-                                group.maxConfidence >= 80 && "bg-success/20 text-success",
-                                group.maxConfidence >= 50 && group.maxConfidence < 80 && "bg-yellow-500/20 text-yellow-500",
-                              )}
-                            >
-                              {group.maxConfidence}%
-                            </Badge>
-                            {group.count > 1 && (
-                              <span className="text-[10px] text-muted-foreground shrink-0">{group.count}x</span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* Evidence summary — only show meaningful keys */}
-                {detail.evidence && typeof detail.evidence === "object" && (() => {
-                  const meaningful = Object.entries(detail.evidence).filter(
-                    ([key]) => !["chain", "raw", "_finding"].includes(key) && key !== "source_count"
-                  );
-                  if (meaningful.length === 0) return null;
-                  return (
-                    <div className="space-y-2">
-                      <h4 className="text-[11px] font-semibold text-muted-foreground">Evidence Summary</h4>
-                      <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs rounded-lg bg-muted/20 px-3 py-2">
-                        {meaningful.map(([key, val]) => (
-                          <span key={key} className="contents">
-                            <span className="text-muted-foreground capitalize">{key.replace(/_/g, " ")}:</span>
-                            <span>{typeof val === "object" ? JSON.stringify(val).slice(0, 100) : String(val)}</span>
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-            </div>
-          ) : (
-            <div className="p-5">
-              <p className="text-xs text-muted-foreground">Loading details...</p>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -538,25 +266,6 @@ export default function ThreatDetection() {
       toast.error(`Failed: ${err}`);
     }
   };
-
-  // --- Render helpers ---
-
-  const renderFindingCard = (incident: Incident) => (
-    <CollapsibleFindingCard
-      key={incident.id}
-      incident={incident}
-      expanded={expandedIds.has(incident.id)}
-      onToggle={() => toggleExpanded(incident.id)}
-      selected={selectedIds.has(incident.id)}
-      onSelect={(checked) => toggleSelected(incident.id, checked)}
-      detail={detailCache[incident.id] ?? null}
-      onDismiss={() => {
-        setSelectedIds(new Set([incident.id]));
-        handleBulkAction("resolve");
-      }}
-      onSuppress={() => handleSuppress(incident)}
-    />
-  );
 
   return (
     <div className="space-y-6">
@@ -790,7 +499,8 @@ export default function ThreatDetection() {
           const aMatch = matchesFilters(a) && matchesSearch(a);
           const bMatch = matchesFilters(b) && matchesSearch(b);
           if (aMatch !== bMatch) return aMatch ? -1 : 1;
-          return new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime();
+          return Date.parse(b.last_seen ?? "") - Date.parse(a.last_seen ?? "") ||
+            Number(Boolean(b.last_seen)) - Number(Boolean(a.last_seen));
         });
 
         const visibleCount = sorted.filter(i => matchesFilters(i) && matchesSearch(i)).length;
@@ -909,6 +619,7 @@ export default function ThreatDetection() {
               const isExpanded = expandedIncidentId === incident.id;
               const colors = SEVERITY_COLORS[incident.severity] ?? SEVERITY_COLORS.informational;
               const showExpanded = isMatch && isExpanded;
+              const detail = detailCache[incident.id];
               const isPending = pendingIds.has(incident.id);
               const isResolved = incident.status === "resolved" || incident.status === "false_positive";
 
@@ -995,13 +706,12 @@ export default function ThreatDetection() {
                   {showExpanded && (
                     <div className="rounded-b-lg border border-t-0 border-border bg-card/50 overflow-hidden animate-in slide-in-from-top-1 duration-200">
                       <div className="px-5 py-5 space-y-6">
-                        {!detailCache[incident.id] ? (
+                        {!detail ? (
                           <p className="text-sm text-muted-foreground">Loading details...</p>
                         ) : (() => {
-                          const detail = detailCache[incident.id];
                           const dev = detail.device as any;
                           const ctx = detail.detection_context;
-                          const alerts = (detail as any)?.alert_messages ?? [];
+                          const alerts = detail.alert_messages ?? [];
                           const confColor = (c: number) =>
                             c >= 80 ? "hsl(var(--success))" : c >= 50 ? "hsl(var(--warning))" : "hsl(var(--destructive))";
 
@@ -1169,7 +879,7 @@ export default function ThreatDetection() {
 
                               {/* 5. RECENT OBSERVATIONS */}
                               {detail.recent_observations && detail.recent_observations.length > 0 && (() => {
-                                const obsGrouped = new Map<string, { count: number; maxConf: number; lastTs: string }>();
+                                const obsGrouped = new Map<string, { count: number; maxConf: number; lastTs: string | null }>();
                                 for (const obs of detail.recent_observations) {
                                   const existing = obsGrouped.get(obs.source_type);
                                   if (!existing)

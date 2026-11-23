@@ -468,12 +468,12 @@ export default function Settings() {
                     e.preventDefault();
                     const next = Math.min(historyIndex + 1, queryHistory.length - 1);
                     setHistoryIndex(next);
-                    setSql(queryHistory[next]);
+                    setSql(queryHistory[next] ?? "");
                   } else if (e.key === "ArrowDown" && historyIndex > 0) {
                     e.preventDefault();
                     const next = historyIndex - 1;
                     setHistoryIndex(next);
-                    setSql(queryHistory[next]);
+                    setSql(queryHistory[next] ?? "");
                   } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
                     e.preventDefault();
                     handleRunQuery();

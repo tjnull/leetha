@@ -42,7 +42,7 @@ describe("CustomProperties", () => {
   });
 
   it("PATCH sends owner on blur when changed", async () => {
-    const spyFetch = vi.fn(async () => ({
+    const spyFetch = vi.fn<typeof fetch>(async () => ({
       ok: true, status: 200,
       json: async () => ({ owner: "bob" }),
     } as Response));
@@ -57,13 +57,13 @@ describe("CustomProperties", () => {
     await userEvent.type(owner, "bob");
     fireEvent.blur(owner);
     await waitFor(() => expect(spyFetch).toHaveBeenCalled());
-    const call = spyFetch.mock.calls[0];
-    const body = JSON.parse((call[1] as RequestInit).body as string);
+    const call = spyFetch.mock.calls[0] ?? [];
+    const body = JSON.parse(call[1]?.body as string);
     expect(body).toEqual({ owner: "bob" });
   });
 
   it("adds a new tag via Enter key", async () => {
-    const spyFetch = vi.fn(async () => ({
+    const spyFetch = vi.fn<typeof fetch>(async () => ({
       ok: true, status: 200,
       json: async () => ({ tags: ["prod", "core"] }),
     } as Response));
@@ -77,12 +77,12 @@ describe("CustomProperties", () => {
     await userEvent.type(input, "core");
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(spyFetch).toHaveBeenCalled());
-    const body = JSON.parse((spyFetch.mock.calls[0][1] as RequestInit).body as string);
+    const body = JSON.parse(spyFetch.mock.calls[0]?.[1]?.body as string);
     expect(body).toEqual({ tags: ["prod", "core"] });
   });
 
   it("duplicate tag add is a no-op", async () => {
-    const spyFetch = vi.fn(async () => ({
+    const spyFetch = vi.fn<typeof fetch>(async () => ({
       ok: true, status: 200, json: async () => ({}),
     } as Response));
     vi.stubGlobal("fetch", spyFetch);
@@ -98,7 +98,7 @@ describe("CustomProperties", () => {
   });
 
   it("removes a tag via the X button", async () => {
-    const spyFetch = vi.fn(async () => ({
+    const spyFetch = vi.fn<typeof fetch>(async () => ({
       ok: true, status: 200, json: async () => ({ tags: [] }),
     } as Response));
     vi.stubGlobal("fetch", spyFetch);
@@ -110,7 +110,7 @@ describe("CustomProperties", () => {
     const removeBtn = screen.getByLabelText("Remove tag prod");
     await userEvent.click(removeBtn);
     await waitFor(() => expect(spyFetch).toHaveBeenCalled());
-    const body = JSON.parse((spyFetch.mock.calls[0][1] as RequestInit).body as string);
+    const body = JSON.parse(spyFetch.mock.calls[0]?.[1]?.body as string);
     expect(body).toEqual({ tags: [] });
   });
 });

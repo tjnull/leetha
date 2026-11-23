@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Show the last successful fingerprint feed sync, entry count, and upstream ETag in Sources when available.
+- Add a 100,000-device benchmark for the OUI placeholder upgrade.
+
+### Fixed
+
+- Reload refreshed OUI assignments during capture and show registration provenance in device evidence.
+- Keep IEEE Registration Authority placeholders as registry evidence and repair saved vendor verdicts that used those placeholders.
+- Normalize OUI device types for gateway handling and preserve the existing cache when a refresh fails.
+- Fix frontend type errors and run the TypeScript check in CI.
+
 ## [1.5.2] - 2026-10-02 — Memory bounds and storage scaling
 
 ### Added

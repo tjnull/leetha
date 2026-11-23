@@ -12,6 +12,9 @@ import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from leetha.fingerprint.oui import (
+    compact_prefix, is_current_assignment, is_registry_placeholder, match_assignment, matches_registrant,
+)
 from leetha.store.database import Database
 
 _log = logging.getLogger(__name__)
@@ -30,8 +33,9 @@ def _read_oui_db(cache_location: Path) -> dict[str, dict]:
         raw_entries = blob.get("entries", {})
         # Normalise prefixes to uppercase hex without separators
         return {
-            pfx.replace(":", "").replace("-", "").upper(): info
+            compact_prefix(pfx): info
             for pfx, info in raw_entries.items()
+            if isinstance(info, dict) and info.get("registry") != "CID"
         }
     except (json.JSONDecodeError, OSError) as err:
         _log.warning("OUI cache load failed: %s", err)
@@ -48,12 +52,7 @@ def _extract_oui_prefix(mac: str) -> str:
 
 def _matching_oui(mac: str, table: dict[str, dict]) -> tuple[str, dict] | None:
     """Return the most specific registered block covering a MAC."""
-    cleaned = mac.replace(":", "").replace("-", "").replace(".", "").upper()
-    for size in (9, 8, 7, 6, 4):
-        prefix = cleaned[:size]
-        if prefix in table:
-            return prefix, table[prefix]
-    return None
+    return match_assignment(mac, table)
 
 
 def _is_locally_administered(mac: str) -> bool:
@@ -193,7 +192,7 @@ async def check_manufacturer_agreement(db: Database, cache_dir: Path) -> dict:
     issues: list[dict] = []
 
     for dev in all_devices:
-        if _skip_for_manufacturer(dev) or not dev.manufacturer:
+        if _skip_for_manufacturer(dev) or not dev.manufacturer or is_registry_placeholder(dev.manufacturer):
             continue
 
         match = _matching_oui(dev.mac, oui_table)
@@ -202,12 +201,12 @@ async def check_manufacturer_agreement(db: Database, cache_dir: Path) -> dict:
         # The IEEE OUI cache stores the vendor under "vendor" (with
         # "manufacturer" kept only as a legacy fallback).
         oui_mfr = oui_record.get("vendor") or oui_record.get("manufacturer") if oui_record else None
-        if not oui_mfr:
+        if not oui_mfr or is_registry_placeholder(oui_mfr) or not is_current_assignment(oui_record):
             continue
 
         dev_mfr = dev.manufacturer
 
-        if oui_mfr.lower() in dev_mfr.lower() or dev_mfr.lower() in oui_mfr.lower():
+        if matches_registrant(dev_mfr, oui_mfr, oui_record):
             ok_count += 1
         else:
             fail_count += 1

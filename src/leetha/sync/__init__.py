@@ -71,7 +71,7 @@ class _CliSyncTracker:
         return None
 
 
-async def run_sync(list_sources: bool = False, source: str | None = None):
+async def run_sync(list_sources: bool = False, source: str | None = None) -> bool:
     """CLI entry point for the sync command with progress bars."""
     from leetha.sync.registry import SourceRegistry
     from leetha.config import get_config
@@ -102,14 +102,14 @@ async def run_sync(list_sources: bool = False, source: str | None = None):
         console.print()
         console.print(table)
         console.print()
-        return
+        return True
 
     # Determine which sources to sync
     if source:
         src = registry.get_source(source)
         if not src:
             console.print(f"  [red]✗[/red] Unknown source: [bold]{source}[/bold]")
-            return
+            return False
         source_names = [src.name]
     else:
         source_names = [s.name for s in registry.list_sources()]
@@ -222,6 +222,7 @@ async def run_sync(list_sources: bool = False, source: str | None = None):
             f"{'s' if len(pruned) > 1 else ''}: {', '.join(sorted(pruned))}[/dim]"
         )
     console.print()
+    return failed == 0
 
 
 def prune_retired_caches(cache_dir, registry) -> list[str]:
@@ -317,8 +318,8 @@ async def sync_source_with_progress(source_name: str) -> AsyncGenerator[dict, No
     from leetha.sync.registry import SourceRegistry
     from leetha.sync.downloader import download_with_progress, download_multifile_with_progress
     from leetha.sync import parsers
+    from leetha.sync.cache import write_feed_cache
     from leetha.config import get_config
-    import json
 
     registry = SourceRegistry()
     config = get_config()
@@ -404,8 +405,6 @@ async def sync_source_with_progress(source_name: str) -> AsyncGenerator[dict, No
                 raise ValueError(f"{src.name} produced no usable entries")
             cache_name = CACHE_NAMES.get(src.name, src.name)
             cache_file = config.cache_dir / f"{cache_name}.json"
-            with open(cache_file, "w") as f:
-                json.dump({"source": src.name, "entries": merged}, f)
 
             # merged is keyed by match type, each holding a list of
             # fingerprints. Report the fingerprints -- reporting the 13
@@ -414,6 +413,7 @@ async def sync_source_with_progress(source_name: str) -> AsyncGenerator[dict, No
                 len(v) if isinstance(v, (list, dict)) else 1
                 for v in merged.values()
             )
+            write_feed_cache(cache_file, src.name, merged, entry_count)
 
             yield {
                 "event": "complete",
@@ -431,6 +431,7 @@ async def sync_source_with_progress(source_name: str) -> AsyncGenerator[dict, No
 
     tmp_file = _tf.SpooledTemporaryFile(max_size=4 * 1024 * 1024, mode="w+b")
     download_size = 0
+    etag = None
     async for progress in download_with_progress(src.url, dest_file=tmp_file):
         if progress["stage"] == "connecting":
             yield {"event": "downloading", "source": src.name, "downloaded": 0, "total": None}
@@ -443,6 +444,7 @@ async def sync_source_with_progress(source_name: str) -> AsyncGenerator[dict, No
             }
         elif progress["stage"] == "done":
             download_size = progress["downloaded"]
+            etag = progress.get("etag")
         elif progress["stage"] == "error":
             tmp_file.close()
             yield {"event": "error", "source": src.name, "error": progress["error"]}
@@ -468,18 +470,8 @@ async def sync_source_with_progress(source_name: str) -> AsyncGenerator[dict, No
 
         cache_name = CACHE_NAMES.get(src.name, src.name)
         cache_file = config.cache_dir / f"{cache_name}.json"
-        import os
-        with _tf.NamedTemporaryFile(mode="w", encoding="utf-8", dir=config.cache_dir,
-                                    prefix=f".{cache_name}.", suffix=".tmp", delete=False) as f:
-            tmp_name = f.name
-            try:
-                json.dump({"source": src.name, "entries": data}, f)
-            except BaseException:
-                os.unlink(tmp_name)
-                raise
-        os.replace(tmp_name, cache_file)
-
         count = len(data) if isinstance(data, (dict, list)) else 0
+        write_feed_cache(cache_file, src.name, data, count, etag)
         yield {
             "event": "complete",
             "source": src.name,

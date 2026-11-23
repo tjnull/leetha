@@ -228,7 +228,7 @@ export default function AttackSurface({ subscribe }: AttackSurfaceProps) {
 
   const findings = data?.findings ?? [];
   const chains = data?.chains ?? [];
-  const summary = data?.summary ?? {};
+  const summary = data?.summary;
   const bySev = summary?.by_severity ?? {};
   const byCat = summary?.by_category ?? {};
   const exclusions = exclusionsData?.exclusions ?? [];

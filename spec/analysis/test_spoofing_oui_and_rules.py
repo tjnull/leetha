@@ -75,6 +75,48 @@ async def test_appliance_brand_mismatch_still_flags():
     assert oui[0].rule == "oui_mismatch"
 
 
+@pytest.mark.parametrize("record", [
+    {"registration_status": "deregistered"},
+    {"registration_status": "current", "registrant_history": "Old Vendor | Other Vendor"},
+])
+async def test_oui_history_and_status_qualify_mismatch(record):
+    det = SpoofingDetector(db=None)
+    dev = _mac_dev(manufacturer="Old Vendor", device_type="camera")
+    alerts = await det.process_device_update(
+        dev, oui_vendor="Current Vendor", oui_record=record,
+        snapshot_reader=_no_prior, snapshot_writer=_noop_writer,
+    )
+    assert not any(a.rule == "oui_mismatch" for a in alerts)
+
+
+async def test_assignment_refresh_does_not_look_like_device_replacement():
+    det = SpoofingDetector(db=None)
+    dev = _mac_dev(manufacturer="Current Vendor", device_type="camera", os_family="Linux")
+
+    async def reader(mac, limit=1):
+        return [{"oui_vendor": "Old Vendor", "manufacturer": "Old Vendor", "os_family": "Linux"}]
+
+    alerts = await det.process_device_update(
+        dev, oui_vendor="Current Vendor", oui_record={"registration_status": "current"},
+        snapshot_reader=reader, snapshot_writer=_noop_writer,
+    )
+    assert not alerts
+
+
+async def test_registry_placeholder_does_not_trigger_vendor_findings():
+    det = SpoofingDetector(db=None)
+    placeholder = "IEEE Registration Authority"
+    dev = _mac_dev(manufacturer="Camera Vendor", device_type="camera", os_family="Linux")
+
+    async def reader(mac, limit=1):
+        return [{"oui_vendor": placeholder, "manufacturer": placeholder, "os_family": "Linux"}]
+
+    alerts = await det.process_device_update(
+        dev, oui_vendor=placeholder, snapshot_reader=reader, snapshot_writer=_noop_writer,
+    )
+    assert not alerts
+
+
 async def test_mac_spoofing_carries_its_own_rule():
     det = SpoofingDetector(db=None)
     dev = _mac_dev(mac="00:aa:bb:cc:dd:ee", manufacturer="Cisco",

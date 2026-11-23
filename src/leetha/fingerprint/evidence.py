@@ -678,6 +678,8 @@ def _compute_overall_confidence(signals: list[FingerprintMatch]) -> float:
     numerator = 0.0
     denominator = 0.0
     for sig in signals:
+        if sig.source == "oui" and sig.raw_data.get("registry_only"):
+            continue
         trust = SOURCE_WEIGHTS.get(sig.source, _FALLBACK_TRUST)
         numerator += trust * sig.confidence
         denominator += trust

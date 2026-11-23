@@ -65,6 +65,13 @@ class TestIdentityShift:
         assert result is not None
         assert result.severity == AlertSeverity.CRITICAL
 
+    async def test_registry_placeholder_correction_is_not_a_vendor_shift(self, store):
+        rule = _get_rule()
+        store.verdicts.find_by_addr = AsyncMock(
+            return_value=_verdict(category="camera", vendor="IEEE Registration Authority"),
+        )
+        assert await rule.evaluate(_host(), _verdict(category="camera", vendor="Acme"), store) is None
+
     @pytest.mark.asyncio
     async def test_platform_change_fires_high(self, store):
         rule = _get_rule()

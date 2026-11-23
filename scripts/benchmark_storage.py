@@ -17,6 +17,8 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from leetha.evidence.models import Evidence
+from leetha.fingerprint.oui import REGISTRY_PLACEHOLDER
 from leetha.store.store import Store
 
 
@@ -124,20 +126,89 @@ def run(path: Path, device_count: int, sighting_count: int) -> None:
         print(f"{label}: {elapsed_ms:.1f}ms ({rows} rows)")
 
 
+def benchmark_oui_upgrade(path: Path, device_count: int) -> None:
+    """Measure the first startup of the OUI verdict repair and a normal reopen."""
+    if path.exists():
+        raise FileExistsError(f"Choose a new benchmark database path: {path}")
+    asyncio.run(_initialize(path))
+    now = datetime.now(timezone.utc).isoformat()
+    behavioral = [
+        Evidence("ssdp", "exact", .90, vendor="Example Devices", category="camera"),
+        Evidence("mdns", "pattern", .80, category="camera"),
+        Evidence("dhcpv4", "exact", .78, hostname="example-camera"),
+        Evidence("tcp_syn_sig", "pattern", .70, platform="Linux"),
+    ]
+    actual = Evidence("oui", "exact", .95, vendor="Example Devices", raw={"registry": "MA-L"})
+    placeholder = Evidence("oui", "exact", .95, vendor=REGISTRY_PLACEHOLDER,
+                           raw={"registry": "MA-L", "registrant_raw": REGISTRY_PLACEHOLDER})
+    known_chain = json.dumps([item.to_dict() for item in [actual, *behavioral]])
+    legacy_chain = json.dumps([item.to_dict() for item in [placeholder, *behavioral]])
+    placeholder_count = (device_count + 99) // 100
+    conn = sqlite3.connect(path)
+    try:
+        with conn:
+            conn.executemany(
+                "INSERT INTO hosts (hw_addr, discovered_at, last_active, disposition) VALUES (?, ?, ?, 'known')",
+                ((_mac(i + 1), now, now) for i in range(device_count)),
+            )
+            conn.executemany(
+                "INSERT INTO verdicts (hw_addr, vendor, category, certainty, evidence_chain, computed_at) "
+                "VALUES (?, ?, 'camera', 85, ?, ?)",
+                (
+                    (_mac(i + 1), REGISTRY_PLACEHOLDER if i % 100 == 0 else "Example Devices",
+                     legacy_chain if i % 100 == 0 else known_chain, now)
+                    for i in range(device_count)
+                ),
+            )
+            conn.execute("DELETE FROM leetha_migrations WHERE name = 'oui_registry_placeholders_v1'")
+    finally:
+        conn.close()
+
+    started = time.perf_counter()
+    asyncio.run(_initialize(path))
+    upgrade_ms = (time.perf_counter() - started) * 1000
+    started = time.perf_counter()
+    asyncio.run(_initialize(path))
+    reopen_ms = (time.perf_counter() - started) * 1000
+    conn = sqlite3.connect(path)
+    try:
+        remaining, = conn.execute("SELECT count(*) FROM verdicts WHERE vendor = ?",
+                                  (REGISTRY_PLACEHOLDER,)).fetchone()
+        repaired, = conn.execute(
+            """SELECT count(*) FROM verdicts WHERE vendor = 'Example Devices'
+               AND evidence_chain LIKE '%"registry_only": true%'""",
+        ).fetchone()
+    finally:
+        conn.close()
+    if remaining or repaired != placeholder_count:
+        raise RuntimeError(f"Expected {placeholder_count} repairs, found {repaired} and {remaining} remaining")
+    print(f"fixture: {device_count:,} saved devices, {placeholder_count:,} registry placeholders")
+    print(f"first store startup: {upgrade_ms:.1f}ms")
+    print(f"subsequent store startup: {reopen_ms:.1f}ms")
+    print(f"startup overhead: {upgrade_ms - reopen_ms:.1f}ms")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--devices", type=int, default=100_000)
     parser.add_argument("--sightings", type=int, default=1_000_000)
     parser.add_argument("--database", type=Path)
+    parser.add_argument("--oui-upgrade", action="store_true", help="benchmark the OUI repair on an existing inventory")
     args = parser.parse_args()
     if args.devices < 1 or args.sightings < 0:
         parser.error("--devices must be positive and --sightings cannot be negative")
 
+    def run_benchmark(path: Path) -> None:
+        if args.oui_upgrade:
+            benchmark_oui_upgrade(path, args.devices)
+        else:
+            run(path, args.devices, args.sightings)
+
     if args.database:
-        run(args.database, args.devices, args.sightings)
+        run_benchmark(args.database)
     else:
         with tempfile.TemporaryDirectory(prefix="leetha-storage-") as directory:
-            run(Path(directory) / "benchmark.db", args.devices, args.sightings)
+            run_benchmark(Path(directory) / "benchmark.db")
     return 0
 
 

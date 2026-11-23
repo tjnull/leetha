@@ -565,10 +565,12 @@ def main():
 
     if args.command == "sync":
         from leetha.sync import run_sync
-        asyncio.run(run_sync(
+        success = asyncio.run(run_sync(
             list_sources=args.list_sources,
             source=args.source,
         ))
+        if not success:
+            raise SystemExit(1)
         return
     elif args.command == "override":
         from leetha.cli_override import run_override

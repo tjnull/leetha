@@ -22,7 +22,7 @@ describe("InventorySources", () => {
   });
 
   it("uploads a lease file via multipart POST", async () => {
-    const spy = vi.fn(async () => ({
+    const spy = vi.fn<typeof fetch>(async () => ({
       ok: true, status: 200,
       json: async () => ({ imported: 3, flavor: "isc" }),
     } as Response));
@@ -34,10 +34,10 @@ describe("InventorySources", () => {
     await userEvent.upload(fileInput, file);
     await waitFor(() => expect(spy).toHaveBeenCalled());
 
-    const [url, opts] = spy.mock.calls[0];
+    const [url, opts] = spy.mock.calls[0] ?? [];
     expect(String(url)).toBe("/api/inventory/dhcp-leases/upload");
-    expect((opts as RequestInit).method).toBe("POST");
-    expect((opts as RequestInit).body).toBeInstanceOf(FormData);
+    expect(opts?.method).toBe("POST");
+    expect(opts?.body).toBeInstanceOf(FormData);
   });
 
   it("shows success state after upload", async () => {

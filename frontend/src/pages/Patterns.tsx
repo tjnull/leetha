@@ -173,7 +173,6 @@ function SortablePatternRow({
   entry,
   index,
   type,
-  isCapturing,
   onUpdate,
   onDelete,
   onTest,
@@ -183,7 +182,6 @@ function SortablePatternRow({
   entry: PatternEntry;
   index: number;
   type: string;
-  isCapturing: boolean;
   onUpdate: (index: number, updated: PatternEntry) => void;
   onDelete: (index: number) => void;
   onTest: (entry: PatternEntry, type: string) => void;
@@ -517,9 +515,10 @@ export default function Patterns() {
 
         for (const line of lines) {
           const dataMatch = line.match(/^data:\s*(.+)$/m);
-          if (!dataMatch) continue;
+          const data = dataMatch?.[1];
+          if (!data) continue;
           try {
-            const event = JSON.parse(dataMatch[1]);
+            const event = JSON.parse(data);
             if (event.type === "done") {
               setLiveTestActive(false);
             } else {
@@ -674,7 +673,6 @@ export default function Patterns() {
                       entry={entry}
                       index={index}
                       type={type}
-                      isCapturing={false}
                       onUpdate={(i, updated) => handleUpdate(type, i, updated)}
                       onDelete={(i) => handleDelete(type, i)}
                       onTest={(e, t) => handleTest(e, t)}

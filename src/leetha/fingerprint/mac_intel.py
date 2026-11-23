@@ -21,9 +21,9 @@ if TYPE_CHECKING:
 # Prefixes assigned by hypervisors and container runtimes -- these have
 # the locally-administered bit set but are NOT randomised.
 _HYPERVISOR_MAC_PREFIXES = (
-    "02:42",        # Docker containers
-    "02:50:56",     # VMware NSX
-    "52:54:00",     # QEMU/KVM
+    "0242",        # Docker containers
+    "025056",      # VMware NSX
+    "525400",      # QEMU/KVM
 )
 
 # Signal weights for multi-factor identity correlation (higher = rarer signal).
@@ -57,15 +57,7 @@ def detect_randomised_mac(addr: str | None) -> bool:
     if not addr:
         return False
 
-    # Normalize to colon-separated uppercase for consistent comparison
-    upper = addr.replace("-", ":").upper()
-
-    # Exempt known hypervisor/container prefixes.
-    for pfx in _HYPERVISOR_MAC_PREFIXES:
-        if upper.startswith(pfx.upper()):
-            return False
-
-    cleaned = upper.replace(":", "").replace(".", "")
+    cleaned = addr.replace(":", "").replace("-", "").replace(".", "").upper()
     if len(cleaned) != 12:
         return False
 
@@ -75,7 +67,7 @@ def detect_randomised_mac(addr: str | None) -> bool:
     except ValueError:
         return False
 
-    return (octet & 0x02) != 0
+    return bool(octet & 0x02) and not cleaned.startswith(_HYPERVISOR_MAC_PREFIXES)
 
 # Backward-compat alias
 is_randomized_mac = detect_randomised_mac

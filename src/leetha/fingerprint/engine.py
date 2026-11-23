@@ -26,6 +26,7 @@ class FingerprintEngine:
     def reload(self):
         """Reload all fingerprint lookup data after sync."""
         self.lookup.reload()
+        self._oui_seen.clear()
 
     def _lookup_oui_once(self, mac: str) -> list[FingerprintMatch]:
         """Return OUI matches for *mac*, but only the first time per MAC."""

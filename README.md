@@ -416,7 +416,7 @@ Leetha passively captures service banners from observed TCP traffic without send
 | Huginn-Muninn Devices | 122K | Device hierarchy used to enrich combination matches |
 | AppleDB | 661 model identifiers | Product names for private-MAC Apple devices |
 | Satori (7 feeds) | 1,812 | DHCP, User-Agent, TCP, SMB, SSH, HTTP, and SIP device signatures |
-| IEEE OUI | 59K | MAC manufacturer lookup (authoritative MAC→vendor source) |
+| OUI Master Database | 59K | MAC prefix lookup with IEEE assignments, device-type hints, and registrant history |
 | IANA Enterprise Numbers | 67K | DHCPv6 enterprise ID to organization |
 | JA3 TLS Fingerprints | Database | TLS client identification with matching |
 | JA4+ TLS Fingerprints | Database | Modern TLS client identification with matching |
@@ -530,7 +530,7 @@ Leetha is a passive network analysis tool intended for **authorized use only** o
 Leetha's fingerprinting accuracy depends on data generously maintained by these projects:
 
 - **[Huginn-Muninn](https://github.com/Ringmast4r/Huginn-Muninn)** by **[Ringmast4r](https://github.com/Ringmast4r)** -- DHCP vendor classes, annotated DHCP combinations, Satori fingerprints, AppleDB models, and device hierarchy.
-- **[IEEE OUI Registry](https://standards-oui.ieee.org/)** -- Official MAC address manufacturer assignments.
+- **[OUI Master Database](https://github.com/Ringmast4r/OUI-Master-Database)** -- MAC assignments from the [IEEE OUI Registry](https://standards-oui.ieee.org/) with community and historical data.
 - **[p0f](https://lcamtuf.coredump.cx/p0f3/)** -- TCP/IP stack fingerprinting signatures by Michal Zalewski. The foundation for passive OS detection.
 - **[JA3](https://github.com/salesforce/ja3)** -- TLS client fingerprinting method by Salesforce.
 - **[JA4+](https://github.com/FoxIO-LLC/ja4)** -- Next-generation TLS fingerprinting by FoxIO, LLC. JA4 methodology and specification are Copyright (c) 2023, FoxIO, LLC.

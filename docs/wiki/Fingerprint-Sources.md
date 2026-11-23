@@ -12,7 +12,9 @@ leetha sync --list               # print configured source names and description
 leetha sync --source ieee_oui   # update a single source
 ```
 
-The React dashboard exposes the same functionality at `/sync` with real-time download progress bars.
+The React dashboard exposes the same functionality at `/sync` with real-time download progress bars. During capture, Leetha checks for an updated OUI cache every few seconds and re-evaluates each MAC when it next appears.
+
+Sources shows the last successful sync, the entry count, and the upstream ETag when the server provides one. Older caches show their file date until they are refreshed.
 
 ---
 
@@ -20,11 +22,13 @@ The React dashboard exposes the same functionality at `/sync` with real-time dow
 
 ### Vendor and OUI Resolution
 
-**OUI Master Database** -- one row per assignment block, including MA-L, MA-M, and MA-S prefixes. The cached record retains its canonical manufacturer, curated device type, raw registrant, registration status, deregistration date, and registrant history.
+**OUI Master Database** -- Ringmast4r's merged feed with one row per assignment block, including MA-L, MA-M, and MA-S prefixes. The device drawer's fingerprint evidence shows the matched prefix, contributing sources, registration status and dates, and registrant history when available.
 
-> **Note:** A separate Huginn-Muninn MAC vendor feed was evaluated and removed. Its upstream export was 99.7% `Unknown MAC Vendor (xxxxxx)` placeholder rows (a full 24-bit prefix enumeration) and contributed only 5 real vendors beyond the IEEE OUI registry, at a 700 MB+ cost. MAC-to-vendor resolution relies solely on the IEEE OUI registry.
+> **Note:** A separate Huginn-Muninn MAC vendor feed was evaluated and removed. Its upstream export was 99.7% `Unknown MAC Vendor (xxxxxx)` placeholder rows (a full 24-bit prefix enumeration) and contributed only 5 real vendors beyond the OUI Master Database, at a 700 MB+ cost.
 
-*Matching:* The OUI table supplies the manufacturer and curated device type. Built-in entries supplement category and model hints. The longest matching block wins.
+*Matching.* The longest matching block supplies the registered organization and a device-type hint. Built-in entries supplement category and model hints. Historical assignments contribute lower-confidence evidence. Vendor-mismatch checks account for prior registrants and skip historical assignments.
+
+An IEEE Registration Authority placeholder remains visible as a registry match. If there is no more-specific vendor assignment, Leetha uses behavioral evidence to identify the device.
 
 ### DHCPv4 Analysis
 

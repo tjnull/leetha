@@ -4,7 +4,7 @@ import { NavLink, useLocation } from "react-router-dom";
 import { useTheme } from "@/providers/theme-provider";
 import { useQuery } from "@tanstack/react-query";
 import { fetchStats } from "@/lib/api";
-import { isAdmin, isAuthenticated, clearAuth, getRole } from "@/lib/auth";
+import { isAdmin, isAuthenticated, clearAuth } from "@/lib/auth";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Moon, Sun, LogOut } from "lucide-react";

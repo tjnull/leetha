@@ -412,6 +412,11 @@ export interface SourceInfo {
   url: string;
   source_type: string;
   description: string;
+  freshness?: {
+    last_synced_at: string;
+    entry_count: number | null;
+    upstream_etag: string | null;
+  } | null;
 }
 
 export interface SyncProgressEvent {
@@ -489,7 +494,8 @@ export interface IncidentDetail {
   evidence: Array<Record<string, unknown>>;
   arp_history: Array<Record<string, unknown>>;
   fingerprint_history: Array<Record<string, unknown>>;
-  recent_observations: Array<Record<string, unknown>>;
+  recent_observations: Array<{ source_type: string; confidence: number; timestamp: string | null }>;
+  alert_messages?: Array<{ message: string; timestamp: string; severity: string; status: string }>;
   trusted_bindings: Array<Record<string, unknown>>;
   suppression_rules: Array<Record<string, unknown>>;
   detection_context: {

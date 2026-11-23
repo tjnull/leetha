@@ -19,10 +19,7 @@ import {
   deleteBuildHistory,
   type NetworkInterface,
   type ProbeInfo,
-  type RemoteSensor,
-  type BuildTarget,
   type BuildRequestBody,
-  type ServerAddress,
   type BuildHistoryEntry,
 } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
@@ -46,7 +43,6 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import {
   WifiOff,
@@ -198,8 +194,9 @@ export default function Interfaces() {
 
   // Auto-select first server address
   useEffect(() => {
-    if (serverAddresses.length > 0 && !buildServerIp) {
-      setBuildServerIp(serverAddresses[0].address);
+    const firstAddress = serverAddresses[0];
+    if (firstAddress && !buildServerIp) {
+      setBuildServerIp(firstAddress.address);
     }
   }, [serverAddresses, buildServerIp]);
 
@@ -309,9 +306,10 @@ export default function Interfaces() {
 
         for (const line of lines) {
           const dataMatch = line.match(/^data:\s*(.+)$/m);
-          if (!dataMatch) continue;
+          const data = dataMatch?.[1];
+          if (!data) continue;
           try {
-            const event = JSON.parse(dataMatch[1]);
+            const event = JSON.parse(data);
             setBuildLog((prev) => [...prev, event]);
 
             if (event.stage === "done") {

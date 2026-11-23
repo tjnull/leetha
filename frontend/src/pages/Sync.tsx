@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   fetchSyncSources,
@@ -42,6 +42,7 @@ interface SourceSyncState {
 const defaultState: SourceSyncState = { status: "idle", progress: 0, detail: "" };
 
 export default function Sync() {
+  const queryClient = useQueryClient();
   const { data: sourcesData } = useQuery({
     queryKey: ["sync-sources"],
     queryFn: fetchSyncSources,
@@ -114,6 +115,7 @@ export default function Sync() {
           } else if (data.event === "complete") {
             const detail = `${(data.entries ?? 0).toLocaleString()} entries (${formatBytes(data.size)})`;
             updateState(sourceName, { status: "complete", progress: 100, detail });
+            void queryClient.invalidateQueries({ queryKey: ["sync-sources"] });
             es.close();
             esRef.current.delete(sourceName);
           } else if (data.event === "error") {
@@ -138,7 +140,7 @@ export default function Sync() {
         });
       };
     },
-    [updateState]
+    [queryClient, updateState]
   );
 
   const handleSyncAll = useCallback(() => {
@@ -192,7 +194,12 @@ export default function Sync() {
           }));
           setSyncAllRunning(false);
           es.close();
-          toast.success("All sources synced");
+          void queryClient.invalidateQueries({ queryKey: ["sync-sources"] });
+          if (data.failed) {
+            toast.error(`${data.failed} sources failed to sync`);
+          } else {
+            toast.success("All sources synced");
+          }
         }
       } catch {
         // ignore
@@ -204,7 +211,7 @@ export default function Sync() {
       setSyncAllRunning(false);
       toast.error("Connection lost during sync");
     };
-  }, [sources, updateState]);
+  }, [queryClient, sources, updateState]);
 
   const handleValidation = useCallback(async () => {
     setValidating(true);
@@ -314,6 +321,23 @@ export default function Sync() {
                     {source.url}
                   </div>
                   <div className="text-xs text-muted-foreground">{source.description}</div>
+                  {source.freshness ? (
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                      <span>Last synced <time dateTime={source.freshness.last_synced_at}>
+                        {new Date(source.freshness.last_synced_at).toLocaleString()}
+                      </time></span>
+                      {source.freshness.entry_count != null && (
+                        <span>{source.freshness.entry_count.toLocaleString()} entries</span>
+                      )}
+                      {source.freshness.upstream_etag && (
+                        <span className="max-w-full truncate font-mono" title={source.freshness.upstream_etag}>
+                          ETag {source.freshness.upstream_etag}
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-muted-foreground">No local snapshot</div>
+                  )}
 
                   {/* Progress bar */}
                   {(busy || state.status === "complete" || state.status === "error") && state.detail && (

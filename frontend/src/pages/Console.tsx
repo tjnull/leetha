@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import {
   Pause, Play, Trash2, Terminal, Radio, Copy, Activity,
-  Filter, Settings2, Download, Upload, Loader2,
+  Filter, Settings2, Download, Upload,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -198,9 +198,9 @@ const PacketEntry = memo(function PacketEntry({ packet }: { packet: ConsolePacke
           {matches.slice(0, 4).map((m: Record<string, unknown>, i: number) => (
             <span key={i} className="mr-3">
               <span className="text-cyan-500/70">{String(m.source || "?")}:</span>{" "}
-              {m.manufacturer && <span>vendor=<span className="text-foreground/80">{String(m.manufacturer)}</span> </span>}
-              {m.os_family && <span>os=<span className="text-foreground/80">{String(m.os_family)}</span> </span>}
-              {m.device_type && <span>type=<span className="text-foreground/80">{String(m.device_type)}</span> </span>}
+              {Boolean(m.manufacturer) && <span>vendor=<span className="text-foreground/80">{String(m.manufacturer)}</span> </span>}
+              {Boolean(m.os_family) && <span>os=<span className="text-foreground/80">{String(m.os_family)}</span> </span>}
+              {Boolean(m.device_type) && <span>type=<span className="text-foreground/80">{String(m.device_type)}</span> </span>}
               <span className={confClass(Number(m.confidence ?? 0) > 1 ? Number(m.confidence) : Number(m.confidence ?? 0) * 100)}>({Math.round(Number(m.confidence ?? 0) > 1 ? Number(m.confidence) : Number(m.confidence ?? 0) * 100)}%)</span>
             </span>
           ))}
@@ -528,7 +528,6 @@ export default function Console() {
   const [ipFilter, setIpFilter] = useState("");
   const [textFilter, setTextFilter] = useState("");
   const [importing, setImporting] = useState(false);
-  const [importProgress, setImportProgress] = useState<{ filename: string; processed: number; total: number } | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pausedRef = useRef(false);
@@ -636,14 +635,6 @@ export default function Console() {
         <span className="text-xs text-muted-foreground">
           {dragOver ? "Drop PCAP file here" : "or drag & drop .pcap / .pcapng / .cap"}
         </span>
-        {importProgress && (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            <span>
-              Importing {importProgress.filename}: {importProgress.processed.toLocaleString()}/{importProgress.total.toLocaleString()} packets
-            </span>
-          </div>
-        )}
       </div>
       {activeTab === "stream" && <LiveStreamTab packets={packets} paused={paused} setPaused={setPaused} autoScroll={autoScroll} setAutoScroll={setAutoScroll} protocolFilter={protocolFilter} setProtocolFilter={setProtocolFilter} macFilter={macFilter} setMacFilter={setMacFilter} ipFilter={ipFilter} setIpFilter={setIpFilter} textFilter={textFilter} setTextFilter={setTextFilter} onClear={handleClear} />}
       {activeTab === "overview" && <NetworkOverviewTab packets={packets} sessionPackets={_consoleTotalCount} />}

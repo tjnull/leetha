@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
 from leetha.evidence.models import Evidence, Verdict
 
@@ -52,6 +53,71 @@ class VerdictRepository:
                   verdict.hostname, verdict.certainty, chain_json,
                   verdict.computed_at.isoformat()))
             await self._conn.commit()
+
+    async def repair_oui_placeholders(self) -> None:
+        """Recompute saved verdicts that previously used a registry name as a vendor."""
+        from leetha.evidence.engine import VerdictEngine
+        from leetha.fingerprint.oui import REGISTRY_PLACEHOLDER, is_registry_placeholder
+
+        migration = "oui_registry_placeholders_v1"
+        async with self._conn.execute(
+            "SELECT 1 FROM leetha_migrations WHERE name = ?", (migration,),
+        ) as cursor:
+            if await cursor.fetchone():
+                return
+
+        label = REGISTRY_PLACEHOLDER.casefold()
+        engine = VerdictEngine()
+        async with self._mu:
+            await self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                async with self._conn.execute(
+                    "INSERT OR IGNORE INTO leetha_migrations(name) VALUES (?)", (migration,),
+                ) as cursor:
+                    if not cursor.rowcount:
+                        await self._conn.commit()
+                        return
+                async with self._conn.execute(
+                    """SELECT * FROM verdicts
+                       WHERE lower(trim(vendor)) = ? OR evidence_chain LIKE ?""",
+                    (label, f'%"{REGISTRY_PLACEHOLDER}"%'),
+                ) as cursor:
+                    async for row in cursor:
+                        old = self._row_to_verdict(row)
+                        evidence = []
+                        revised = False
+                        for item in old.evidence_chain:
+                            if item.source == "oui" and is_registry_placeholder(item.vendor):
+                                raw = dict(item.raw, registry_only=True)
+                                raw.setdefault("registrant_raw", item.vendor)
+                                item = replace(item, vendor=None, category=None, model=None,
+                                               platform=None, platform_version=None, hostname=None, raw=raw)
+                                revised = True
+                            evidence.append(item)
+                        if revised or (evidence and is_registry_placeholder(old.vendor)):
+                            verdict = engine.compute(old.hw_addr, evidence)
+                        elif is_registry_placeholder(old.vendor):
+                            verdict = replace(old, vendor=None, certainty=0)
+                        else:
+                            continue
+                        await self._conn.execute(
+                            """UPDATE verdicts SET vendor = ?, category = ?, model = ?, platform = ?,
+                               platform_version = ?, hostname = COALESCE(?, hostname),
+                               certainty = ?, evidence_chain = ? WHERE hw_addr = ?""",
+                            (verdict.vendor, verdict.category, verdict.model, verdict.platform,
+                             verdict.platform_version, verdict.hostname, verdict.certainty,
+                             json.dumps([item.to_dict() for item in verdict.evidence_chain]), old.hw_addr),
+                        )
+                await self._conn.execute(
+                    """UPDATE identities SET manufacturer =
+                       (SELECT vendor FROM verdicts WHERE hw_addr = identities.primary_mac)
+                       WHERE lower(trim(manufacturer)) = ?""",
+                    (label,),
+                )
+                await self._conn.commit()
+            except BaseException:
+                await self._conn.rollback()
+                raise
 
     async def find_by_addr(self, hw_addr: str) -> Verdict | None:
         cursor = await self._conn.execute(

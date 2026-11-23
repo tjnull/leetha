@@ -519,6 +519,8 @@ class LeethaApp:
                 is_randomized_mac=host.mac_randomized,
             )
             oui_vendor = pipeline._oui_vendors.get(hw_addr)
+            oui_record = next((e.raw for e in verdict.evidence_chain
+                               if e.source == "oui" and not e.raw.get("from")), {})
 
             async def _snap_read(mac, limit=1):
                 return await store.snapshots.get_latest(mac, limit)
@@ -527,7 +529,7 @@ class LeethaApp:
 
             alerts = ev_loop.run_until_complete(
                 spoof_det.process_device_update(
-                    device, oui_vendor=oui_vendor,
+                    device, oui_vendor=oui_vendor, oui_record=oui_record,
                     snapshot_reader=_snap_read,
                     snapshot_writer=_snap_write))
             _MAP = {
@@ -1331,6 +1333,8 @@ class LeethaApp:
             oui_vendor = None
             if self.pipeline:
                 oui_vendor = self.pipeline._oui_vendors.get(hw_addr)
+            oui_record = next((e.raw for e in verdict.evidence_chain
+                               if e.source == "oui" and not e.raw.get("from")), {})
 
             async def _snapshot_reader(mac, limit=1):
                 return await self.store.snapshots.get_latest(mac, limit)
@@ -1342,7 +1346,7 @@ class LeethaApp:
                     device_type=device_type, hostname=hostname, oui_vendor=oui_vendor)
 
             alerts = await self.spoofing_detector.process_device_update(
-                device, oui_vendor=oui_vendor,
+                device, oui_vendor=oui_vendor, oui_record=oui_record,
                 snapshot_reader=_snapshot_reader,
                 snapshot_writer=_snapshot_writer)
 

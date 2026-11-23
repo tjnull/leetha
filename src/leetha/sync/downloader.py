@@ -57,7 +57,7 @@ async def fetch_with_updates(
     Yielded dicts follow one of these shapes:
         ``{"stage": "connecting"}``
         ``{"stage": "downloading", "downloaded": N, "total": T_or_None}``
-        ``{"stage": "done", "downloaded": N, "total": T, "data": <bytes|None>}``
+        ``{"stage": "done", "downloaded": N, "total": T, "data": <bytes|None>, "etag": <str|None>}``
         ``{"stage": "error", "error": "message"}``
     """
     merged_hdrs = {**_REQUEST_HEADERS, **(extra_headers or {})}
@@ -91,6 +91,7 @@ async def fetch_with_updates(
                     "downloaded": received,
                     "total": content_len or received,
                     "data": payload,
+                    "etag": resp.headers.get("ETag"),
                 }
     except Exception as exc:
         log.error("Fetch failed for %s: %s", url, exc)

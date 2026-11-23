@@ -38,7 +38,7 @@ describe("PresencePanel", () => {
   });
 
   it("preset button PATCHes presence_threshold_seconds", async () => {
-    const fetchSpy = vi.fn(async () => ({
+    const fetchSpy = vi.fn<typeof fetch>(async () => ({
       ok: true, status: 200, json: async () => ({}),
     } as Response));
     vi.stubGlobal("fetch", fetchSpy);
@@ -52,12 +52,12 @@ describe("PresencePanel", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "1h" }));
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
-    const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string);
+    const body = JSON.parse(fetchSpy.mock.calls[0]?.[1]?.body as string);
     expect(body).toEqual({ presence_threshold_seconds: 3600 });
   });
 
   it("does not PATCH when same preset is chosen twice (no-op)", async () => {
-    const fetchSpy = vi.fn(async () => ({
+    const fetchSpy = vi.fn<typeof fetch>(async () => ({
       ok: true, status: 200, json: async () => ({}),
     } as Response));
     vi.stubGlobal("fetch", fetchSpy);

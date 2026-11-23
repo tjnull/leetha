@@ -45,7 +45,7 @@ describe("AuthorizationPanel", () => {
   });
 
   it("Approve button fires POST /approve with optional reason", async () => {
-    const fetchSpy = vi.fn(async () => ({
+    const fetchSpy = vi.fn<typeof fetch>(async () => ({
       ok: true, status: 200, json: async () => ({ authorization: "approved" }),
     } as Response));
     vi.stubGlobal("fetch", fetchSpy);
@@ -61,13 +61,13 @@ describe("AuthorizationPanel", () => {
     await userEvent.click(screen.getByRole("button", { name: /approve/i }));
 
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
-    const [url, opts] = fetchSpy.mock.calls[0];
+    const [url, opts] = fetchSpy.mock.calls[0] ?? [];
     expect(String(url)).toMatch(/\/api\/devices\/.*\/approve$/);
-    expect(JSON.parse((opts as RequestInit).body as string)).toEqual({ reason: "onboard" });
+    expect(JSON.parse(opts?.body as string)).toEqual({ reason: "onboard" });
   });
 
   it("Reject button fires /reject", async () => {
-    const fetchSpy = vi.fn(async () => ({
+    const fetchSpy = vi.fn<typeof fetch>(async () => ({
       ok: true, status: 200, json: async () => ({}),
     } as Response));
     vi.stubGlobal("fetch", fetchSpy);
@@ -81,7 +81,7 @@ describe("AuthorizationPanel", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /reject/i }));
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
-    expect(String(fetchSpy.mock.calls[0][0])).toMatch(/\/reject$/);
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toMatch(/\/reject$/);
   });
 
   it("Revoke button is disabled when already unapproved", () => {

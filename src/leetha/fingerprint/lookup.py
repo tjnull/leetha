@@ -13,9 +13,14 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
+import time
 from pathlib import Path
 from leetha.fingerprint.evidence import FingerprintMatch
 from leetha.fingerprint.mac_intel import is_randomized_mac
+from leetha.fingerprint.oui import (
+    compact_prefix, is_current_assignment, is_registry_placeholder, match_assignment,
+)
 from leetha.patterns.matching import match_banner as _match_banner_pattern
 from leetha.patterns.matching import match_mdns_service as _match_mdns_pattern, MDNS_SERVICE_DEVICE_MAP
 from leetha.patterns.matching import match_dhcp_opt55, match_dhcp_opt60
@@ -374,6 +379,11 @@ class SignatureMatcher:
 
         # Normalised OUI prefix -> vendor info for O(1) lookups
         self._oui_index: dict[str, dict] = {}
+        self._custom_oui: dict[str, dict] = {}
+        self._oui_lock = threading.Lock()
+        self._oui_stamp = self._oui_cache_stamp()
+        self._next_oui_check = time.monotonic() + 5
+        self._oui_revision = 0
         self._build_oui_index()
 
     # -- cache_dir property for backward compat --
@@ -388,9 +398,32 @@ class SignatureMatcher:
     def reload(self) -> None:
         """Flush cached data and rebuild the OUI index.  Call after sync."""
         self._store.clear()
-        self._oui_index.clear()
-        self._build_oui_index()
+        with self._oui_lock:
+            self._oui_stamp = self._oui_cache_stamp()
+            self._build_oui_index()
+            self._oui_revision += 1
         _log.info("Signature data reloaded")
+
+    def _oui_cache_stamp(self) -> tuple[int, int, int] | None:
+        try:
+            stat = (self._data_dir / "ieee_oui.json").stat()
+        except OSError:
+            return None
+        return stat.st_ino, stat.st_mtime_ns, stat.st_size
+
+    def refresh_oui(self) -> int:
+        """Check periodically for cache replacement and return the index revision."""
+        now = time.monotonic()
+        if now >= self._next_oui_check:
+            with self._oui_lock:
+                if now >= self._next_oui_check:
+                    stamp = self._oui_cache_stamp()
+                    if stamp != self._oui_stamp:
+                        self._build_oui_index()
+                        self._oui_stamp = stamp
+                        self._oui_revision += 1
+                    self._next_oui_check = now + 5
+        return self._oui_revision
 
     def load_custom_patterns(self, data_dir: Path) -> None:
         """Merge user-supplied patterns from *data_dir* into memory."""
@@ -414,9 +447,14 @@ class SignatureMatcher:
                 HOSTNAME_PATTERNS.append(record)
 
         # Additional MAC prefix rules
-        for pfx, meta in user_patterns.get("mac_prefix", {}).items():
-            key = pfx.replace(":", "").replace("-", "").upper()
-            self._oui_index[key] = meta
+        custom_oui = {
+            compact_prefix(prefix): info for prefix, info in user_patterns.get("mac_prefix", {}).items()
+        }
+        with self._oui_lock:
+            self._custom_oui.update(custom_oui)
+            self._oui_index = self._oui_index | custom_oui
+            if custom_oui:
+                self._oui_revision += 1
 
         _log.info("Custom patterns loaded from %s", data_dir)
 
@@ -433,9 +471,7 @@ class SignatureMatcher:
             _log.warning("No OUI data available")
             return
 
-        for prefix_str, vendor_meta in raw.items():
-            key = prefix_str.replace(":", "").replace("-", "").upper()
-            self._oui_index[key] = vendor_meta
+        self._oui_index = {compact_prefix(prefix): info for prefix, info in raw.items()} | self._custom_oui
 
         _log.info("OUI index built with %d prefixes", len(self._oui_index))
 
@@ -444,64 +480,39 @@ class SignatureMatcher:
     # ==================================================================
 
     def match_mac(self, mac: str) -> list[FingerprintMatch]:
-        """Identify a device by its MAC address via OUI and Huginn data.
+        """Return the most specific assignment or built-in MAC pattern."""
+        if not mac or is_randomized_mac(mac):
+            return []
+        match = match_assignment(mac, self._oui_index)
+        if match is None:
+            return []
 
-        Both the IEEE OUI database and the Huginn MAC vendor table are
-        consulted; all hits are returned so the evidence aggregator can
-        weigh them.
-
-        Parameters
-        ----------
-        mac:
-            Hardware address in common hex notation (e.g.
-            ``"AA:BB:CC:DD:EE:FF"``).
-
-        Returns
-        -------
-        list[FingerprintMatch]
-            Possibly empty list of matches.
-        """
-        hits: list[FingerprintMatch] = []
-
-        if not mac:
-            return hits
-
-        if is_randomized_mac(mac):
-            return hits
-
-        norm = mac.replace(":", "").replace("-", "").upper()
-
-        # IEEE OUI (longest-prefix wins)
-        if self._oui_index:
-            for n_chars in (9, 8, 7, 6, 4):
-                pfx = norm[:n_chars]
-                if pfx in self._oui_index:
-                    info = self._oui_index[pfx]
-                    hits.append(FingerprintMatch(
-                        source="oui",
-                        match_type="exact",
-                        confidence=0.95,
-                        manufacturer=info.get("manufacturer"),
-                        device_type=info.get("device_type"),
-                        model=info.get("model"),
-                        category=info.get("category"),
-                        raw_data={
-                            "source_db": "IEEE OUI Master Database",
-                            "source_file": "~/.leetha/cache/ieee_oui/master_oui.csv",
-                            "matched_key": f"OUI prefix {pfx}",
-                            "registration_status": info.get("status"),
-                            "registrant_raw": info.get("registrant_raw"),
-                            "deregistered_date": info.get("deregistered_date"),
-                        },
-                    ))
-                    break
-
-        # MAC-to-vendor resolution relies solely on the IEEE OUI Master
-        # Database above -- the authoritative source. (The former
-        # huginn_mac_vendors fallback was removed: it was 99.7%
-        # placeholder rows and fabricated "Unknown MAC Vendor (...)"
-        # matches for unassigned OUIs.)
-        return hits
+        prefix, info = match
+        raw = {"matched_key": f"OUI prefix {prefix}"}
+        if info.get("source_db"):
+            raw["source_db"] = info["source_db"]
+            raw["source_file"] = "ieee_oui.json"
+        for field in ("registry", "sources", "registrant_raw", "registered_date",
+                      "deregistered_date", "registrant_history"):
+            if info.get(field):
+                raw[field] = info[field]
+        if info.get("status"):
+            raw["registration_status"] = info["status"]
+        confidence = 0.95 if is_current_assignment(info) else 0.55
+        if is_registry_placeholder(info.get("manufacturer")):
+            raw["registry_only"] = True
+            raw.setdefault("registrant_raw", info["manufacturer"])
+            return [FingerprintMatch(source="oui", match_type="exact", confidence=confidence, raw_data=raw)]
+        return [FingerprintMatch(
+            source="oui",
+            match_type="exact",
+            confidence=confidence,
+            manufacturer=info.get("manufacturer"),
+            device_type=info.get("device_type"),
+            model=info.get("model"),
+            category=info.get("category"),
+            raw_data=raw,
+        )]
 
     # Backward-compat alias
     lookup_mac = match_mac

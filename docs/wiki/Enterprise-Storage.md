@@ -113,3 +113,13 @@ The benchmark reports the inventory page, dashboard aggregation, device
 drill-down, and JSON connection-query timings. Results depend on storage and
 CPU, so release decisions should compare them on the same host and publish the
 hardware alongside the numbers.
+
+Measure the OUI placeholder repair on a disposable 100,000-device inventory:
+
+```bash
+PYTHONPATH=src python scripts/benchmark_storage.py --oui-upgrade --devices 100000
+```
+
+This fixture seeds one placeholder verdict per 100 devices and reports the
+first store startup and the subsequent reopen. The difference estimates
+one-time database startup delay before capture can start.

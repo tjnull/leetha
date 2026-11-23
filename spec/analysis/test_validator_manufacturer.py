@@ -15,7 +15,7 @@ import pytest
 
 from leetha.store.database import Database
 from leetha.store.store import Store
-from leetha.analysis.validator import check_manufacturer_agreement
+from leetha.analysis.validator import check_manufacturer_agreement, check_oui_coverage
 
 _c = itertools.count()
 
@@ -51,7 +51,8 @@ def _cache(tmp_path):
     (cd / "ieee_oui.json").write_text(json.dumps({"entries": {
         "00:24:E4": {"vendor": "Withings"},
         "AC:BB:CC": {"vendor": "Acme Corp"},
-        "11:22:33": {"vendor": "Ubiquiti Inc"},
+        "10:22:33": {"vendor": "Ubiquiti Inc"},
+        "8C:1F:64": {"vendor": "IEEE Registration Authority"},
     }}), encoding="utf-8")
     return cd
 
@@ -69,9 +70,18 @@ async def test_genuine_vendor_mismatch_is_flagged(tmp_path):
 
 async def test_agreeing_vendor_passes(tmp_path):
     db = await _mkdb(tmp_path)
-    await _add(db, "11:22:33:44:55:66", vendor="Ubiquiti", category="switch")
+    await _add(db, "10:22:33:44:55:66", vendor="Ubiquiti", category="switch")
     rep = await check_manufacturer_agreement(db, _cache(tmp_path))
     assert rep["passed"] == 1 and rep["failed"] == 0
+    await db.close()
+
+
+async def test_registry_placeholder_is_coverage_only(tmp_path):
+    db = await _mkdb(tmp_path)
+    await _add(db, "8c:1f:64:ff:ff:ff", vendor="Acme", category="camera")
+    cache = _cache(tmp_path)
+    assert (await check_oui_coverage(db, cache))["passed"] == 1
+    assert await check_manufacturer_agreement(db, cache) == {"passed": 0, "failed": 0, "details": []}
     await db.close()
 
 
